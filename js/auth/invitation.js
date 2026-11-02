@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Invitation Acceptance Controller
+ * KITE SYSTEM — Invitation Acceptance Controller
  */
 
 import { Auth } from './auth-service.js';
@@ -19,9 +19,7 @@ const alertText = document.getElementById('alertText');
 
 function showAlert(message, isSuccess = false) {
   alertText.textContent = message;
-  alertBox.className = isSuccess 
-    ? 'p-3 rounded-lg text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' 
-    : 'p-3 rounded-lg text-xs bg-rose-500/15 text-rose-300 border border-rose-500/30';
+  alertBox.className = isSuccess ? 'alert alert-success' : 'alert alert-error';
   alertBox.classList.remove('hidden');
 }
 
@@ -77,7 +75,7 @@ inviteForm?.addEventListener('submit', async (e) => {
     await Api.acceptInvitation();
 
     showAlert('Account activated! Entering workspace...', true);
-    Toast.success('Welcome to PULSE STUDIO OS!', 'Account Activated');
+    Toast.success('Welcome to KITE SYSTEM!', 'Account Activated');
 
     setTimeout(() => {
       window.location.href = 'index.html';

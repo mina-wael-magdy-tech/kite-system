@@ -38,7 +38,7 @@
    ==================================================================== */
 .kanban-board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
   gap: var(--space-4);
   align-items: flex-start;
   overflow-x: auto;
@@ -61,7 +61,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background-color: rgba(9, 10, 15, 0.4);
+  background-color: rgba(10, 11, 13, 0.45);
 }
 
 .kanban-column-title {
@@ -204,7 +204,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  background-color: rgba(9, 10, 15, 0.4);
+  background-color: rgba(10, 11, 13, 0.45);
 }
 
 .chat-msg {
@@ -231,7 +231,7 @@
 }
 
 .msg-outgoing .chat-msg-bubble {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  background: linear-gradient(135deg, #e8222f 0%, #c31a21 100%);
   color: #ffffff;
   border-bottom-right-radius: var(--radius-xs);
 }
@@ -248,7 +248,7 @@
   margin-top: var(--space-2);
   padding: var(--space-3);
   border-radius: var(--radius-lg);
-  background-color: rgba(9, 10, 15, 0.7);
+  background-color: rgba(10, 11, 13, 0.72);
   border: 1px solid var(--border-medium);
   display: flex;
   flex-direction: column;
@@ -279,17 +279,17 @@
 }
 
 .org-node.admin-node {
-  background: linear-gradient(180deg, rgba(245, 158, 11, 0.12) 0%, var(--studio-900) 100%);
+  background: linear-gradient(180deg, rgba(251, 186, 72, 0.13) 0%, var(--studio-900) 100%);
   border-color: var(--color-amber-border);
 }
 
 .org-node.manager-node {
-  background: linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, var(--studio-900) 100%);
+  background: linear-gradient(180deg, rgba(224, 27, 40, 0.11) 0%, var(--studio-900) 100%);
   border-color: var(--color-primary-border);
 }
 
 .tree-connector-line {
   width: 2px;
   height: 28px;
-  background: linear-gradient(180deg, #6366f1 0%, #38bdf8 100%);
+  background: linear-gradient(180deg, #e01b28 0%, #fbba48 100%);
 }

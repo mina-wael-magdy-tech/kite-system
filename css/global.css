@@ -18,6 +18,11 @@ html {
   -moz-osx-font-smoothing: grayscale;
 }
 
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: 0;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--bg-page);
@@ -163,11 +168,23 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {
 }
 
 .glass-panel-subtle {
-  background: rgba(17, 19, 28, 0.75);
+  background: rgba(17, 18, 21, 0.78);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
 }
+
+/* Alerts (login / invitation / reset pages and inline notices) */
+.alert {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+.alert-error   { background: var(--color-rose-bg);    color: var(--color-rose-light);    border-color: var(--color-rose-border); }
+.alert-success { background: var(--color-emerald-bg); color: var(--color-emerald-light); border-color: var(--color-emerald-border); }
+.alert-info    { background: var(--color-sky-bg);     color: var(--color-sky-light);     border-color: var(--color-sky-border); }
 
 /* Animation Utilities */
 @keyframes fadeIn {

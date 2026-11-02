@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Login Controller
+ * KITE SYSTEM — Login Controller
  * Handles credentials validation, authentication with Supabase, and navigation.
  */
 

@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module B: Employee Management & HR Directory
+ * KITE SYSTEM — Module B: Employee Management & HR Directory
  * Full staff directory, role assignments, department allocation, and employee invitations.
  */
 

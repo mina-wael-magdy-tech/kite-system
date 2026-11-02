@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module M: Reports & Analytics
+ * KITE SYSTEM — Module M: Reports & Analytics
  * Company-wide deliverable analytics, department productivity indicators & CSV exports.
  */
 
@@ -147,7 +147,7 @@ export class ReportsModule {
               this.tasks.filter(t => t.status === 'under_review').length || 2,
               this.tasks.filter(t => t.status === 'completed' || t.status === 'approved').length || 5
             ],
-            backgroundColor: ['#334155', '#0ea5e9', '#f59e0b', '#10b981'],
+            backgroundColor: ['#3b3e48', '#12ABE3', '#FBBA48', '#22C58B'],
             borderWidth: 0
           }]
         },
@@ -155,7 +155,7 @@ export class ReportsModule {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'bottom', labels: { color: '#cbd5e1' } }
+            legend: { position: 'bottom', labels: { color: '#cdd0d7' } }
           }
         }
       });
@@ -175,7 +175,7 @@ export class ReportsModule {
               this.tasks.filter(t => t.priority === 'medium').length || 6,
               this.tasks.filter(t => t.priority === 'low').length || 2
             ],
-            backgroundColor: ['#f43f5e', '#f59e0b', '#0ea5e9', '#64748b'],
+            backgroundColor: ['#EB6F69', '#FBBA48', '#12ABE3', '#81858F'],
             borderWidth: 0
           }]
         },
@@ -183,7 +183,7 @@ export class ReportsModule {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'bottom', labels: { color: '#cbd5e1' } }
+            legend: { position: 'bottom', labels: { color: '#cdd0d7' } }
           },
           cutout: '65%'
         }
@@ -211,7 +211,7 @@ export class ReportsModule {
     const blobUrl = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
     link.setAttribute('href', blobUrl);
-    link.setAttribute('download', `PULSE_STUDIO_DELIVERABLES_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `KITE_DELIVERABLES_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);

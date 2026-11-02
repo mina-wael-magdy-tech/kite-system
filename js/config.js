@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Configuration Module
+ * KITE SYSTEM — Configuration Module
  * Central application settings and constants.
  * Deployment values (Supabase URL / anon key) come from /env.js.
  */
@@ -19,8 +19,8 @@ export const CONFIG = {
     !SUPABASE_ANON_KEY.includes('YOUR_SUPABASE'),
 
   // Application Identity
-  APP_NAME: 'PULSE STUDIO OS',
-  APP_TAGLINE: 'Creative Agency Management System',
+  APP_NAME: 'KITE SYSTEM',
+  APP_TAGLINE: 'Kite Design Studio',
   APP_VERSION: '1.0.0',
 
   // Pagination & Lists

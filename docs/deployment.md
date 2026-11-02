@@ -6,7 +6,7 @@
 
 ## 2. Deploying on Vercel (recommended path)
 
-The repo already contains `vercel.json`, `package.json` and `scripts/build.mjs`. The build copies **only** `*.html`, `css/`, `js/`, `vendor/` into `dist/` and generates `dist/env.js` from environment variables, so `supabase/`, `docs/` and scripts are never published.
+The repo already contains `vercel.json`, `package.json` and `scripts/build.mjs`. The build copies **only** `*.html`, `css/`, `js/`, `vendor/`, `assets/`, `fonts/` into `dist/` and generates `dist/env.js` from environment variables, so `supabase/`, `docs/` and scripts are never published.
 
 1. Push this folder to a Git repository. If the repo root is above `pulse-studio-os`, set **Root Directory** to `pulse-studio-os` in Vercel.
 2. Import the project in Vercel. Framework preset: **Other**. Build/Output come from `vercel.json` (`npm run build` → `dist`).
@@ -37,7 +37,7 @@ Use the provided `.htaccess` (needs `mod_headers`, `mod_rewrite`). Adjust the `f
 
 #### Nginx
 ```nginx
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://sites.google.com" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://sites.google.com" always;
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;

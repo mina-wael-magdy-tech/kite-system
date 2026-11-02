@@ -1,0 +1,78 @@
+/**
+ * KITE SYSTEM — Authentication pages (login, forgot / reset password, invitation)
+ */
+
+body.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-4);
+  background:
+    radial-gradient(900px 520px at 92% -8%, rgba(224, 27, 40, 0.18), transparent 60%),
+    radial-gradient(720px 520px at -8% 108%, rgba(18, 171, 227, 0.13), transparent 58%),
+    radial-gradient(520px 320px at 55% 118%, rgba(251, 186, 72, 0.09), transparent 60%),
+    var(--studio-950);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  padding: var(--space-8);
+  background: rgba(23, 24, 28, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-xl);
+  position: relative;
+}
+
+/* Brand-coloured top edge: red → amber → blue (the three Kite colours) */
+.auth-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--space-8);
+  right: var(--space-8);
+  height: 3px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: linear-gradient(90deg, var(--kite-red-500) 0 45%, var(--kite-amber-400) 45% 72%, var(--kite-blue-400) 72% 100%);
+}
+
+.auth-brand {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.auth-brand img {
+  display: block;
+  width: 112px;
+  height: auto;
+  margin: var(--space-2) auto var(--space-4);
+}
+
+.auth-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-2xl);
+  line-height: 1.15;
+  color: #ffffff;
+}
+
+.auth-sub {
+  margin-top: var(--space-1-5);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.auth-card .alert {
+  margin-bottom: var(--space-4);
+}
+
+.auth-footnote {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  text-align: center;
+}

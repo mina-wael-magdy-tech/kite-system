@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Client-Side Input Validators
+ * KITE SYSTEM — Client-Side Input Validators
  * Secure form validation and input sanity checks before database submission.
  */
 

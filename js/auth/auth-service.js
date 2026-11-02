@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Authentication Service
+ * KITE SYSTEM — Authentication Service
  * Wraps Supabase Auth API with session tracking, password reset, and profile hydration.
  */
 

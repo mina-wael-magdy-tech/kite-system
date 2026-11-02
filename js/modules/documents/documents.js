@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module K: Document Management & Digital Asset Vault
+ * KITE SYSTEM — Module K: Document Management & Digital Asset Vault
  * File uploads, deliverable assets, design guidelines, and Supabase Storage integration.
  */
 

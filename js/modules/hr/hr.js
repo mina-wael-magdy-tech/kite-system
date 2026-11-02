@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module H: HR Operations
+ * KITE SYSTEM — Module H: HR Operations
  * Attendance check-in/out, leave requests, manager approvals & studio holiday calendar.
  */
 

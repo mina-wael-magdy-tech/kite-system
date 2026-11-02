@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module C: Department Management
+ * KITE SYSTEM — Module C: Department Management
  * Overview & control for the 5 initial creative studio hubs: Branding, BTL, Digital, Media & Web Dev.
  */
 

@@ -84,6 +84,9 @@ Before going live, complete the [Production Checklist](docs/production-checklist
 
 ---
 
+## Branding
+Kite Design Studio identity lives in `css/tokens.css` (single source of truth): red `#E01B28` (primary), amber `#FBBA48`, blue `#7BCBE3`, with Poppins (UI) and Sour Gummy (headings) self-hosted in `fonts/`. Logos and favicons are in `assets/`. Change a token once and every screen follows.
+
 ## 5. Documentation
 - [Installation Guide](docs/installation.md)
 - [Database Schema Reference](docs/database.md)

@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Display Formatters
+ * KITE SYSTEM — Display Formatters
  * Badge rendering, status indicators, and UI formatting mappings.
  */
 

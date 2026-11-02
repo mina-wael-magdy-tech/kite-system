@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — General Utility Helpers
+ * KITE SYSTEM — General Utility Helpers
  * Safe HTML escaping, formatting, debouncing, and UI helpers.
  */
 
@@ -111,13 +111,13 @@ export function getInitials(name = '') {
  */
 export function getAccentHex(str = '') {
   const colors = [
-    '#6366F1', // Indigo
-    '#EC4899', // Pink (Branding)
-    '#F97316', // Orange (BTL)
-    '#10B981', // Emerald (Digital)
-    '#A855F7', // Purple (Media)
-    '#06B6D4', // Cyan (Web)
-    '#F59E0B'  // Amber (Admin)
+    '#E01B28', // Kite red
+    '#E24D47', // Coral (Branding)
+    '#D79F3E', // Ochre (BTL)
+    '#22C58B', // Green
+    '#50B9E3', // Blue (Media)
+    '#98D6EA', // Pale blue (Web)
+    '#FBBA48'  // Amber (Admin)
   ];
   let hash = 0;
   for (let i = 0; i < str.length; i++) {

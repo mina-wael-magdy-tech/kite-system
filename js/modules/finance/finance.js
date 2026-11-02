@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module I: Finance & Expense Management
+ * KITE SYSTEM — Module I: Finance & Expense Management
  * Department budgets, studio expense submissions, invoice tracking & manager approvals.
  */
 
@@ -27,7 +27,7 @@ export class FinanceModule {
           <div>
             <h1 class="font-display font-bold text-xl text-white">Finance & Operational Budgets</h1>
             <p class="text-xs text-muted" style="margin-top: 2px;">
-              Track studio expenditure, vendor payables, client invoices & managerial approvals.
+              Submit expense claims and review approvals.
             </p>
           </div>
 
@@ -35,23 +35,19 @@ export class FinanceModule {
             <button type="button" class="btn btn-primary btn-sm" id="btnSubmitExpense">
               <i data-lucide="receipt"></i> Submit Expense
             </button>
-            ${isFinanceOrAdmin ? `
-              <button type="button" class="btn btn-secondary btn-sm" id="btnCreateInvoice">
-                <i data-lucide="file-plus"></i> New Invoice
-              </button>
-            ` : ''}
           </div>
         </div>
 
         <!-- Budget & Expense KPI Cards -->
         <div class="kpi-grid">
+          ${isFinanceOrAdmin ? `
           <div class="stat-card border-indigo">
             <div class="stat-card-header">
-              <span class="stat-card-label">Studio Annual Budget</span>
-              <span class="badge badge-indigo">FY 2026</span>
+              <span class="stat-card-label">Annual Budget</span>
+              <span class="badge badge-indigo">FY ${new Date().getFullYear()}</span>
             </div>
-            <div class="stat-card-value font-mono">$295,000</div>
-            <div class="stat-card-footer">Allocated across the 5 departments</div>
+            <div class="stat-card-value font-mono" id="kpiBudget">—</div>
+            <div class="stat-card-footer">Sum of budgets recorded for this fiscal year</div>
           </div>
 
           <div class="stat-card border-emerald">
@@ -59,9 +55,10 @@ export class FinanceModule {
               <span class="stat-card-label">Client Invoices Paid</span>
               <span class="badge badge-emerald">Receivables</span>
             </div>
-            <div class="stat-card-value font-mono">$185,400</div>
-            <div class="stat-card-footer">Settled via wire transfer</div>
+            <div class="stat-card-value font-mono" id="kpiInvoicesPaid">—</div>
+            <div class="stat-card-footer">Total of paid receivable invoices</div>
           </div>
+          ` : ''}
 
           <div class="stat-card border-amber">
             <div class="stat-card-header">
@@ -72,14 +69,16 @@ export class FinanceModule {
             <div class="stat-card-footer">Awaiting finance review</div>
           </div>
 
+          ${isFinanceOrAdmin ? `
           <div class="stat-card border-sky">
             <div class="stat-card-header">
               <span class="stat-card-label">Vendor Payables</span>
               <span class="badge badge-sky">Suppliers</span>
             </div>
-            <div class="stat-card-value font-mono">$24,600</div>
-            <div class="stat-card-footer">CNC booths & print packaging</div>
+            <div class="stat-card-value font-mono" id="kpiPayables">—</div>
+            <div class="stat-card-footer">Unpaid payable invoices</div>
           </div>
+          ` : ''}
         </div>
 
         <!-- Expense Claims Table -->
@@ -139,9 +138,32 @@ export class FinanceModule {
       if (error) throw error;
       this.expenses = expenses || [];
       this.renderExpensesTable();
+      await this.loadTotals();
     } catch (err) {
       console.warn('Finance data fetch error:', err);
       this.renderExpensesTable();
+    }
+  }
+
+  // Real figures from the database. Only finance/admin can read these tables (RLS).
+  async loadTotals() {
+    if (!(Permissions.isAdmin() || Permissions.hasRole('finance_manager'))) return;
+    const supabase = getSupabase();
+    const sum = (rows, key) => (rows || []).reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = formatCurrency(value); };
+    try {
+      const year = new Date().getFullYear();
+      const [{ data: budgets, error: e1 }, { data: invoices, error: e2 }] = await Promise.all([
+        supabase.from('budgets').select('amount').eq('fiscal_year', year),
+        supabase.from('invoices').select('type, status, total')
+      ]);
+      if (e1 || e2) throw (e1 || e2);
+      set('kpiBudget', sum(budgets, 'amount'));
+      set('kpiInvoicesPaid', sum((invoices || []).filter(i => i.type === 'receivable' && i.status === 'paid'), 'total'));
+      set('kpiPayables', sum((invoices || []).filter(i => i.type === 'payable' && ['draft', 'sent', 'overdue'].includes(i.status)), 'total'));
+    } catch (err) {
+      console.warn('Finance totals error:', err);
+      ['kpiBudget', 'kpiInvoicesPaid', 'kpiPayables'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = 'n/a'; });
     }
   }
 

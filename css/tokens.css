@@ -1,107 +1,153 @@
 /**
- * PULSE STUDIO OS — Design Tokens
- * Master CSS Custom Properties defining the visual identity, colors, typography, spacing, and layers.
+ * KITE SYSTEM — Design Tokens
+ * Single source of truth for brand colors, typography, spacing, radii, shadows and layers.
+ *
+ * Brand: Kite Design Studio
+ *   Red   #E01B28  (primary / logo)
+ *   Amber #FBBA48  (highlight / review)
+ *   Blue  #7BCBE3  (information / neutral tags)
+ * Fonts: Poppins (interface), Sour Gummy (display / brand headings)
  */
 
+@import url('fonts.css');
+
 :root {
-  /* Studio Theme Dark Color Palette (Preserved & Enhanced from Prototype) */
-  --studio-950: #090a0f;
-  --studio-900: #11131c;
-  --studio-850: #171a26;
-  --studio-800: #1e2231;
-  --studio-700: #2a3045;
-  --studio-600: #3b425e;
-  --studio-500: #555e84;
-  --studio-400: #7e87ab;
-  --studio-300: #a7b0d0;
-  --studio-200: #cbd2e8;
-  --studio-100: #e7ebf7;
-  --studio-50:  #f4f6fc;
+  /* ---------------------------------------------------------------
+     Brand ramps (from the Kite palette: dark → light)
+     --------------------------------------------------------------- */
+  --kite-red-900: #7e1517;
+  --kite-red-800: #941a1d;
+  --kite-red-700: #a81a1f;
+  --kite-red-600: #c31a21;
+  --kite-red-500: #e01b28;   /* brand red */
+  --kite-red-400: #e24d47;
+  --kite-red-300: #eb6f69;
+  --kite-red-200: #f09089;
+  --kite-red-100: #f6b1b6;
 
-  /* Accent Colors */
-  /* Primary Accent: Indigo */
-  --color-primary: #6366f1;
-  --color-primary-hover: #4f46e5;
-  --color-primary-light: #818cf8;
-  --color-primary-bg: rgba(99, 102, 241, 0.15);
-  --color-primary-border: rgba(99, 102, 241, 0.35);
+  --kite-amber-700: #cb9638;
+  --kite-amber-600: #d79f3e;
+  --kite-amber-500: #eeb142;
+  --kite-amber-400: #fbba48; /* brand amber */
+  --kite-amber-300: #fac468;
+  --kite-amber-200: #f9ce82;
+  --kite-amber-100: #fadfae;
 
-  /* Emerald (Success, Growth, Live indicators) */
-  --color-emerald: #10b981;
-  --color-emerald-light: #34d399;
-  --color-emerald-bg: rgba(16, 185, 129, 0.15);
-  --color-emerald-border: rgba(16, 185, 129, 0.35);
+  --kite-blue-700: #12abe3;
+  --kite-blue-600: #32b2e5;
+  --kite-blue-500: #50b9e3;
+  --kite-blue-400: #7bcbe3;  /* brand blue */
+  --kite-blue-300: #98d6ea;
+  --kite-blue-200: #afe0f0;
+  --kite-blue-100: #c9e7f3;
 
-  /* Amber (Warning, Review, Pending, Admin highlight) */
-  --color-amber: #f59e0b;
-  --color-amber-light: #fbbf24;
-  --color-amber-bg: rgba(245, 158, 11, 0.15);
-  --color-amber-border: rgba(245, 158, 11, 0.35);
+  /* ---------------------------------------------------------------
+     Neutral surfaces (kept legacy names so every component inherits)
+     Near-black with a faint cool tint to sit well with the blue ramp.
+     --------------------------------------------------------------- */
+  --studio-950: #0a0b0d;
+  --studio-900: #111215;
+  --studio-850: #17181c;
+  --studio-800: #1e2025;
+  --studio-700: #2a2c33;
+  --studio-600: #3b3e48;
+  --studio-500: #585c69;
+  --studio-400: #81858f;
+  --studio-300: #aaaeb8;
+  --studio-200: #cdd0d7;
+  --studio-100: #e8e9ed;
+  --studio-50:  #f5f6f8;
 
-  /* Rose / Red (Danger, Urgent, High Priority, Errors) */
-  --color-rose: #f43f5e;
-  --color-rose-light: #fb7185;
-  --color-rose-bg: rgba(244, 63, 94, 0.15);
-  --color-rose-border: rgba(244, 63, 94, 0.35);
+  /* ---------------------------------------------------------------
+     Semantic accents
+     --------------------------------------------------------------- */
+  /* Primary: brand red (buttons, active navigation, focus) */
+  --color-primary: var(--kite-red-500);
+  --color-primary-hover: var(--kite-red-600);
+  --color-primary-light: var(--kite-red-300);
+  --color-primary-bg: rgba(224, 27, 40, 0.14);
+  --color-primary-border: rgba(224, 27, 40, 0.42);
 
-  /* Sky / Blue (In Progress, Active Info) */
-  --color-sky: #0ea5e9;
-  --color-sky-light: #38bdf8;
-  --color-sky-bg: rgba(14, 165, 233, 0.15);
-  --color-sky-border: rgba(14, 165, 233, 0.35);
+  /* Success (approved, active, live): the one non-brand hue, kept for meaning */
+  --color-emerald: #22c58b;
+  --color-emerald-light: #5ee0ad;
+  --color-emerald-bg: rgba(34, 197, 139, 0.14);
+  --color-emerald-border: rgba(34, 197, 139, 0.38);
 
-  /* Purple (Creative, Media Prod) */
-  --color-purple: #a855f7;
-  --color-purple-light: #c084fc;
-  --color-purple-bg: rgba(168, 85, 247, 0.15);
-  --color-purple-border: rgba(168, 85, 247, 0.35);
+  /* Amber: review, pending, highlights, admin */
+  --color-amber: var(--kite-amber-400);
+  --color-amber-light: var(--kite-amber-300);
+  --color-amber-bg: rgba(251, 186, 72, 0.14);
+  --color-amber-border: rgba(251, 186, 72, 0.4);
 
-  /* Pink (Branding Lead) */
-  --color-pink: #ec4899;
-  --color-pink-light: #f472b6;
-  --color-pink-bg: rgba(236, 72, 153, 0.15);
-  --color-pink-border: rgba(236, 72, 153, 0.35);
+  /* Rose: danger / urgent / errors — coral from the red ramp so it never
+     reads as the solid brand-red primary action */
+  --color-rose: var(--kite-red-300);
+  --color-rose-light: var(--kite-red-200);
+  --color-rose-bg: rgba(235, 111, 105, 0.14);
+  --color-rose-border: rgba(235, 111, 105, 0.4);
 
-  /* Orange (BTL Specialist) */
-  --color-orange: #f97316;
-  --color-orange-light: #fb923c;
-  --color-orange-bg: rgba(249, 115, 22, 0.15);
-  --color-orange-border: rgba(249, 115, 22, 0.35);
+  /* Sky: information, in-progress, neutral tags */
+  --color-sky: var(--kite-blue-700);
+  --color-sky-light: var(--kite-blue-400);
+  --color-sky-bg: rgba(18, 171, 227, 0.14);
+  --color-sky-border: rgba(18, 171, 227, 0.4);
 
-  /* Cyan (Web Dev Lead) */
-  --color-cyan: #06b6d4;
-  --color-cyan-light: #22d3ee;
-  --color-cyan-bg: rgba(6, 182, 212, 0.15);
-  --color-cyan-border: rgba(6, 182, 212, 0.35);
+  /* Department / category tags: all drawn from the brand ramps */
+  --color-purple: var(--kite-blue-500);        /* Media Production */
+  --color-purple-light: var(--kite-blue-300);
+  --color-purple-bg: rgba(80, 185, 227, 0.14);
+  --color-purple-border: rgba(80, 185, 227, 0.4);
 
-  /* Text & Surface Neutral Tokens */
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
-  --text-dark: #0f172a;
-  
+  --color-pink: var(--kite-red-400);           /* Branding */
+  --color-pink-light: var(--kite-red-200);
+  --color-pink-bg: rgba(226, 77, 71, 0.14);
+  --color-pink-border: rgba(226, 77, 71, 0.4);
+
+  --color-orange: var(--kite-amber-600);       /* BTL */
+  --color-orange-light: var(--kite-amber-200);
+  --color-orange-bg: rgba(215, 159, 62, 0.16);
+  --color-orange-border: rgba(215, 159, 62, 0.42);
+
+  --color-cyan: var(--kite-blue-300);          /* Web Development */
+  --color-cyan-light: var(--kite-blue-200);
+  --color-cyan-bg: rgba(152, 214, 234, 0.13);
+  --color-cyan-border: rgba(152, 214, 234, 0.38);
+
+  /* ---------------------------------------------------------------
+     Text & surface tokens
+     --------------------------------------------------------------- */
+  --text-main: #f7f7f8;
+  --text-muted: #a6a9b3;
+  --text-dim: #7f838e;
+  --text-dark: #0a0b0d;
+
   --bg-page: var(--studio-950);
   --bg-card: var(--studio-900);
   --bg-card-hover: var(--studio-850);
   --bg-card-inset: var(--studio-950);
-  --bg-glass: rgba(23, 26, 38, 0.82);
+  --bg-glass: rgba(23, 24, 28, 0.84);
   --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-medium: rgba(255, 255, 255, 0.14);
-  --border-active: rgba(99, 102, 241, 0.5);
+  --border-medium: rgba(255, 255, 255, 0.15);
+  --border-active: rgba(224, 27, 40, 0.6);
 
-  /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-display: 'Plus Jakarta Sans', var(--font-sans);
-  --font-mono: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace;
+  /* ---------------------------------------------------------------
+     Typography
+     Poppins carries the UI; Sour Gummy carries headings and brand text.
+     Latin-only webfonts: Arabic falls back to the system font.
+     --------------------------------------------------------------- */
+  --font-sans: 'Poppins', 'Segoe UI', Tahoma, 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Sour Gummy', 'Poppins', 'Segoe UI', Tahoma, 'Noto Sans Arabic', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SFMono-Regular', Consolas, Menlo, monospace;
 
   --text-2xs: 0.6875rem; /* 11px */
-  --text-xs: 0.75rem;    /* 12px */
+  --text-xs: 0.78125rem; /* 12.5px: Poppins runs wide */
   --text-sm: 0.875rem;   /* 14px */
   --text-base: 1rem;     /* 16px */
   --text-lg: 1.125rem;   /* 18px */
-  --text-xl: 1.25rem;    /* 20px */
-  --text-2xl: 1.5rem;    /* 24px */
-  --text-3xl: 1.875rem;  /* 30px */
+  --text-xl: 1.375rem;   /* 22px */
+  --text-2xl: 1.75rem;   /* 28px */
+  --text-3xl: 2.125rem;  /* 34px */
 
   /* Spacing Scale */
   --space-0-5: 0.125rem; /* 2px */
@@ -119,13 +165,13 @@
   --space-12: 3rem;      /* 48px */
   --space-16: 4rem;      /* 64px */
 
-  /* Radii */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
+  /* Radii: softer, to match the rounded Sour Gummy letterforms */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
   --radius-full: 9999px;
 
   /* Shadows */
@@ -133,8 +179,8 @@
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
-  --shadow-glow-indigo: 0 0 20px rgba(99, 102, 241, 0.35);
-  --shadow-glow-emerald: 0 0 20px rgba(16, 185, 129, 0.35);
+  --shadow-glow-indigo: 0 0 20px rgba(224, 27, 40, 0.35); /* legacy name = brand glow */
+  --shadow-glow-emerald: 0 0 20px rgba(34, 197, 139, 0.35);
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);

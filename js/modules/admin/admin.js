@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module N: Admin Control Center
+ * KITE SYSTEM — Module N: Admin Control Center
  * Administrator overview: access model, task override/reassignment & the server-written audit ledger.
  */
 

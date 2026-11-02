@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module G: CRM & Client Management
+ * KITE SYSTEM — Module G: CRM & Client Management
  * Client accounts, deal pipeline, pitch proposals & client communication history.
  */
 

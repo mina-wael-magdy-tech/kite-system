@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Notification Service
+ * KITE SYSTEM — Notification Service
  * Manages persisted notifications, unread badges, and Supabase Realtime alerts.
  */
 

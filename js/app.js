@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Master Application Entry Point
+ * KITE SYSTEM — Master Application Entry Point
  * Orchestrates session authentication, permission loading, module registration, and UI shell events.
  */
 
@@ -32,6 +32,12 @@ class PulseStudioApp {
   }
 
   async init() {
+    // Charts follow the brand typography / text colour
+    if (window.Chart) {
+      window.Chart.defaults.font.family = "'Poppins', 'Segoe UI', sans-serif";
+      window.Chart.defaults.color = '#a6a9b3';
+    }
+
     // 1. Validate Session & Account Access
     this.currentProfile = await protectPage();
     if (!this.currentProfile) return; // protectPage redirects to login if unauthenticated
@@ -114,7 +120,7 @@ class PulseStudioApp {
   registerModules() {
     AppRouter.register('dashboard', {
       title: 'Executive Dashboard',
-      breadcrumbs: ['PULSE STUDIO', 'Executive Dashboard'],
+      breadcrumbs: ['KITE', 'Executive Dashboard'],
       render: (container, query) => new DashboardModule(this).render(container, query)
     });
 

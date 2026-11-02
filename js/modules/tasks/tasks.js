@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module D: Task Management
+ * KITE SYSTEM — Module D: Task Management
  * Complete task engine: Kanban & Table views, 9 lifecycle stages, checklists, comments, and role privacy.
  */
 

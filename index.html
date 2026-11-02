@@ -2,15 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PULSE STUDIO OS — Creative Agency Operating System</title>
-  
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <title>Kite System — Kite Design Studio</title>
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <meta name="theme-color" content="#0a0b0d" />
+  <link rel="preload" href="fonts/poppins-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="fonts/sour-gummy-500.woff2" as="font" type="font/woff2" crossorigin />
   
   <!-- Core Design System -->
   <link rel="stylesheet" href="css/tokens.css">
@@ -37,11 +38,11 @@
       <div class="sidebar-header">
         <a href="#dashboard" class="brand-link">
           <div class="brand-icon-box">
-            <i data-lucide="layers" style="width: 20px; height: 20px;"></i>
+            <img src="assets/logo-mark.png" srcset="assets/logo-mark.png 1x, assets/logo-mark@2x.png 2x" alt="Kite" width="40" height="40" />
           </div>
           <div class="brand-title-wrap">
-            <span class="brand-name">PULSE STUDIO</span>
-            <span class="brand-badge">Agency OS</span>
+            <span class="brand-name">KITE</span>
+            <span class="brand-badge">Design Studio</span>
           </div>
         </a>
         <button type="button" class="sidebar-collapse-btn" id="sidebarCollapseBtn" aria-label="Toggle Sidebar">
@@ -164,7 +165,7 @@
           </button>
           
           <ul class="breadcrumb-list" id="breadcrumbList">
-            <li>PULSE STUDIO</li>
+            <li>KITE</li>
             <li class="breadcrumb-separator">/</li>
             <li class="breadcrumb-current">Executive Dashboard</li>
           </ul>
@@ -217,7 +218,7 @@
         <!-- Dynamically populated by AppRouter -->
         <div class="empty-state" style="border:none; padding: 48px 0;">
           <div class="empty-state-icon animate-spin">⟳</div>
-          <div class="empty-state-title">Initializing PULSE STUDIO OS...</div>
+          <div class="empty-state-title">Initializing Kite System...</div>
         </div>
       </main>
     </div>

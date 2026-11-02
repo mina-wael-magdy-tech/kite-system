@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module A: Executive Dashboard
+ * KITE SYSTEM — Module A: Executive Dashboard
  * Real-time agency analytics, Chart.js performance trends, pending approvals & recent activities.
  */
 
@@ -252,14 +252,14 @@ export class DashboardModule {
             label: 'Active Deliverables',
             data: [3, 2, 4, 3, 2],
             backgroundColor: [
-              'rgba(236, 72, 153, 0.65)',
-              'rgba(249, 115, 22, 0.65)',
-              'rgba(16, 185, 129, 0.65)',
-              'rgba(168, 85, 247, 0.65)',
-              'rgba(6, 182, 212, 0.65)'
+              'rgba(226, 77, 71, 0.7)',
+              'rgba(215, 159, 62, 0.7)',
+              'rgba(251, 186, 72, 0.7)',
+              'rgba(80, 185, 227, 0.7)',
+              'rgba(152, 214, 234, 0.62)'
             ],
             borderColor: [
-              '#EC4899', '#F97316', '#10B981', '#A855F7', '#06B6D4'
+              '#E24D47', '#D79F3E', '#FBBA48', '#50B9E3', '#98D6EA'
             ],
             borderWidth: 1,
             borderRadius: 6
@@ -274,11 +274,11 @@ export class DashboardModule {
           scales: {
             y: {
               beginAtZero: true,
-              ticks: { color: '#94a3b8', font: { size: 11 } },
+              ticks: { color: '#a6a9b3', font: { size: 11 } },
               grid: { color: 'rgba(255, 255, 255, 0.05)' }
             },
             x: {
-              ticks: { color: '#94a3b8', font: { size: 11 } },
+              ticks: { color: '#a6a9b3', font: { size: 11 } },
               grid: { display: false }
             }
           }
@@ -296,10 +296,10 @@ export class DashboardModule {
           datasets: [{
             data: [4, 5, 2, 6],
             backgroundColor: [
-              '#334155',
-              '#0ea5e9',
-              '#f59e0b',
-              '#10b981'
+              '#3b3e48',
+              '#12ABE3',
+              '#FBBA48',
+              '#22C58B'
             ],
             borderWidth: 0
           }]
@@ -310,7 +310,7 @@ export class DashboardModule {
           plugins: {
             legend: {
               position: 'bottom',
-              labels: { color: '#cbd5e1', font: { size: 11 } }
+              labels: { color: '#cdd0d7', font: { size: 11 } }
             }
           },
           cutout: '70%'

@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Client-Side Hash Router
+ * KITE SYSTEM — Client-Side Hash Router
  * Handles seamless module mounting, permission verification, and URL state.
  */
 

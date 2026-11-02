@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module J: Communication & Role Chat
+ * KITE SYSTEM — Module J: Communication & Role Chat
  * Studio channels, direct messages & instant creative task handoffs.
  */
 

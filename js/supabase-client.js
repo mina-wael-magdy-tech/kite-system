@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Supabase Client Wrapper
+ * KITE SYSTEM — Supabase Client Wrapper
  * Singleton Supabase client instance with realtime capabilities & session management.
  */
 
@@ -11,7 +11,7 @@ export function getSupabase() {
   if (supabase) return supabase;
 
   if (!CONFIG.IS_CONFIGURED) {
-    console.error('PULSE STUDIO OS is not configured: set your Supabase URL and anon key in env.js.');
+    console.error('KITE SYSTEM is not configured: set your Supabase URL and anon key in env.js.');
     return null;
   }
 

@@ -1,4 +1,4 @@
-// Vercel build: copies ONLY the public web files into dist/ and writes dist/env.js
+// Vercel build: copies ONLY the public web files (html, css, js, vendor, assets, fonts) into dist/ and writes dist/env.js
 // from environment variables. Nothing else (supabase/, docs/, scripts/) is ever served.
 //
 // Required Vercel env vars (Project Settings -> Environment Variables):
@@ -16,7 +16,7 @@ if (/service_role/i.test(key) || decodeJwtRole(key) === 'service_role') fail('SU
 rmSync('dist', { recursive: true, force: true });
 mkdirSync('dist');
 for (const f of readdirSync('.').filter((n) => n.endsWith('.html'))) cpSync(f, `dist/${f}`);
-for (const d of ['css', 'js', 'vendor']) cpSync(d, `dist/${d}`, { recursive: true });
+for (const d of ['css', 'js', 'vendor', 'assets', 'fonts']) cpSync(d, `dist/${d}`, { recursive: true });
 
 writeFileSync('dist/env.js',
   `window.ENV_SUPABASE_URL = ${JSON.stringify(url)};\nwindow.ENV_SUPABASE_ANON_KEY = ${JSON.stringify(key)};\n`);

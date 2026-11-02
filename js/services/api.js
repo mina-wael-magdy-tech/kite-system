@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Edge Function client
+ * KITE SYSTEM — Edge Function client
  * All privileged / business-rule operations go through server-side Edge Functions.
  * This wrapper surfaces the server's error message instead of a generic one.
  */

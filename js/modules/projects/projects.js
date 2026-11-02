@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module E: Project Management
+ * KITE SYSTEM — Module E: Project Management
  * Multi-department creative projects, milestone tracking, budgets & deadlines.
  */
 

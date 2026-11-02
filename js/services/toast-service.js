@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Toast Notification Service
+ * KITE SYSTEM — Toast Notification Service
  * Lightweight stackable alert toasts matching prototype styling.
  */
 

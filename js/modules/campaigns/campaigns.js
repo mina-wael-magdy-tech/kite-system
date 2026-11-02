@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Module F: Campaign Management
+ * KITE SYSTEM — Module F: Campaign Management
  * Cross-department Studio Campaigns coordinating Branding, BTL, Digital, Media & Web Dev.
  */
 

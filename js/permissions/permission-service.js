@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Client-Side Permission & Role Engine
+ * KITE SYSTEM — Client-Side Permission & Role Engine
  * Mirrors backend RLS authorization policies for responsive UI rendering.
  */
 

@@ -2,63 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign In — PULSE STUDIO OS</title>
-  
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <title>Sign In — Kite System</title>
+  <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <meta name="theme-color" content="#0a0b0d" />
+  <link rel="preload" href="fonts/poppins-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="fonts/sour-gummy-500.woff2" as="font" type="font/woff2" crossorigin />
   
   <!-- CSS Design System -->
   <link rel="stylesheet" href="css/tokens.css">
   <link rel="stylesheet" href="css/global.css">
   <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/auth.css">
   
   <!-- Supabase JS Client & Lucide Icons -->
   <script src="env.js"></script>
   <script src="vendor/supabase.js"></script>
   <script src="vendor/lucide.min.js"></script>
-
-  <style>
-    body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: var(--space-4);
-      background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.12), transparent 40%),
-                  radial-gradient(circle at bottom left, rgba(236, 72, 153, 0.08), transparent 40%),
-                  var(--studio-950);
-    }
-    .auth-card {
-      width: 100%;
-      max-width: 440px;
-      padding: var(--space-8);
-      background: rgba(23, 26, 38, 0.85);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--border-medium);
-      border-radius: var(--radius-2xl);
-      box-shadow: var(--shadow-xl);
-    }
-  </style>
 </head>
-<body>
+<body class="auth-page">
 
   <div class="auth-card">
     <!-- Brand Header -->
-    <div style="text-align: center; margin-bottom: var(--space-6);">
-      <div style="display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: var(--radius-xl); background: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%); margin-bottom: var(--space-3); box-shadow: 0 8px 20px rgba(99, 102, 241, 0.35);">
-        <i data-lucide="layers" style="color: #ffffff; width: 24px; height: 24px;"></i>
-      </div>
-      <h1 class="font-display font-bold text-xl text-white" style="letter-spacing: -0.02em;">PULSE STUDIO OS</h1>
-      <p class="text-xs text-muted" style="margin-top: 4px;">Creative Agency Management System</p>
+    <div class="auth-brand">
+      <img src="assets/logo-vertical.png" srcset="assets/logo-vertical.png 1x, assets/logo-vertical@2x.png 2x" alt="Kite Design Studio" width="112" height="121" />
+      <h1 class="auth-title">Welcome back</h1>
+      <p class="auth-sub">Sign in to Kite System</p>
     </div>
 
     <!-- Error Alert Banner -->
-    <div id="authAlert" class="hidden" style="margin-bottom: var(--space-4); padding: var(--space-3); border-radius: var(--radius-lg); background-color: var(--color-rose-bg); border: 1px solid var(--color-rose-border); color: var(--color-rose-light); font-size: var(--text-xs);">
+    <div id="authAlert" class="alert alert-error hidden">
       <span id="authAlertText"></span>
     </div>
 
@@ -71,7 +48,7 @@
           type="email" 
           required 
           autocomplete="email" 
-          placeholder="name@pulsestudio.agency" 
+          placeholder="name@kiteagency-eg.com" 
           class="form-control" 
         />
       </div>
@@ -116,7 +93,7 @@
     </form>
 
     <!-- Footer Security Notice -->
-    <div style="margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border-subtle); text-align: center;">
+    <div class="auth-footnote">
       <p class="text-2xs text-dim">
         Single sign-on protected by Supabase Auth with Row Level Security.
         <br>

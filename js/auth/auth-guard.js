@@ -1,5 +1,5 @@
 /**
- * PULSE STUDIO OS — Route & Page Authentication Guards
+ * KITE SYSTEM — Route & Page Authentication Guards
  * Protects application routes and ensures proper session validation.
  */
 
