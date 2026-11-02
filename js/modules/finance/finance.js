@@ -19,11 +19,6 @@ export class FinanceModule {
   }
 
   async render(container) {
-    if (displayExpenses.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No expense claims yet.</td></tr>';
-      return;
-    }
-
     const isFinanceOrAdmin = Permissions.isAdmin() || Permissions.hasRole('finance_manager');
 
     container.innerHTML = `
@@ -159,9 +154,11 @@ export class FinanceModule {
     const displayExpenses = this.expenses;
 
     if (badge) badge.textContent = `${displayExpenses.length} Claims`;
-    const pendingCount = displayExpenses.filter(e => e.status === 'submitted' || e.status === 'draft').length;
-    if (kpiPending) kpiPending.textContent = String(pendingCount);
-
+    if (kpiPending) kpiPending.textContent = String(displayExpenses.filter(e => e.status === 'submitted' || e.status === 'draft').length);
+    if (displayExpenses.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No expense claims yet.</td></tr>';
+      return;
+    }
     const isFinanceOrAdmin = Permissions.isAdmin() || Permissions.hasRole('finance_manager');
 
     tbody.innerHTML = displayExpenses.map(e => `
