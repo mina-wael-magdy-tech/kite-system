@@ -81,8 +81,8 @@
 
 .btn-secondary:hover {
   background-color: var(--studio-800);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #ffffff;
+  border-color: var(--border-medium);
+  color: var(--text-strong);
 }
 
 .btn-outline {
@@ -115,7 +115,7 @@
 
 .btn-ghost:hover {
   background-color: var(--studio-850);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* ====================================================================
@@ -231,7 +231,7 @@
   font-family: var(--font-display);
   font-size: var(--text-sm);
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .card-subtitle {
@@ -247,7 +247,7 @@
 .card-footer {
   padding: var(--space-3-5) var(--space-5);
   border-top: 1px solid var(--border-subtle);
-  background-color: rgba(10, 11, 13, 0.45);
+  background-color: var(--surface-translucent);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -300,7 +300,7 @@
   font-variant-numeric: tabular-nums;
   font-size: var(--text-2xl);
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-strong);
   line-height: 1.1;
   margin: var(--space-1) 0;
 }
@@ -336,7 +336,7 @@
   background-color: var(--studio-950);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-lg);
-  color: #ffffff;
+  color: var(--text-strong);
   font-family: var(--font-sans);
   font-size: var(--text-xs);
   transition: all var(--transition-fast);
@@ -422,7 +422,7 @@ textarea.form-control {
 }
 
 .data-table thead tr {
-  background-color: rgba(10, 11, 13, 0.62);
+  background-color: var(--surface-translucent);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -438,7 +438,7 @@ textarea.form-control {
 
 .data-table td {
   padding: var(--space-3-5) var(--space-4);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--border-subtle);
   color: var(--text-main);
   vertical-align: middle;
 }
@@ -457,7 +457,7 @@ textarea.form-control {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.75);
+  background-color: rgba(20, 32, 48, 0.5);
   backdrop-filter: blur(6px);
   z-index: var(--z-modal-backdrop);
   display: flex;
@@ -506,7 +506,7 @@ textarea.form-control {
   font-family: var(--font-display);
   font-size: var(--text-base);
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .modal-close-btn {
@@ -522,7 +522,7 @@ textarea.form-control {
 }
 
 .modal-close-btn:hover {
-  color: #ffffff;
+  color: var(--text-strong);
   background-color: var(--studio-800);
 }
 
@@ -569,7 +569,7 @@ textarea.form-control {
 }
 
 .tab-btn:hover {
-  color: #ffffff;
+  color: var(--text-strong);
   background-color: var(--studio-900);
 }
 
@@ -658,10 +658,10 @@ textarea.form-control {
   animation: fadeIn var(--transition-fast) forwards;
 }
 
-.toast-indigo { border-left-color: var(--color-primary); color: #ffffff; }
-.toast-emerald { border-left-color: var(--color-emerald); color: #ffffff; }
-.toast-amber   { border-left-color: var(--color-amber); color: #ffffff; }
-.toast-rose    { border-left-color: var(--color-rose); color: #ffffff; }
+.toast-indigo { border-left-color: var(--color-primary); color: var(--text-strong); }
+.toast-emerald { border-left-color: var(--color-emerald); color: var(--text-strong); }
+.toast-amber   { border-left-color: var(--color-amber); color: var(--text-strong); }
+.toast-rose    { border-left-color: var(--color-rose); color: var(--text-strong); }
 
 .toast-content {
   flex: 1;
@@ -684,7 +684,7 @@ textarea.form-control {
 }
 
 .toast-close:hover {
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* ====================================================================
@@ -699,7 +699,7 @@ textarea.form-control {
   padding: var(--space-12) var(--space-6);
   border: 1px dashed var(--border-medium);
   border-radius: var(--radius-xl);
-  background-color: rgba(17, 18, 21, 0.45);
+  background-color: var(--surface-translucent);
 }
 
 .empty-state-icon {
@@ -718,7 +718,7 @@ textarea.form-control {
   font-family: var(--font-display);
   font-size: var(--text-sm);
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .empty-state-desc {

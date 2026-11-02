@@ -1,7 +1,8 @@
 // PULSE STUDIO OS — Edge Function: workflow
 //
 // All business rules for state-changing operations live HERE, not in SQL:
-//   task.create | task.set_status | task.reassign | expense.decide | leave.decide
+//   task.create | task.set_status | task.reassign | task.update | task.delete
+//   expense.decide | leave.decide | employee.update
 //
 // Pattern for every action:
 //   1. authenticate the caller (JWT -> profile + roles, server-side)
@@ -62,6 +63,9 @@ serveJson(async (req) => {
     case "task.create": return json(req, await taskCreate(req, admin, caller, body));
     case "task.set_status": return json(req, await taskSetStatus(req, admin, caller, body));
     case "task.reassign": return json(req, await taskReassign(req, admin, caller, body));
+    case "task.update": return json(req, await taskUpdate(req, admin, caller, body));
+    case "task.delete": return json(req, await taskDelete(req, admin, caller, body));
+    case "employee.update": return json(req, await employeeUpdate(req, admin, caller, body));
     case "expense.decide": return json(req, await expenseDecide(req, admin, caller, body));
     case "leave.decide": return json(req, await leaveDecide(req, admin, caller, body));
     default: throw new HttpError(400, "Unknown action");
@@ -300,4 +304,158 @@ async function leaveDecide(req: Request, admin: SupabaseClient, caller: Caller, 
   });
   await audit(admin, { userId: caller.id, action: `LEAVE_${decision.toUpperCase()}`, entityType: "leave_requests", entityId: leaveId, oldData: { status: "pending" }, newData: { status: decision } }, req);
   return { success: true, status: decision };
+}
+
+// ---------------------------------------------------------------- task.update
+
+async function taskUpdate(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const taskId = v.uuid(b.taskId, "taskId");
+  const task = await loadVisibleTask(caller, taskId);
+  const allowed = (await isReviewer(admin, caller, task)) || (await isParticipant(admin, caller, task));
+  if (!allowed) throw new HttpError(403, "You are not allowed to edit this task");
+
+  const patch: Record<string, unknown> = {};
+  if ("title" in b) patch.title = v.text(b.title, "title", 1, 200);
+  if ("description" in b) patch.description = v.optText(b.description, "description", 5000);
+  if ("priority" in b) patch.priority = v.oneOf(b.priority, PRIORITIES, "priority");
+  if ("dueDate" in b) patch.due_date = v.isoDate(b.dueDate, "dueDate");
+  if ("projectId" in b) {
+    const projectId = v.optUuid(b.projectId, "projectId");
+    if (projectId) {
+      const { data } = await userClient(caller.token).from("projects").select("id").eq("id", projectId).maybeSingle();
+      if (!data) throw new HttpError(404, "Project not found");
+    }
+    patch.project_id = projectId;
+  }
+  if (Object.keys(patch).length === 0) throw new HttpError(400, "Nothing to update");
+
+  const cols = Object.keys(patch).join(", ");
+  const { data: before } = await admin.from("tasks").select(cols).eq("id", taskId).single();
+  const { error } = await admin.from("tasks").update(patch).eq("id", taskId);
+  if (error) throw error;
+
+  await logTask(admin, taskId, caller.id, "EDITED", before, patch);
+  await audit(admin, { userId: caller.id, action: "TASK_EDITED", entityType: "tasks", entityId: taskId, oldData: before, newData: patch }, req);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------- task.delete
+
+async function taskDelete(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const taskId = v.uuid(b.taskId, "taskId");
+  const task = await loadVisibleTask(caller, taskId);
+  const allowed = caller.isAdmin || task.created_by === caller.id ||
+    (await isDeptManager(admin, caller.id, task.department_id)) ||
+    (await isProjectManager(admin, caller.id, task.project_id));
+  if (!allowed) throw new HttpError(403, "Only an admin, a manager or the task creator can delete this task");
+
+  // Remove stored files first so nothing is orphaned in the bucket.
+  const { data: files } = await admin.from("task_attachments").select("storage_path").eq("task_id", taskId);
+  const paths = (files ?? []).map((f: { storage_path: string }) => f.storage_path);
+  if (paths.length) {
+    const { error: rmErr } = await admin.storage.from("task-attachments").remove(paths);
+    if (rmErr) console.error("storage cleanup failed:", rmErr.message);
+  }
+
+  const { error } = await admin.from("tasks").delete().eq("id", taskId);
+  if (error) throw error;
+
+  await audit(admin, {
+    userId: caller.id, action: "TASK_DELETED", entityType: "tasks", entityId: taskId,
+    oldData: { task_number: task.task_number, title: task.title, status: task.status, files: paths.length },
+  }, req);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------- employee.update
+
+const ADMIN_LEVEL_ROLES = ["super_admin", "owner", "general_manager"];
+const EMPLOYMENT_STATUSES = ["active", "inactive", "suspended"] as const;
+
+async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  if (!(caller.isAdmin || caller.has("hr_manager"))) throw new HttpError(403, "Admin or HR privilege required");
+  const userId = v.uuid(b.userId, "userId");
+  const isSelf = userId === caller.id;
+
+  const { data: target } = await admin.from("profiles")
+    .select("id, full_name, job_title, department_id, employment_status").eq("id", userId).maybeSingle();
+  if (!target) throw new HttpError(404, "Employee not found");
+
+  const { data: roleRows } = await admin.from("user_roles").select("roles(id, name)").eq("user_id", userId);
+  // deno-lint-ignore no-explicit-any
+  const targetRoles: string[] = (roleRows ?? []).map((r: any) => r.roles?.name).filter(Boolean);
+  // Only admins may touch admin-level people
+  if (targetRoles.some((r) => ADMIN_LEVEL_ROLES.includes(r)) && !caller.isAdmin) {
+    throw new HttpError(403, "Only an administrator can modify this account");
+  }
+
+  const patch: Record<string, unknown> = {};
+  if ("fullName" in b) patch.full_name = v.text(b.fullName, "fullName", 2, 120);
+  if ("jobTitle" in b) patch.job_title = v.optText(b.jobTitle, "jobTitle", 100);
+  if ("departmentId" in b) {
+    const deptId = v.optUuid(b.departmentId, "departmentId");
+    if (deptId) {
+      const { data: d } = await admin.from("departments").select("id").eq("id", deptId).maybeSingle();
+      if (!d) throw new HttpError(400, "Unknown department");
+    }
+    patch.department_id = deptId;
+  }
+
+  let newStatus: typeof EMPLOYMENT_STATUSES[number] | null = null;
+  if ("employmentStatus" in b) {
+    newStatus = v.oneOf(b.employmentStatus, EMPLOYMENT_STATUSES, "employmentStatus");
+    if (isSelf && newStatus !== "active") throw new HttpError(400, "You cannot deactivate your own account");
+    if (newStatus !== target.employment_status) patch.employment_status = newStatus;
+  }
+
+  let newRole: { id: string; name: string } | null = null;
+  if ("roleId" in b && b.roleId) {
+    const roleId = v.uuid(b.roleId, "roleId");
+    if (isSelf) throw new HttpError(400, "You cannot change your own role");
+    const { data: role } = await admin.from("roles").select("id, name, is_active").eq("id", roleId).maybeSingle();
+    if (!role || !role.is_active) throw new HttpError(400, "Unknown or inactive role");
+    if (ADMIN_LEVEL_ROLES.includes(role.name) && !caller.isAdmin) throw new HttpError(403, "Only an administrator can grant this role");
+    if (role.name === "super_admin" && !caller.has("super_admin")) throw new HttpError(403, "Only a super administrator can grant super_admin");
+    if (!(targetRoles.length === 1 && targetRoles[0] === role.name)) newRole = { id: role.id, name: role.name };
+    // never remove the last super admin
+    if (newRole && targetRoles.includes("super_admin") && role.name !== "super_admin") {
+      const { count } = await admin.from("user_roles").select("id, roles!inner(name)", { count: "exact", head: true }).eq("roles.name", "super_admin");
+      if ((count ?? 0) <= 1) throw new HttpError(409, "Cannot remove the last super administrator");
+    }
+  }
+  if (Object.keys(patch).length === 0 && !newRole) return { success: true, unchanged: true };
+
+  if (Object.keys(patch).length) {
+    const { error } = await admin.from("profiles").update(patch).eq("id", userId);
+    if (error) throw error;
+    if ("department_id" in patch) {
+      await admin.from("user_departments").delete().eq("user_id", userId).eq("is_primary", true);
+      if (patch.department_id) {
+        await admin.from("user_departments").upsert(
+          { user_id: userId, department_id: patch.department_id, is_primary: true },
+          { onConflict: "user_id,department_id" },
+        );
+      }
+    }
+  }
+  if (newRole) {
+    await admin.from("user_roles").delete().eq("user_id", userId);
+    const { error } = await admin.from("user_roles").insert({ user_id: userId, role_id: newRole.id, assigned_by: caller.id });
+    if (error) throw error;
+  }
+  // Deactivated people can no longer sign in or refresh a session.
+  if (newStatus && "employment_status" in patch) {
+    const { error } = await admin.auth.admin.updateUserById(userId, { ban_duration: newStatus === "active" ? "none" : "87600h" });
+    if (error) console.error("ban update failed:", error.message);
+  }
+
+  await audit(admin, {
+    userId: caller.id, action: "EMPLOYEE_UPDATED", entityType: "profiles", entityId: userId,
+    oldData: {
+      full_name: target.full_name, job_title: target.job_title, department_id: target.department_id,
+      employment_status: target.employment_status, roles: targetRoles,
+    },
+    newData: { ...patch, role: newRole?.name },
+  }, req);
+  return { success: true };
 }

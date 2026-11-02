@@ -7,6 +7,7 @@ import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
 import { Api } from '../../services/api.js';
+import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, debounce } from '../../utils/helpers.js';
 import { formatTaskStatusBadge, formatPriorityBadge } from '../../utils/formatters.js';
 
@@ -240,10 +241,10 @@ export class TasksModule {
 
   renderKanbanBoard(container, tasks) {
     const columns = [
-      { id: 'todo', title: 'To Do / Queued', dot: 'var(--text-dim)' },
-      { id: 'in_progress', title: 'In Production', dot: 'var(--color-sky)' },
-      { id: 'under_review', title: 'Creative Review', dot: 'var(--color-amber)' },
-      { id: 'completed', title: 'Approved & Done', dot: 'var(--color-emerald)' }
+      { id: 'todo', title: 'To Do / Queued', dot: 'var(--color-sky)', tone: 'blue' },
+      { id: 'in_progress', title: 'In Production', dot: 'var(--color-amber)', tone: 'amber' },
+      { id: 'under_review', title: 'Creative Review', dot: 'var(--color-rose)', tone: 'red' },
+      { id: 'completed', title: 'Approved & Done', dot: 'var(--color-emerald)', tone: 'green' }
     ];
 
     container.innerHTML = `
@@ -255,20 +256,18 @@ export class TasksModule {
           });
 
           return `
-            <div class="kanban-column">
+            <div class="kanban-column kanban-tone-${col.tone}" data-column="${col.id}">
               <div class="kanban-column-header">
                 <div class="kanban-column-title">
                   <span class="kanban-column-dot" style="background-color: ${col.dot};"></span>
                   <span>${col.title}</span>
                 </div>
-                <span class="badge badge-slate">${colTasks.length}</span>
+                <span class="badge badge-slate kanban-count">${colTasks.length}</span>
               </div>
 
-              <div class="kanban-tasks-list">
+              <div class="kanban-tasks-list" data-drop-column="${col.id}">
                 ${colTasks.length === 0 ? `
-                  <div style="padding: var(--space-8); text-align: center; color: var(--text-dim); font-size: var(--text-2xs);">
-                    No deliverables in this stage
-                  </div>
+                  <div class="kanban-empty">Drop a deliverable here</div>
                 ` : colTasks.map(t => this.renderTaskCardHTML(t)).join('')}
               </div>
             </div>
@@ -277,13 +276,163 @@ export class TasksModule {
       </div>
     `;
 
-    // Attach card click handlers
+    // Card click opens details; the edit / delete icons act on their own
     container.querySelectorAll('.task-card').forEach(el => {
-      el.addEventListener('click', () => {
-        const taskId = el.getAttribute('data-task-id');
-        this.openTaskDetailModal(taskId);
+      const taskId = el.getAttribute('data-task-id');
+      el.addEventListener('click', () => this.openTaskDetailModal(taskId));
+      el.querySelector('.card-act-edit')?.addEventListener('click', (e) => { e.stopPropagation(); this.openTaskEditDialog(taskId); });
+      el.querySelector('.card-act-delete')?.addEventListener('click', (e) => { e.stopPropagation(); this.deleteTask(taskId); });
+    });
+
+    this.bindDragAndDrop(container);
+  }
+
+  // ====================================================================
+  // DRAG & DROP (HTML5). Dropping on a column moves the task to that stage
+  // through the server (same rules as the status buttons); on refusal it snaps back.
+  // ====================================================================
+  bindDragAndDrop(container) {
+    let draggedId = null;
+
+    container.querySelectorAll('.task-card').forEach(card => {
+      card.setAttribute('draggable', 'true');
+      card.addEventListener('dragstart', (e) => {
+        draggedId = card.getAttribute('data-task-id');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', draggedId);
+        requestAnimationFrame(() => card.classList.add('dragging'));
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        draggedId = null;
       });
     });
+
+    container.querySelectorAll('.kanban-column').forEach(col => {
+      const list = col.querySelector('.kanban-tasks-list');
+      col.addEventListener('dragover', (e) => {
+        if (!draggedId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        col.classList.add('drag-over');
+      });
+      col.addEventListener('dragleave', (e) => {
+        if (!col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+      });
+      col.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        col.classList.remove('drag-over');
+        const id = draggedId || e.dataTransfer.getData('text/plain');
+        if (!id) return;
+        await this.moveTaskToColumn(id, list.getAttribute('data-drop-column'));
+      });
+    });
+  }
+
+  async moveTaskToColumn(taskId, columnId) {
+    const task = this.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    const groupOf = (s) => (s === 'approved' ? 'completed' : s);
+    if (groupOf(task.status) === columnId) return; // dropped where it already is
+
+    const previous = task.status;
+    task.status = columnId;           // optimistic
+    this.renderCurrentView();
+    try {
+      await Api.setTaskStatus(taskId, columnId);
+      Toast.success(`Moved ${task.task_number} to ${columnId.replace('_', ' ').toUpperCase()}`, 'Stage updated');
+    } catch (err) {
+      task.status = previous;         // snap back
+      this.renderCurrentView();
+      Toast.error(err.message || 'Could not move this task', 'Move refused');
+    }
+  }
+
+  // ====================================================================
+  // EDIT / DELETE
+  // ====================================================================
+  canEditTask(t) {
+    const me = this.app.currentUser.id;
+    return Permissions.isAdmin() || Permissions.isManager() || t.created_by === me || t.assigned_to === me;
+  }
+
+  canDeleteTask(t) {
+    return Permissions.isAdmin() || Permissions.isManager() || t.created_by === this.app.currentUser.id;
+  }
+
+  async openTaskEditDialog(taskId) {
+    const t = this.tasks.find(x => x.id === taskId);
+    if (!t) return;
+
+    const supabase = getSupabase();
+    const { data: people } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .eq('employment_status', 'active')
+      .order('full_name', { ascending: true });
+
+    const canReassign = Permissions.isAdmin() || Permissions.isManager() ||
+      (t.created_by === this.app.currentUser.id && t.assigned_to !== this.app.currentUser.id);
+
+    const fields = [
+      { name: 'title', label: 'Task name', required: true, value: t.title, maxlength: 200 },
+      { name: 'description', label: 'Creative brief', type: 'textarea', value: t.description || '', rows: 4, maxlength: 5000 },
+      { name: 'priority', label: 'Priority', type: 'select', half: true, value: t.priority, options: [
+        { value: 'urgent', label: 'Urgent' }, { value: 'high', label: 'High' },
+        { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }] },
+      { name: 'dueDate', label: 'Deadline', type: 'date', half: true, required: true, value: (t.due_date || '').slice(0, 10) },
+      { name: 'projectId', label: 'Project', type: 'select', half: true, value: t.project_id || '', options: [
+        { value: '', label: 'General studio work' },
+        ...this.projects.map(p => ({ value: p.id, label: `${p.name} (${p.code})` }))] }
+    ];
+    if (canReassign) {
+      fields.push({ name: 'assigneeId', label: 'Assigned to', type: 'select', half: true, required: true, value: t.assigned_to || '',
+        options: (people || []).map(p => ({ value: p.id, label: p.full_name })) });
+    }
+
+    formDialog({
+      title: `Edit ${t.task_number}`,
+      subtitle: 'Change the name, brief, priority, deadline, project or assignee.',
+      fields,
+      onSubmit: async (v) => {
+        await Api.updateTask(t.id, {
+          title: v.title, description: v.description, priority: v.priority,
+          dueDate: v.dueDate, projectId: v.projectId
+        });
+        if (canReassign && v.assigneeId && v.assigneeId !== t.assigned_to) {
+          await Api.reassignTask(t.id, v.assigneeId);
+        }
+        Toast.success('Task updated', 'Saved');
+        await this.loadData();
+      },
+      onDelete: this.canDeleteTask(t) ? async () => {
+        await Api.deleteTask(t.id);
+        Toast.success(`${t.task_number} deleted`, 'Deleted');
+        await this.loadData();
+      } : undefined,
+      deleteLabel: 'Delete task',
+      deleteMessage: `"${t.title}" and its comments, files and history will be permanently removed.`
+    });
+  }
+
+  async deleteTask(taskId) {
+    const t = this.tasks.find(x => x.id === taskId);
+    if (!t) return;
+    const ok = await confirmDialog({
+      title: 'Delete this task?',
+      message: `"${t.title}" (${t.task_number}) and its comments, files and history will be permanently removed.`,
+      confirmLabel: 'Delete task',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await Api.deleteTask(taskId);
+      Toast.success(`${t.task_number} deleted`, 'Deleted');
+      await this.loadData();
+    } catch (err) {
+      Toast.error(err.message || 'Could not delete task', 'Delete refused');
+    }
   }
 
   renderTaskCardHTML(t) {
@@ -295,6 +444,10 @@ export class TasksModule {
       <div class="task-card" data-task-id="${t.id}">
         <div class="task-card-meta-top">
           <span class="badge badge-slate font-mono">${t.task_number}</span>
+          <span class="card-actions">
+            ${this.canEditTask(t) ? '<button type="button" class="card-act card-act-edit" title="Edit task" aria-label="Edit task"><i data-lucide="pencil"></i></button>' : ''}
+            ${this.canDeleteTask(t) ? '<button type="button" class="card-act card-act-delete" title="Delete task" aria-label="Delete task"><i data-lucide="trash-2"></i></button>' : ''}
+          </span>
           ${formatPriorityBadge(t.priority)}
         </div>
 
@@ -347,6 +500,8 @@ export class TasksModule {
                   <button type="button" class="btn btn-secondary btn-sm btn-inspect-task" data-task-id="${t.id}">
                     Inspect
                   </button>
+                  ${this.canEditTask(t) ? `<button type="button" class="btn btn-ghost btn-sm btn-edit-task" data-task-id="${t.id}">Edit</button>` : ''}
+                  ${this.canDeleteTask(t) ? `<button type="button" class="btn btn-danger btn-sm btn-delete-task" data-task-id="${t.id}">Delete</button>` : ''}
                 </td>
               </tr>
             `).join('')}
@@ -356,10 +511,13 @@ export class TasksModule {
     `;
 
     container.querySelectorAll('.btn-inspect-task').forEach(el => {
-      el.addEventListener('click', () => {
-        const taskId = el.getAttribute('data-task-id');
-        this.openTaskDetailModal(taskId);
-      });
+      el.addEventListener('click', () => this.openTaskDetailModal(el.getAttribute('data-task-id')));
+    });
+    container.querySelectorAll('.btn-edit-task').forEach(el => {
+      el.addEventListener('click', () => this.openTaskEditDialog(el.getAttribute('data-task-id')));
+    });
+    container.querySelectorAll('.btn-delete-task').forEach(el => {
+      el.addEventListener('click', () => this.deleteTask(el.getAttribute('data-task-id')));
     });
   }
 
@@ -455,6 +613,7 @@ export class TasksModule {
         <a href="#chat" class="btn btn-secondary btn-sm" id="btnDiscussChat">
           💬 Message Collaborator in Chat
         </a>
+        ${this.canEditTask(task) ? '<button type="button" class="btn btn-secondary btn-sm" id="btnModalEditTask"><i data-lucide="pencil"></i> Edit</button>' : ''}
         <button type="button" class="btn btn-ghost btn-sm" id="btnModalCloseAction">Close</button>
       </div>
     `;
@@ -464,6 +623,8 @@ export class TasksModule {
     // Close handlers
     document.getElementById('btnCloseModal')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
     document.getElementById('btnModalCloseAction')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
+    document.getElementById('btnModalEditTask')?.addEventListener('click', () => this.openTaskEditDialog(taskId));
+    if (window.lucide) window.lucide.createIcons();
 
     // Status change handlers
     ['todo', 'in_progress', 'under_review', 'completed'].forEach(st => {

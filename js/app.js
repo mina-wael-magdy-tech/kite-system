@@ -35,7 +35,7 @@ class PulseStudioApp {
     // Charts follow the brand typography / text colour
     if (window.Chart) {
       window.Chart.defaults.font.family = "'Poppins', 'Segoe UI', sans-serif";
-      window.Chart.defaults.color = '#a6a9b3';
+      window.Chart.defaults.color = '#525b68';
     }
 
     // 1. Validate Session & Account Access

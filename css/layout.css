@@ -9,7 +9,7 @@
   display: flex;
   min-height: 100vh;
   width: 100%;
-  background-color: var(--bg-page);
+  background: transparent;
   position: relative;
 }
 
@@ -18,7 +18,7 @@
    ==================================================================== */
 .app-sidebar {
   width: 260px;
-  background-color: var(--studio-900);
+  background-color: var(--tint-blue-soft);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
@@ -84,7 +84,7 @@
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--text-lg);
-  color: #ffffff;
+  color: var(--text-strong);
   letter-spacing: 0.04em;
   line-height: 1.1;
 }
@@ -111,7 +111,7 @@
 }
 
 .sidebar-collapse-btn:hover {
-  color: #ffffff;
+  color: var(--text-strong);
   background-color: var(--studio-800);
   border-color: var(--border-medium);
 }
@@ -166,13 +166,13 @@
 }
 
 .nav-item:hover {
-  color: #ffffff;
+  color: var(--text-strong);
   background-color: var(--studio-850);
 }
 
 .nav-item.active {
-  color: #ffffff;
-  background-color: var(--color-primary-bg);
+  color: var(--kite-red-700);
+  background-color: var(--tint-red);
   border: 1px solid var(--color-primary-border);
   box-shadow: inset 3px 0 0 var(--color-primary);
   font-weight: 600;
@@ -213,7 +213,7 @@
 .sidebar-footer {
   padding: var(--space-3);
   border-top: 1px solid var(--border-subtle);
-  background-color: rgba(10, 11, 13, 0.45);
+  background-color: var(--surface-translucent);
 }
 
 .user-snippet {
@@ -240,7 +240,7 @@
 .user-snippet-name {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .user-snippet-role {
@@ -258,7 +258,7 @@
   margin-left: 260px;
   min-height: 100vh;
   transition: margin-left var(--transition-normal);
-  background-color: var(--bg-page);
+  background: transparent;
   min-width: 0;
 }
 
@@ -269,7 +269,7 @@
 /* Topbar */
 .app-topbar {
   height: 64px;
-  background-color: rgba(10, 11, 13, 0.88);
+  background-color: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-subtle);
@@ -316,7 +316,7 @@
 }
 
 .breadcrumb-current {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -351,7 +351,7 @@
   background-color: var(--studio-900);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  color: #ffffff;
+  color: var(--text-strong);
   font-size: var(--text-xs);
   transition: all var(--transition-fast);
 }
@@ -377,7 +377,7 @@
 }
 
 .topbar-icon-btn:hover {
-  color: #ffffff;
+  color: var(--text-strong);
   background-color: var(--studio-850);
   border-color: var(--border-medium);
 }
@@ -434,7 +434,7 @@
   display: none;
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.7);
+  background-color: rgba(20, 32, 48, 0.45);
   backdrop-filter: blur(4px);
   z-index: calc(var(--z-sidebar) - 1);
 }

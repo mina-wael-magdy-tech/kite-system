@@ -134,13 +134,8 @@ export class ChatModule {
     try {
       // 1. Fetch conversations
       const { data: convos } = await supabase.from('conversations').select('*').order('created_at', { ascending: true });
-      this.channels = convos && convos.length > 0 ? convos : [
-        { id: '33333333-3333-3333-3333-333333333301', name: '#creative-handoffs', description: 'Cross-department task handoffs & asset deliveries' },
-        { id: '33333333-3333-3333-3333-333333333302', name: '#studio-general', description: 'Daily standups, studio announcements & creative alignment' },
-        { id: '33333333-3333-3333-3333-333333333303', name: '#client-briefs', description: 'Manager & Admin campaign briefs and milestone reviews' }
-      ];
-
-      this.activeChannelId = this.channels[0].id;
+      this.channels = convos || [];
+      this.activeChannelId = this.channels[0]?.id || null;
 
       // 2. Fetch employees for handoff dropdown
       const { data: emps } = await supabase.from('profiles').select('id, full_name, job_title, department_id, departments!profiles_department_id_fkey(name)');
@@ -156,6 +151,11 @@ export class ChatModule {
       }
 
       this.renderChannelsList();
+      if (!this.activeChannelId) {
+        const feed = document.getElementById('chatFeed');
+        if (feed) feed.innerHTML = '<div class="empty-state" style="border:none;"><div class="empty-state-title">No channels available</div><div class="empty-state-desc">Ask an administrator to create or share a channel with you.</div></div>';
+        return;
+      }
       await this.loadMessages(this.activeChannelId);
       this.subscribeToChannel(this.activeChannelId);
     } catch (err) {

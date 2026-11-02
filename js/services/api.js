@@ -30,6 +30,9 @@ export const Api = {
   createTask: (p) => Api.workflow('task.create', p),
   setTaskStatus: (taskId, status) => Api.workflow('task.set_status', { taskId, status }),
   reassignTask: (taskId, assigneeId) => Api.workflow('task.reassign', { taskId, assigneeId }),
+  updateTask: (taskId, fields) => Api.workflow('task.update', { taskId, ...fields }),
+  deleteTask: (taskId) => Api.workflow('task.delete', { taskId }),
+  updateEmployee: (userId, fields) => Api.workflow('employee.update', { userId, ...fields }),
   decideExpense: (expenseId, decision, notes) => Api.workflow('expense.decide', { expenseId, decision, notes }),
   decideLeave: (leaveId, decision, notes) => Api.workflow('leave.decide', { leaveId, decision, notes }),
 

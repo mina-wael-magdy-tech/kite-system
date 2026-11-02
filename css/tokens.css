@@ -1,5 +1,5 @@
 /**
- * KITE SYSTEM — Design Tokens
+ * KITE SYSTEM — Design Tokens (light theme: pale palette tints on white)
  * Single source of truth for brand colors, typography, spacing, radii, shadows and layers.
  *
  * Brand: Kite Design Studio
@@ -42,21 +42,31 @@
   --kite-blue-100: #c9e7f3;
 
   /* ---------------------------------------------------------------
-     Neutral surfaces (kept legacy names so every component inherits)
-     Near-black with a faint cool tint to sit well with the blue ramp.
+     Neutral surfaces — LIGHT THEME (legacy names kept so components inherit)
+     950 = page tint · 900 = card (white) · 850/800 = insets & hovers
+     700-600 = borders/scroll · 500-50 = text-capable ink
      --------------------------------------------------------------- */
-  --studio-950: #0a0b0d;
-  --studio-900: #111215;
-  --studio-850: #17181c;
-  --studio-800: #1e2025;
-  --studio-700: #2a2c33;
-  --studio-600: #3b3e48;
-  --studio-500: #585c69;
-  --studio-400: #81858f;
-  --studio-300: #aaaeb8;
-  --studio-200: #cdd0d7;
-  --studio-100: #e8e9ed;
-  --studio-50:  #f5f6f8;
+  --studio-950: #eef6fb;
+  --studio-900: #ffffff;
+  --studio-850: #f5f9fc;
+  --studio-800: #e9f1f7;
+  --studio-700: #d6e2ec;
+  --studio-600: #bccad6;
+  --studio-500: #94a3b1;
+  --studio-400: #707d8b;
+  --studio-300: #525e6c;
+  --studio-200: #38424f;
+  --studio-100: #232a34;
+  --studio-50:  #141920;
+
+  /* Pale palette tints used as backgrounds (from the Kite swatches) */
+  --tint-blue:   #ddeff8;
+  --tint-blue-soft: #eaf5fb;
+  --tint-amber:  #fbe8c2;
+  --tint-amber-soft: #fdf3dc;
+  --tint-red:    #fadadd;
+  --tint-red-soft: #fdeced;
+  --tint-green:  #dcf3ea;
 
   /* ---------------------------------------------------------------
      Semantic accents
@@ -64,72 +74,81 @@
   /* Primary: brand red (buttons, active navigation, focus) */
   --color-primary: var(--kite-red-500);
   --color-primary-hover: var(--kite-red-600);
-  --color-primary-light: var(--kite-red-300);
-  --color-primary-bg: rgba(224, 27, 40, 0.14);
+  --color-primary-light: var(--kite-red-600);
+  --color-primary-bg: rgba(224, 27, 40, 0.17);
   --color-primary-border: rgba(224, 27, 40, 0.42);
 
   /* Success (approved, active, live): the one non-brand hue, kept for meaning */
   --color-emerald: #22c58b;
-  --color-emerald-light: #5ee0ad;
-  --color-emerald-bg: rgba(34, 197, 139, 0.14);
+  --color-emerald-light: #0d7a53;
+  --color-emerald-bg: rgba(34, 197, 139, 0.17);
   --color-emerald-border: rgba(34, 197, 139, 0.38);
 
   /* Amber: review, pending, highlights, admin */
   --color-amber: var(--kite-amber-400);
-  --color-amber-light: var(--kite-amber-300);
-  --color-amber-bg: rgba(251, 186, 72, 0.14);
+  --color-amber-light: #8a5a05;
+  --color-amber-bg: rgba(251, 186, 72, 0.17);
   --color-amber-border: rgba(251, 186, 72, 0.4);
 
   /* Rose: danger / urgent / errors — coral from the red ramp so it never
      reads as the solid brand-red primary action */
   --color-rose: var(--kite-red-300);
-  --color-rose-light: var(--kite-red-200);
-  --color-rose-bg: rgba(235, 111, 105, 0.14);
+  --color-rose-light: #b4232c;
+  --color-rose-bg: rgba(235, 111, 105, 0.17);
   --color-rose-border: rgba(235, 111, 105, 0.4);
 
   /* Sky: information, in-progress, neutral tags */
   --color-sky: var(--kite-blue-700);
-  --color-sky-light: var(--kite-blue-400);
-  --color-sky-bg: rgba(18, 171, 227, 0.14);
+  --color-sky-light: #0a73a0;
+  --color-sky-bg: rgba(18, 171, 227, 0.17);
   --color-sky-border: rgba(18, 171, 227, 0.4);
 
   /* Department / category tags: all drawn from the brand ramps */
   --color-purple: var(--kite-blue-500);        /* Media Production */
-  --color-purple-light: var(--kite-blue-300);
-  --color-purple-bg: rgba(80, 185, 227, 0.14);
+  --color-purple-light: #14719c;
+  --color-purple-bg: rgba(80, 185, 227, 0.17);
   --color-purple-border: rgba(80, 185, 227, 0.4);
 
   --color-pink: var(--kite-red-400);           /* Branding */
-  --color-pink-light: var(--kite-red-200);
-  --color-pink-bg: rgba(226, 77, 71, 0.14);
+  --color-pink-light: #b0302b;
+  --color-pink-bg: rgba(226, 77, 71, 0.17);
   --color-pink-border: rgba(226, 77, 71, 0.4);
 
   --color-orange: var(--kite-amber-600);       /* BTL */
-  --color-orange-light: var(--kite-amber-200);
-  --color-orange-bg: rgba(215, 159, 62, 0.16);
+  --color-orange-light: #85590f;
+  --color-orange-bg: rgba(215, 159, 62, 0.17);
   --color-orange-border: rgba(215, 159, 62, 0.42);
 
   --color-cyan: var(--kite-blue-300);          /* Web Development */
-  --color-cyan-light: var(--kite-blue-200);
-  --color-cyan-bg: rgba(152, 214, 234, 0.13);
+  --color-cyan-light: #2f7690;
+  --color-cyan-bg: rgba(152, 214, 234, 0.17);
   --color-cyan-border: rgba(152, 214, 234, 0.38);
 
   /* ---------------------------------------------------------------
      Text & surface tokens
      --------------------------------------------------------------- */
-  --text-main: #f7f7f8;
-  --text-muted: #a6a9b3;
-  --text-dim: #7f838e;
+  --text-strong: #14181e;   /* headings, names */
+  --text-main: #1f252d;
+  --text-muted: #525b68;
+  --text-dim: #6c7684;
   --text-dark: #0a0b0d;
+  --on-brand: #ffffff;      /* text on saturated brand fills */
 
   --bg-page: var(--studio-950);
   --bg-card: var(--studio-900);
   --bg-card-hover: var(--studio-850);
-  --bg-card-inset: var(--studio-950);
-  --bg-glass: rgba(23, 24, 28, 0.84);
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-medium: rgba(255, 255, 255, 0.15);
-  --border-active: rgba(224, 27, 40, 0.6);
+  --bg-card-inset: var(--studio-850);
+  --bg-glass: rgba(255, 255, 255, 0.86);
+  --surface-translucent: rgba(255, 255, 255, 0.62);
+  --border-subtle: rgba(24, 48, 72, 0.10);
+  --border-medium: rgba(24, 48, 72, 0.20);
+  --border-active: rgba(224, 27, 40, 0.55);
+
+  /* App background: pale blue with amber + red washes (palette tints) */
+  --bg-app: radial-gradient(1100px 620px at 100% -5%, rgba(251, 186, 72, 0.20), transparent 62%),
+            radial-gradient(900px 560px at -5% 105%, rgba(123, 203, 227, 0.30), transparent 60%),
+            radial-gradient(700px 420px at 60% 115%, rgba(246, 177, 182, 0.22), transparent 62%),
+            #f1f8fc;
 
   /* ---------------------------------------------------------------
      Typography
@@ -174,13 +193,13 @@
   --radius-2xl: 24px;
   --radius-full: 9999px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
-  --shadow-glow-indigo: 0 0 20px rgba(224, 27, 40, 0.35); /* legacy name = brand glow */
-  --shadow-glow-emerald: 0 0 20px rgba(34, 197, 139, 0.35);
+  /* Shadows (soft, for light surfaces) */
+  --shadow-sm: 0 1px 2px 0 rgba(24, 48, 72, 0.08);
+  --shadow-md: 0 4px 10px -2px rgba(24, 48, 72, 0.10), 0 2px 4px -2px rgba(24, 48, 72, 0.08);
+  --shadow-lg: 0 12px 22px -6px rgba(24, 48, 72, 0.16), 0 4px 8px -4px rgba(24, 48, 72, 0.10);
+  --shadow-xl: 0 24px 40px -10px rgba(24, 48, 72, 0.22), 0 8px 14px -6px rgba(24, 48, 72, 0.12);
+  --shadow-glow-indigo: 0 0 0 3px rgba(224, 27, 40, 0.18); /* legacy name = brand focus ring */
+  --shadow-glow-emerald: 0 0 0 3px rgba(34, 197, 139, 0.2);
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);

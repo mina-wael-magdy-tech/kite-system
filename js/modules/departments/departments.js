@@ -6,6 +6,7 @@
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
+import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatCurrency } from '../../utils/helpers.js';
 
 export class DepartmentsModule {
@@ -75,22 +76,24 @@ export class DepartmentsModule {
     const container = document.getElementById('departmentsGrid');
     if (!container) return;
 
-    const displayDepts = this.departments.length > 0 ? this.departments : [
-      { name: 'Branding', code: 'BRAND', description: 'Visual identities, typography hierarchy, logo systems & style manuals.', budget: 50000 },
-      { name: 'BTL', code: 'BTL', description: 'Below The Line activations, exhibition booths, pop-up kiosks & print production.', budget: 45000 },
-      { name: 'Digital Marketing', code: 'MKTG', description: 'Meta/TikTok campaigns, ad copy hooks, analytics & conversion funnels.', budget: 60000 },
-      { name: 'Media Production', code: 'MEDIA', description: '4K video commercial edits, 3D motion graphics reels, grading & sound.', budget: 75000 },
-      { name: 'Web Development', code: 'DEV', description: 'Interactive WebGL applications, responsive UI/UX & e-commerce flows.', budget: 65000 }
-    ];
+    const displayDepts = this.departments;
+    if (displayDepts.length === 0) {
+      container.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1;"><div class="empty-state-icon">🏢</div><div class="empty-state-title">No departments yet</div><div class="empty-state-desc">Add your first department to start organizing the studio.</div></div>';
+      return;
+    }
 
     container.innerHTML = displayDepts.map(d => {
       const memberCount = d.profiles ? d.profiles.length : 0;
 
       return `
-        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+        <div class="card entity-card" style="display: flex; flex-direction: column; justify-content: space-between;">
           <div class="card-header">
             <div>
               <span class="badge badge-indigo font-mono text-2xs">${escapeHTML(d.code || 'DEPT')}</span>
+              <span class="card-actions">
+                ${Permissions.isAdmin() ? `<button type="button" class="card-act card-act-edit" data-id="${d.id}" title="Edit department" aria-label="Edit department"><i data-lucide="pencil"></i></button>
+                <button type="button" class="card-act card-act-delete" data-id="${d.id}" title="Delete department" aria-label="Delete department"><i data-lucide="trash-2"></i></button>` : ''}
+              </span>
               <div class="card-title" style="margin-top: 4px;">${escapeHTML(d.name)}</div>
             </div>
             <span class="badge badge-slate">${memberCount} Members</span>
@@ -102,11 +105,11 @@ export class DepartmentsModule {
             <div class="glass-panel" style="padding: var(--space-3); background: var(--studio-950); display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); font-size: var(--text-2xs);">
               <div>
                 <span class="text-dim block">Department Manager</span>
-                <strong class="text-white">${escapeHTML(d.manager?.full_name || 'Designated Lead')}</strong>
+                <strong class="text-white">${escapeHTML(d.manager?.full_name || 'Not assigned')}</strong>
               </div>
               <div>
                 <span class="text-dim block">Annual Budget</span>
-                <strong class="font-mono text-emerald">${formatCurrency(d.budget || 50000)}</strong>
+                <strong class="font-mono text-emerald">${formatCurrency(d.budget || 0)}</strong>
               </div>
             </div>
           </div>
@@ -119,6 +122,49 @@ export class DepartmentsModule {
         </div>
       `;
     }).join('');
+
+    container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
+    container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteDepartment(b.dataset.id)));
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  async openEditDialog(id) {
+    const d = this.departments.find(x => x.id === id);
+    if (!d) return;
+    const { data: people } = await getSupabase().from('profiles').select('id, full_name').eq('employment_status', 'active').order('full_name', { ascending: true });
+    formDialog({
+      title: `Edit ${d.name}`,
+      subtitle: 'Rename the department, set its code, budget and department manager.',
+      fields: [
+        { name: 'name', label: 'Department name', required: true, value: d.name, maxlength: 100 },
+        { name: 'code', label: 'Code', half: true, value: d.code || '', maxlength: 12 },
+        { name: 'budget', label: 'Annual budget', type: 'number', half: true, min: 0, value: d.budget ?? 0 },
+        { name: 'manager_id', label: 'Department manager', type: 'select', value: d.manager_id || '', options: [
+          { value: '', label: 'Not assigned' }, ...(people || []).map(p => ({ value: p.id, label: p.full_name }))],
+          hint: 'The manager can see and manage every task in this department.' },
+        { name: 'description', label: 'Description', type: 'textarea', value: d.description || '', rows: 3 }
+      ],
+      onSubmit: async (v) => {
+        const { data, error } = await getSupabase().from('departments')
+          .update({ name: v.name, code: v.code, budget: v.budget ?? 0, manager_id: v.manager_id, description: v.description })
+          .eq('id', id).select('id');
+        if (error) throw new Error(error.code === '23505' ? 'That name or code is already used.' : error.message);
+        if (!data?.length) throw new Error('Only an administrator can edit departments.');
+        Toast.success('Department updated', 'Saved');
+        await this.loadDepartments();
+      }
+    });
+  }
+
+  async deleteDepartment(id) {
+    const d = this.departments.find(x => x.id === id);
+    if (!d) return;
+    const ok = await confirmDialog({ title: 'Delete this department?', message: `"${d.name}" will be removed. People and tasks in it are kept but become unassigned to a department.`, confirmLabel: 'Delete department', danger: true });
+    if (!ok) return;
+    const { data, error } = await getSupabase().from('departments').delete().eq('id', id).select('id');
+    if (error || !data?.length) { Toast.error(error?.message || 'Only an administrator can delete departments.', 'Delete refused'); return; }
+    Toast.success('Department deleted', 'Deleted');
+    await this.loadDepartments();
   }
 
   openDeptModal() {

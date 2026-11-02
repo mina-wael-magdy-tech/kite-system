@@ -142,12 +142,12 @@ export class ReportsModule {
           labels: ['To Do', 'In Production', 'Review', 'Completed'],
           datasets: [{
             data: [
-              this.tasks.filter(t => t.status === 'todo').length || 3,
-              this.tasks.filter(t => t.status === 'in_progress').length || 4,
-              this.tasks.filter(t => t.status === 'under_review').length || 2,
-              this.tasks.filter(t => t.status === 'completed' || t.status === 'approved').length || 5
+              this.tasks.filter(t => t.status === 'todo').length,
+              this.tasks.filter(t => t.status === 'in_progress').length,
+              this.tasks.filter(t => t.status === 'under_review').length,
+              this.tasks.filter(t => t.status === 'completed' || t.status === 'approved').length
             ],
-            backgroundColor: ['#3b3e48', '#12ABE3', '#FBBA48', '#22C58B'],
+            backgroundColor: ['#bccad6', '#12ABE3', '#FBBA48', '#22C58B'],
             borderWidth: 0
           }]
         },
@@ -155,7 +155,7 @@ export class ReportsModule {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'bottom', labels: { color: '#cdd0d7' } }
+            legend: { position: 'bottom', labels: { color: '#38424f' } }
           }
         }
       });
@@ -170,12 +170,12 @@ export class ReportsModule {
           labels: ['Urgent', 'High', 'Medium', 'Low'],
           datasets: [{
             data: [
-              this.tasks.filter(t => t.priority === 'urgent').length || 2,
-              this.tasks.filter(t => t.priority === 'high').length || 4,
-              this.tasks.filter(t => t.priority === 'medium').length || 6,
-              this.tasks.filter(t => t.priority === 'low').length || 2
+              this.tasks.filter(t => t.priority === 'urgent').length,
+              this.tasks.filter(t => t.priority === 'high').length,
+              this.tasks.filter(t => t.priority === 'medium').length,
+              this.tasks.filter(t => t.priority === 'low').length
             ],
-            backgroundColor: ['#EB6F69', '#FBBA48', '#12ABE3', '#81858F'],
+            backgroundColor: ['#EB6F69', '#FBBA48', '#12ABE3', '#94a3b1'],
             borderWidth: 0
           }]
         },
@@ -183,7 +183,7 @@ export class ReportsModule {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'bottom', labels: { color: '#cdd0d7' } }
+            legend: { position: 'bottom', labels: { color: '#38424f' } }
           },
           cutout: '65%'
         }

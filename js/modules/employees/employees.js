@@ -8,6 +8,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
 import { CONFIG } from '../../config.js';
 import { Api } from '../../services/api.js';
+import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, getInitials, getAccentHex } from '../../utils/helpers.js';
 import { formatEmploymentStatusBadge } from '../../utils/formatters.js';
 
@@ -155,16 +156,17 @@ export class EmployeesModule {
     container.innerHTML = filtered.map(emp => {
       const initials = getInitials(emp.full_name || emp.email);
       const accent = getAccentHex(emp.full_name || emp.email);
-      const deptName = emp.departments?.name || 'Studio Member';
-      const roleDisplayName = emp.user_roles?.[0]?.roles?.display_name || 'Creative Specialist';
+      const deptName = emp.departments?.name || 'No department';
+      const roleDisplayName = emp.user_roles?.[0]?.roles?.display_name || 'No role';
 
       return `
-        <div class="card" style="padding: var(--space-4); display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-3);">
+        <div class="card entity-card" style="padding: var(--space-4); display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-3);">
           <div>
             <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: var(--space-2);">
               <div class="avatar avatar-md" style="background-color: ${accent};">
                 ${initials}
               </div>
+              ${(Permissions.isAdmin() || Permissions.hasRole('hr_manager')) ? `<span class="card-actions" style="margin-left: auto; margin-right: var(--space-2);"><button type="button" class="card-act card-act-edit" data-id="${emp.id}" title="Edit employee" aria-label="Edit employee"><i data-lucide="pencil"></i></button></span>` : ''}
               ${formatEmploymentStatusBadge(emp.employment_status)}
             </div>
 
@@ -193,6 +195,39 @@ export class EmployeesModule {
         </div>
       `;
     }).join('');
+
+    container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  openEditDialog(id) {
+    const emp = this.employees.find(x => x.id === id);
+    if (!emp) return;
+    const currentRoleId = emp.user_roles?.[0]?.roles?.id || '';
+    const isSelf = emp.id === this.app.currentUser.id;
+    formDialog({
+      title: `Edit ${emp.full_name || emp.email}`,
+      subtitle: `${emp.employee_id || ''} · ${emp.email}`,
+      fields: [
+        { name: 'fullName', label: 'Full name', required: true, value: emp.full_name || '', maxlength: 120 },
+        { name: 'jobTitle', label: 'Job title', half: true, value: emp.job_title || '', maxlength: 100 },
+        { name: 'departmentId', label: 'Department', type: 'select', half: true, value: emp.department_id || '', options: [
+          { value: '', label: 'No department' }, ...this.departments.map(d => ({ value: d.id, label: d.name }))] },
+        ...(isSelf ? [] : [
+          { name: 'roleId', label: 'Role', type: 'select', half: true, value: currentRoleId, options: this.roles.map(r => ({ value: r.id, label: r.display_name })) },
+          { name: 'employmentStatus', label: 'Status', type: 'select', half: true, value: emp.employment_status === 'onboarding' ? 'active' : emp.employment_status, options: [
+            { value: 'active', label: 'Active' }, { value: 'suspended', label: 'Suspended (cannot sign in)' }, { value: 'inactive', label: 'Inactive / left the studio' }],
+            hint: 'Suspended or inactive people are signed out and cannot log in.' }
+        ])
+      ],
+      onSubmit: async (v) => {
+        const payload = { fullName: v.fullName, jobTitle: v.jobTitle, departmentId: v.departmentId };
+        if (!isSelf) { payload.roleId = v.roleId; payload.employmentStatus = v.employmentStatus; }
+        await Api.updateEmployee(id, payload);
+        Toast.success('Employee updated', 'Saved');
+        await this.loadEmployees();
+      }
+    });
   }
 
   openInviteModal() {

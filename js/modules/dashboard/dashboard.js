@@ -231,91 +231,94 @@ export class DashboardModule {
         }
       }
 
-      // Render Charts with Chart.js
-      this.initCharts(tasks || []);
+      // Chart data: every task this user may see (Row Level Security), not just the latest 20
+      const [{ data: chartTasks }, { data: chartDepts }] = await Promise.all([
+        supabase.from('tasks').select('status, department_id').limit(5000),
+        supabase.from('departments').select('id, name').order('name', { ascending: true })
+      ]);
+      this.initCharts(chartTasks || [], chartDepts || []);
     } catch (err) {
       console.warn('Dashboard fetch error:', err);
     }
   }
 
-  initCharts(tasks) {
+  initCharts(tasks, departments) {
     if (!window.Chart) return;
 
-    // 1. Department Task Workload Bar Chart
+    // Replace a chart with an honest message when there is nothing to plot
+    const emptyState = (canvasId, message) => {
+      const canvas = document.getElementById(canvasId);
+      if (canvas?.parentElement) {
+        canvas.parentElement.innerHTML = `<div class="empty-state" style="border:none; padding: 40px 0;"><div class="empty-state-desc">${message}</div></div>`;
+      }
+    };
+
+    // 1. Active deliverables per department (real counts)
+    const active = tasks.filter(t => !['completed', 'approved', 'cancelled'].includes(t.status));
     const deptCtx = document.getElementById('deptWorkloadChart')?.getContext('2d');
     if (deptCtx) {
-      new window.Chart(deptCtx, {
-        type: 'bar',
-        data: {
-          labels: ['Branding', 'BTL', 'Digital Mktg', 'Media Prod', 'Web Dev'],
-          datasets: [{
-            label: 'Active Deliverables',
-            data: [3, 2, 4, 3, 2],
-            backgroundColor: [
-              'rgba(226, 77, 71, 0.7)',
-              'rgba(215, 159, 62, 0.7)',
-              'rgba(251, 186, 72, 0.7)',
-              'rgba(80, 185, 227, 0.7)',
-              'rgba(152, 214, 234, 0.62)'
-            ],
-            borderColor: [
-              '#E24D47', '#D79F3E', '#FBBA48', '#50B9E3', '#98D6EA'
-            ],
-            borderWidth: 1,
-            borderRadius: 6
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false }
+      const rows = departments
+        .map(d => ({ name: d.name, count: active.filter(t => t.department_id === d.id).length }))
+        .filter(r => r.count > 0);
+      const unassigned = active.filter(t => !t.department_id).length;
+      if (unassigned > 0) rows.push({ name: 'No department', count: unassigned });
+
+      if (rows.length === 0) {
+        emptyState('deptWorkloadChart', 'No active deliverables yet.');
+      } else {
+        const palette = ['226, 77, 71', '215, 159, 62', '251, 186, 72', '80, 185, 227', '152, 214, 234', '224, 27, 40', '18, 171, 227'];
+        new window.Chart(deptCtx, {
+          type: 'bar',
+          data: {
+            labels: rows.map(r => r.name),
+            datasets: [{
+              label: 'Active Deliverables',
+              data: rows.map(r => r.count),
+              backgroundColor: rows.map((_, i) => `rgba(${palette[i % palette.length]}, 0.72)`),
+              borderColor: rows.map((_, i) => `rgb(${palette[i % palette.length]})`),
+              borderWidth: 1,
+              borderRadius: 6
+            }]
           },
-          scales: {
-            y: {
-              beginAtZero: true,
-              ticks: { color: '#a6a9b3', font: { size: 11 } },
-              grid: { color: 'rgba(255, 255, 255, 0.05)' }
-            },
-            x: {
-              ticks: { color: '#a6a9b3', font: { size: 11 } },
-              grid: { display: false }
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              y: { beginAtZero: true, ticks: { color: '#525b68', font: { size: 11 }, precision: 0 }, grid: { color: 'rgba(24, 48, 72, 0.08)' } },
+              x: { ticks: { color: '#525b68', font: { size: 11 } }, grid: { display: false } }
             }
           }
-        }
-      });
+        });
+      }
     }
 
-    // 2. Status Donut Chart
+    // 2. Status donut (real counts)
     const statusCtx = document.getElementById('statusDonutChart')?.getContext('2d');
     if (statusCtx) {
-      new window.Chart(statusCtx, {
-        type: 'doughnut',
-        data: {
-          labels: ['To Do', 'In Production', 'Under Review', 'Completed'],
-          datasets: [{
-            data: [4, 5, 2, 6],
-            backgroundColor: [
-              '#3b3e48',
-              '#12ABE3',
-              '#FBBA48',
-              '#22C58B'
-            ],
-            borderWidth: 0
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { color: '#cdd0d7', font: { size: 11 } }
-            }
+      const counts = [
+        tasks.filter(t => t.status === 'todo' || t.status === 'backlog').length,
+        tasks.filter(t => t.status === 'in_progress' || t.status === 'changes_requested').length,
+        tasks.filter(t => t.status === 'under_review').length,
+        tasks.filter(t => t.status === 'completed' || t.status === 'approved').length
+      ];
+      if (counts.every(c => c === 0)) {
+        emptyState('statusDonutChart', 'No tasks yet.');
+      } else {
+        new window.Chart(statusCtx, {
+          type: 'doughnut',
+          data: {
+            labels: ['To Do', 'In Production', 'Under Review', 'Completed'],
+            datasets: [{ data: counts, backgroundColor: ['#bccad6', '#12ABE3', '#FBBA48', '#22C58B'], borderWidth: 0 }]
           },
-          cutout: '70%'
-        }
-      });
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { color: '#38424f', font: { size: 11 } } } },
+            cutout: '70%'
+          }
+        });
+      }
     }
   }
 }

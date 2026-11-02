@@ -6,6 +6,7 @@
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
+import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
 
 export class ProjectsModule {
@@ -93,10 +94,14 @@ export class ProjectsModule {
       const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : p.progress || 0;
 
       return `
-        <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+        <div class="card entity-card" style="display: flex; flex-direction: column; justify-content: space-between;">
           <div class="card-header">
             <div>
               <span class="badge badge-indigo font-mono text-2xs">${escapeHTML(p.code || 'PRJ')}</span>
+              <span class="card-actions">
+                ${this.canEdit(p) ? `<button type="button" class="card-act card-act-edit" data-id="${p.id}" title="Edit project" aria-label="Edit project"><i data-lucide="pencil"></i></button>` : ''}
+                ${Permissions.isAdmin() ? `<button type="button" class="card-act card-act-delete" data-id="${p.id}" title="Delete project" aria-label="Delete project"><i data-lucide="trash-2"></i></button>` : ''}
+              </span>
               <div class="card-title" style="margin-top: 4px;">${escapeHTML(p.name)}</div>
               <div class="card-subtitle">Client: ${escapeHTML(p.client?.company_name || p.client?.name || 'No client assigned')}</div>
             </div>
@@ -119,15 +124,15 @@ export class ProjectsModule {
             <div class="glass-panel" style="padding: var(--space-2-5); display: flex; justify-content: space-between; font-size: var(--text-2xs); background: var(--studio-950);">
               <div>
                 <span class="text-dim block">Project Manager</span>
-                <strong class="text-white">${escapeHTML(p.project_manager?.full_name || 'Nour El-Din')}</strong>
+                <strong class="text-white">${escapeHTML(p.project_manager?.full_name || 'Not assigned')}</strong>
               </div>
               <div>
                 <span class="text-dim block">Budget</span>
-                <strong class="font-mono text-emerald">${formatCurrency(p.budget || 35000)}</strong>
+                <strong class="font-mono text-emerald">${formatCurrency(p.budget || 0)}</strong>
               </div>
               <div>
                 <span class="text-dim block">Launch Date</span>
-                <strong class="font-mono text-white">${formatDate(p.deadline || '2026-12-01')}</strong>
+                <strong class="font-mono text-white">${(p.deadline ? formatDate(p.deadline) : 'Not set')}</strong>
               </div>
             </div>
           </div>
@@ -140,6 +145,57 @@ export class ProjectsModule {
         </div>
       `;
     }).join('');
+
+    container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
+    container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteProject(b.dataset.id)));
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  canEdit(p) {
+    const me = this.app.currentUser.id;
+    return Permissions.isAdmin() || p.project_manager_id === me || p.created_by === me;
+  }
+
+  openEditDialog(id) {
+    const p = this.projects.find(x => x.id === id);
+    if (!p) return;
+    formDialog({
+      title: `Edit ${p.name}`,
+      subtitle: 'Change the project name, code, status, budget, deadline or description.',
+      fields: [
+        { name: 'name', label: 'Project name', required: true, value: p.name, maxlength: 160 },
+        { name: 'code', label: 'Code', required: true, half: true, value: p.code, maxlength: 20 },
+        { name: 'status', label: 'Status', type: 'select', half: true, value: p.status, options: [
+          { value: 'planning', label: 'Planning' }, { value: 'active', label: 'Active' }, { value: 'on_hold', label: 'On hold' },
+          { value: 'under_review', label: 'Under review' }, { value: 'completed', label: 'Completed' }, { value: 'cancelled', label: 'Cancelled' }] },
+        { name: 'budget', label: 'Budget', type: 'number', half: true, min: 0, value: p.budget ?? 0 },
+        { name: 'deadline', label: 'Deadline', type: 'date', half: true, value: (p.deadline || '').slice(0, 10) },
+        { name: 'description', label: 'Description', type: 'textarea', value: p.description || '', rows: 3 }
+      ],
+      onSubmit: async (v) => {
+        const { data, error } = await getSupabase().from('projects')
+          .update({ name: v.name, code: v.code, status: v.status, budget: v.budget ?? 0, deadline: v.deadline, description: v.description })
+          .eq('id', id).select('id');
+        if (error) throw new Error(error.code === '23505' ? 'That project code is already used.' : error.message);
+        if (!data?.length) throw new Error('You do not have permission to edit this project.');
+        Toast.success('Project updated', 'Saved');
+        await this.loadProjects();
+      }
+    });
+  }
+
+  async deleteProject(id) {
+    const p = this.projects.find(x => x.id === id);
+    if (!p) return;
+    const ok = await confirmDialog({
+      title: 'Delete this project?',
+      message: `"${p.name}" will be removed. Its tasks are kept but become general studio work.`,
+      confirmLabel: 'Delete project', danger: true });
+    if (!ok) return;
+    const { data, error } = await getSupabase().from('projects').delete().eq('id', id).select('id');
+    if (error || !data?.length) { Toast.error(error?.message || 'Only an administrator can delete projects.', 'Delete refused'); return; }
+    Toast.success('Project deleted', 'Deleted');
+    await this.loadProjects();
   }
 
   async openCreateProjectModal() {

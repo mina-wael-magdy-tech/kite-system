@@ -5,6 +5,8 @@
 
 import { getSupabase } from '../../supabase-client.js';
 import { Toast } from '../../services/toast-service.js';
+import { Permissions } from '../../permissions/permission-service.js';
+import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
 
 export class CampaignsModule {
@@ -86,9 +88,13 @@ export class CampaignsModule {
     }
 
     container.innerHTML = displayCampaigns.map(c => `
-      <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">
+      <div class="card entity-card" style="display: flex; flex-direction: column; justify-content: space-between;">
         <div class="card-header">
           <div>
+            <span class="card-actions" style="float: right;">
+              ${this.canEdit(c) ? `<button type="button" class="card-act card-act-edit" data-id="${c.id}" title="Edit campaign" aria-label="Edit campaign"><i data-lucide="pencil"></i></button>` : ''}
+              ${Permissions.isAdmin() ? `<button type="button" class="card-act card-act-delete" data-id="${c.id}" title="Delete campaign" aria-label="Delete campaign"><i data-lucide="trash-2"></i></button>` : ''}
+            </span>
             <span class="badge badge-indigo font-bold">${escapeHTML(c.client?.company_name || c.client?.name || 'No client assigned')}</span>
             <div class="card-title" style="margin-top: 6px;">${escapeHTML(c.name)}</div>
           </div>
@@ -113,6 +119,55 @@ export class CampaignsModule {
         </div>
       </div>
     `).join('');
+
+    container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
+    container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteCampaign(b.dataset.id)));
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  canEdit(c) {
+    const me = this.app.currentUser.id;
+    return Permissions.isAdmin() || c.manager_id === me || c.created_by === me;
+  }
+
+  async openEditDialog(id) {
+    const c = this.campaigns.find(x => x.id === id);
+    if (!c) return;
+    const { data: clientRows } = await getSupabase().from('clients').select('id, company_name').order('company_name', { ascending: true });
+    formDialog({
+      title: `Edit ${c.name}`,
+      subtitle: 'Change the campaign name, client, status, launch date or objective.',
+      fields: [
+        { name: 'name', label: 'Campaign name', required: true, value: c.name, maxlength: 160 },
+        { name: 'client_id', label: 'Client', type: 'select', half: true, value: c.client_id || '', options: [
+          { value: '', label: 'No client (internal)' }, ...(clientRows || []).map(r => ({ value: r.id, label: r.company_name }))] },
+        { name: 'status', label: 'Status', type: 'select', half: true, value: c.status, options: [
+          { value: 'planning', label: 'Planning' }, { value: 'active', label: 'Active' }, { value: 'on_hold', label: 'On hold' },
+          { value: 'completed', label: 'Completed' }, { value: 'cancelled', label: 'Cancelled' }] },
+        { name: 'end_date', label: 'Target launch date', type: 'date', half: true, value: (c.end_date || '').slice(0, 10) },
+        { name: 'description', label: 'Objective', type: 'textarea', value: c.description || '', rows: 3 }
+      ],
+      onSubmit: async (v) => {
+        const { data, error } = await getSupabase().from('campaigns')
+          .update({ name: v.name, client_id: v.client_id, status: v.status, end_date: v.end_date, description: v.description })
+          .eq('id', id).select('id');
+        if (error) throw new Error(error.message);
+        if (!data?.length) throw new Error('You do not have permission to edit this campaign.');
+        Toast.success('Campaign updated', 'Saved');
+        await this.loadCampaigns();
+      }
+    });
+  }
+
+  async deleteCampaign(id) {
+    const c = this.campaigns.find(x => x.id === id);
+    if (!c) return;
+    const ok = await confirmDialog({ title: 'Delete this campaign?', message: `"${c.name}" will be removed. Linked tasks and projects are kept.`, confirmLabel: 'Delete campaign', danger: true });
+    if (!ok) return;
+    const { data, error } = await getSupabase().from('campaigns').delete().eq('id', id).select('id');
+    if (error || !data?.length) { Toast.error(error?.message || 'Only an administrator can delete campaigns.', 'Delete refused'); return; }
+    Toast.success('Campaign deleted', 'Deleted');
+    await this.loadCampaigns();
   }
 
   async openCampaignModal() {

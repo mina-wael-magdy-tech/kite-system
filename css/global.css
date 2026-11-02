@@ -25,7 +25,8 @@ h1, h2, h3, h4 {
 
 body {
   font-family: var(--font-sans);
-  background-color: var(--bg-page);
+  background: var(--bg-app);
+  background-attachment: fixed;
   color: var(--text-main);
   min-height: 100vh;
   line-height: 1.5;
@@ -80,7 +81,7 @@ body {
 .font-bold      { font-weight: 700; }
 .font-extrabold { font-weight: 800; }
 
-.text-white   { color: #ffffff; }
+.text-white   { color: var(--text-strong); }
 .text-muted   { color: var(--text-muted); }
 .text-dim     { color: var(--text-dim); }
 .text-primary { color: var(--color-primary-light); }
@@ -168,7 +169,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {
 }
 
 .glass-panel-subtle {
-  background: rgba(17, 18, 21, 0.78);
+  background: var(--surface-translucent);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
