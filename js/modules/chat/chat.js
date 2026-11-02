@@ -143,7 +143,7 @@ export class ChatModule {
       this.activeChannelId = this.channels[0].id;
 
       // 2. Fetch employees for handoff dropdown
-      const { data: emps } = await supabase.from('profiles').select('id, full_name, job_title, department_id, departments(name)');
+      const { data: emps } = await supabase.from('profiles').select('id, full_name, job_title, department_id, departments!profiles_department_id_fkey(name)');
       this.employees = emps || [];
 
       const select = document.getElementById('quickTaskAssignee');

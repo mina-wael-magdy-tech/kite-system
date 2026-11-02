@@ -175,7 +175,7 @@ export class TasksModule {
           *,
           profiles!tasks_assigned_to_fkey(id, full_name, job_title),
           creator:profiles!tasks_created_by_fkey(id, full_name),
-          departments(id, name, code),
+          departments!tasks_department_id_fkey(id, name, code),
           projects(id, name, code)
         `)
         .order('created_at', { ascending: false });
@@ -516,7 +516,7 @@ export class TasksModule {
 
     const { data: comments } = await supabase
       .from('task_comments')
-      .select('*, profiles(full_name)')
+      .select('*, profiles!task_comments_user_id_fkey(full_name)')
       .eq('task_id', taskId)
       .order('created_at', { ascending: true });
 
@@ -548,7 +548,7 @@ export class TasksModule {
     const supabase = getSupabase();
     const { data: employees } = await supabase
       .from('profiles')
-      .select('id, full_name, job_title, department_id, departments(name)')
+      .select('id, full_name, job_title, department_id, departments!profiles_department_id_fkey(name)')
       .eq('employment_status', 'active');
 
     modalDialog.style.maxWidth = '580px';

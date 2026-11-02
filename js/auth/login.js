@@ -12,6 +12,13 @@ import { Toast } from '../services/toast-service.js';
 redirectIfLoggedIn();
 
 const loginForm = document.getElementById('loginForm');
+
+// Message left by the app guard (e.g. account could not be loaded)
+const pendingLoginError = sessionStorage.getItem('pulse_login_error');
+if (pendingLoginError) {
+  sessionStorage.removeItem('pulse_login_error');
+  window.addEventListener('DOMContentLoaded', () => showAlert(pendingLoginError));
+}
 const emailInput = document.getElementById('emailInput');
 const passwordInput = document.getElementById('passwordInput');
 const togglePasswordBtn = document.getElementById('togglePasswordBtn');

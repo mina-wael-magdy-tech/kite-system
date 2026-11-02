@@ -42,7 +42,7 @@ export class PermissionService {
       // 3. Fetch user departments
       const { data: userDepts } = await supabase
         .from('user_departments')
-        .select('department_id, is_primary, departments(id, name, code)')
+        .select('department_id, is_primary, departments!user_departments_department_id_fkey(id, name, code)')
         .eq('user_id', userId);
 
       this.departments = (userDepts || [])

@@ -75,11 +75,14 @@ class AuthService {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('profiles')
-      .select(`${CONFIG.PROFILE_COLUMNS}, departments(id, name, code)`)
+      .select(`${CONFIG.PROFILE_COLUMNS}, departments!profiles_department_id_fkey(id, name, code)`)
       .eq('id', user.id)
       .single();
 
-    if (error) return null;
+    if (error) {
+      console.error('Could not load profile:', error.message);
+      return null;
+    }
     return data;
   }
 }

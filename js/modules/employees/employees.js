@@ -108,8 +108,8 @@ export class EmployeesModule {
         .from('profiles')
         .select(`
           ${CONFIG.PROFILE_COLUMNS},
-          departments(id, name, code),
-          user_roles(roles(id, name, display_name))
+          departments!profiles_department_id_fkey(id, name, code),
+          user_roles!user_roles_user_id_fkey(roles(id, name, display_name))
         `)
         .order('created_at', { ascending: true });
 

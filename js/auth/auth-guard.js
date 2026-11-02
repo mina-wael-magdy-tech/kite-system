@@ -16,7 +16,9 @@ export async function protectPage() {
   try {
     const profile = await Auth.getCurrentProfile();
     if (!profile) {
-      window.location.href = 'login.html';
+      // A session without a loadable profile must NOT bounce to login (login would bounce back: loop).
+      sessionStorage.setItem('pulse_login_error', 'Your account could not be loaded. Please sign in again or contact your administrator.');
+      await Auth.signOut();
       return null;
     }
 
@@ -28,14 +30,20 @@ export async function protectPage() {
 
     return profile;
   } catch (e) {
-    window.location.href = 'login.html';
+    console.error('protectPage failed:', e);
+    sessionStorage.setItem('pulse_login_error', 'Could not verify your session. Please sign in again.');
+    await Auth.signOut();
     return null;
   }
 }
 
 export async function redirectIfLoggedIn() {
   const session = await getSession();
-  if (session) {
+  if (!session) return;
+
+  // Only forward to the app when the account can actually be loaded; otherwise stay on login.
+  const profile = await Auth.getCurrentProfile();
+  if (profile && !['suspended', 'inactive'].includes(profile.employment_status)) {
     window.location.href = 'index.html';
   }
 }

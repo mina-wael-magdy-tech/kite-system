@@ -97,7 +97,7 @@ export class ReportsModule {
     try {
       const { data: tasks } = await supabase
         .from('tasks')
-        .select('*, profiles(full_name)')
+        .select('*, profiles!tasks_assigned_to_fkey(full_name)')
         .order('created_at', { ascending: false });
 
       this.tasks = tasks || [];

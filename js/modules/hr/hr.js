@@ -128,7 +128,7 @@ export class HrModule {
         .from('leave_requests')
         .select(`
           *,
-          profiles(full_name),
+          profiles!leave_requests_user_id_fkey(full_name),
           leave_types(name)
         `)
         .order('created_at', { ascending: false });

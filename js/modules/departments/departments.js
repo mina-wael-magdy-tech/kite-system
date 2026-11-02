@@ -57,8 +57,8 @@ export class DepartmentsModule {
         .from('departments')
         .select(`
           *,
-          manager:profiles!departments_manager_id_fkey(full_name, email),
-          profiles(id)
+          manager:profiles!fk_dept_manager(full_name, email),
+          profiles!profiles_department_id_fkey(id)
         `)
         .order('name', { ascending: true });
 
@@ -84,7 +84,7 @@ export class DepartmentsModule {
     ];
 
     container.innerHTML = displayDepts.map(d => {
-      const memberCount = d.profiles ? d.profiles.length : 1;
+      const memberCount = d.profiles ? d.profiles.length : 0;
 
       return `
         <div class="card" style="display: flex; flex-direction: column; justify-content: space-between;">

@@ -136,8 +136,8 @@ export class FinanceModule {
         .from('expenses')
         .select(`
           *,
-          profiles(full_name),
-          departments(name)
+          profiles!expenses_submitted_by_fkey(full_name),
+          departments!expenses_department_id_fkey(name)
         `)
         .order('created_at', { ascending: false });
 

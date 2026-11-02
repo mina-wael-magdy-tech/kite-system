@@ -177,7 +177,7 @@ export class DashboardModule {
       // 1. Fetch Task Counts & Recent Tasks
       const { data: tasks } = await supabase
         .from('tasks')
-        .select('*, profiles!tasks_assigned_to_fkey(full_name, department_id, departments(name))')
+        .select('*, profiles!tasks_assigned_to_fkey(full_name, department_id, departments!profiles_department_id_fkey(name))')
         .order('created_at', { ascending: false })
         .limit(20);
 

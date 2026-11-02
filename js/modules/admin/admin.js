@@ -120,13 +120,13 @@ export class AdminModule {
 
     try {
       // 1. Fetch Employees
-      const { data: emps } = await supabase.from('profiles').select('id, full_name, departments(name)');
+      const { data: emps } = await supabase.from('profiles').select('id, full_name, departments!profiles_department_id_fkey(name)');
       this.employees = emps || [];
 
       // 2. Fetch All Tasks
       const { data: tasks } = await supabase
         .from('tasks')
-        .select('id, task_number, title, status, assigned_to, profiles(full_name)')
+        .select('id, task_number, title, status, assigned_to, profiles!tasks_assigned_to_fkey(full_name)')
         .order('created_at', { ascending: false });
 
       this.tasks = tasks || [];

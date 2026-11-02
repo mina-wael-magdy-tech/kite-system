@@ -56,7 +56,7 @@ export class CampaignsModule {
         .select(`
           *,
           client:clients(name, company_name),
-          tasks(id, status, department_id, departments(name))
+          tasks(id, status, department_id, departments!tasks_department_id_fkey(name))
         `)
         .order('created_at', { ascending: false });
 

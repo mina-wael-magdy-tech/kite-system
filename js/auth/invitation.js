@@ -34,7 +34,7 @@ async function checkInviteSession() {
   if (user) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('full_name, job_title, departments(name)')
+      .select('full_name, job_title, departments!profiles_department_id_fkey(name)')
       .eq('id', user.id)
       .single();
 
