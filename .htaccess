@@ -1,0 +1,39 @@
+# PULSE STUDIO OS — Apache (Hostinger etc.) security headers.
+# Requires mod_headers. Nginx / Netlify / Cloudflare equivalents: docs/deployment.md
+
+<IfModule mod_headers.c>
+  # Content-Security-Policy mirrors the <meta> tag in each page and adds frame-ancestors,
+  # which only works as an HTTP header. Edit the connect-src host to your Supabase project
+  # and the frame-ancestors list to the origins allowed to embed the app.
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://sites.google.com"
+
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+  Header unset X-Frame-Options
+  Header unset X-Powered-By
+
+  # Never cache the app shell or config; vendor libraries are versioned and may be cached.
+  <FilesMatch "\.(html|js)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+  <FilesMatch "^env\.js$">
+    Header set Cache-Control "no-store"
+  </FilesMatch>
+</IfModule>
+
+# Redirect all HTTP to HTTPS
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTPS} !=on
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+</IfModule>
+
+# Don't expose the backend source or repo metadata if the whole folder is uploaded
+RedirectMatch 404 ^/(supabase|docs|\.git)(/|$)
+<FilesMatch "\.(sql|toml|md|ts)$">
+  Require all denied
+</FilesMatch>
+
+Options -Indexes

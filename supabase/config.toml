@@ -1,0 +1,54 @@
+# PULSE STUDIO OS — Supabase project configuration.
+#
+# Local development:  supabase start
+# Production:         supabase config push     (applies the [auth] section below to the linked project)
+#
+# Replace project_id and the URLs with your own before pushing.
+
+project_id = "pulse-studio-os"
+
+[auth]
+enabled = true
+# Where invitation / reset links send people. Must be your real HTTPS origin.
+site_url = "https://os.example.com"
+additional_redirect_urls = ["https://os.example.com/invitation.html", "https://os.example.com/reset-password.html"]
+
+# CRITICAL: employees are invited by an administrator. Nobody may self-register.
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+# Sessions
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+
+# Passwords (the app and Edge Functions enforce the same 12-character policy)
+minimum_password_length = 12
+password_requirements = "lower_upper_letters_digits"
+
+[auth.email]
+enable_signup = false
+enable_confirmations = true
+double_confirm_changes = true
+secure_password_change = true
+max_frequency = "60s"
+
+[auth.rate_limit]
+# Per-hour limits per IP; tune to your office size.
+email_sent = 30
+sign_in_sign_ups = 60
+token_refresh = 150
+
+# Every function authenticates the caller itself AND is protected by the gateway JWT check.
+[functions.workflow]
+verify_jwt = true
+[functions.invite-employee]
+verify_jwt = true
+[functions.accept-invitation]
+verify_jwt = true
+# setup-admin is a one-time bootstrap guarded by SETUP_TOKEN. Delete it after first use.
+[functions.setup-admin]
+verify_jwt = true
+
+[storage]
+file_size_limit = "25MiB"

@@ -1,0 +1,132 @@
+/**
+ * PULSE STUDIO OS — Responsive Styles & Iframe Support
+ * Breakpoints for tablet, mobile, and Google Sites iframe embedding.
+ */
+
+@import url('tokens.css');
+
+/* ====================================================================
+   DESKTOP & GENERAL CONSTRAINTS
+   ==================================================================== */
+@media (max-width: 1200px) {
+  .dashboard-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ====================================================================
+   TABLET BREAKPOINT (max-width: 992px)
+   ==================================================================== */
+@media (max-width: 992px) {
+  .app-sidebar {
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-xl);
+  }
+
+  .app-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay.active {
+    display: block;
+  }
+
+  .app-main {
+    margin-left: 0 !important;
+  }
+
+  .sidebar-mobile-toggle {
+    display: flex;
+  }
+
+  .chat-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .chat-sidebar {
+    height: 300px;
+  }
+
+  .chat-window {
+    height: 550px;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ====================================================================
+   MOBILE BREAKPOINT (max-width: 640px)
+   ==================================================================== */
+@media (max-width: 640px) {
+  .app-topbar {
+    padding: 0 var(--space-3);
+  }
+
+  .topbar-search {
+    display: none;
+  }
+
+  .app-content {
+    padding: var(--space-3);
+  }
+
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kanban-board {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-dialog {
+    max-height: 96vh;
+    border-radius: var(--radius-xl);
+    margin: var(--space-2);
+  }
+
+  .data-table th, .data-table td {
+    padding: var(--space-2) var(--space-2-5);
+  }
+
+  .stat-card-value {
+    font-size: var(--text-xl);
+  }
+}
+
+/* ====================================================================
+   GOOGLE SITES / IFRAME EMBEDDING OPTIMIZATION
+   ==================================================================== */
+/* When rendered in iframe or embedded in Google Sites portal */
+body.in-iframe {
+  background-color: var(--studio-950);
+}
+
+body.in-iframe .app-topbar {
+  border-radius: 0;
+}
+
+body.in-iframe .app-wrapper {
+  overflow-x: hidden;
+}
+
+/* Print Styles */
+@media print {
+  .app-sidebar, .app-topbar, .toast-container, .btn-primary {
+    display: none !important;
+  }
+
+  .app-main {
+    margin-left: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .card, .data-table {
+    border: 1px solid #cccccc !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}

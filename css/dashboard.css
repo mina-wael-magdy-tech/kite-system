@@ -1,0 +1,295 @@
+/**
+ * PULSE STUDIO OS — Dashboard & Task Management Styles
+ * Kanban board, task cards, project grids, metrics, chat window, and org tree layout.
+ */
+
+@import url('tokens.css');
+
+/* ====================================================================
+   DASHBOARD KPI GRIDS & CHARTS
+   ==================================================================== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.dashboard-charts-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-5);
+}
+
+.chart-card {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-wrapper {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 240px;
+}
+
+/* ====================================================================
+   KANBAN BOARD WORKSPACE
+   ==================================================================== */
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: var(--space-4);
+}
+
+.kanban-column {
+  background-color: var(--studio-900);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  min-height: 480px;
+  overflow: hidden;
+}
+
+.kanban-column-header {
+  padding: var(--space-3-5) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: rgba(9, 10, 15, 0.4);
+}
+
+.kanban-column-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.kanban-column-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+.kanban-tasks-list {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 200px;
+}
+
+/* Task Card in Kanban */
+.task-card {
+  background-color: var(--studio-950);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2-5);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  position: relative;
+}
+
+.task-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.task-card-meta-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.task-card-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.35;
+}
+
+.task-card-desc {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.task-card-route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-2xs);
+  color: var(--text-dim);
+  padding-top: var(--space-1);
+}
+
+.task-card-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 4px;
+  background-color: var(--studio-800);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-emerald) 100%);
+  border-radius: var(--radius-full);
+}
+
+.task-card-footer {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-2xs);
+}
+
+/* ====================================================================
+   CHAT & MESSAGING MODULE
+   ==================================================================== */
+.chat-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: var(--space-4);
+  height: calc(100vh - 160px);
+  min-height: 600px;
+}
+
+.chat-sidebar {
+  background-color: var(--studio-900);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-window {
+  background-color: var(--studio-900);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background-color: rgba(9, 10, 15, 0.4);
+}
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 75%;
+}
+
+.chat-msg.msg-outgoing {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat-msg.msg-incoming {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.chat-msg-bubble {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xl);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.msg-outgoing .chat-msg-bubble {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: #ffffff;
+  border-bottom-right-radius: var(--radius-xs);
+}
+
+.msg-incoming .chat-msg-bubble {
+  background-color: var(--studio-850);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-bottom-left-radius: var(--radius-xs);
+}
+
+/* Quick Task Card inside Chat */
+.chat-task-card {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background-color: rgba(9, 10, 15, 0.7);
+  border: 1px solid var(--border-medium);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+}
+
+/* ====================================================================
+   ORGANIZATIONAL TREE & MATRIX
+   ==================================================================== */
+.org-tree-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-6) 0;
+  gap: var(--space-4);
+}
+
+.org-node {
+  border-radius: var(--radius-xl);
+  padding: var(--space-4) var(--space-5);
+  background: var(--studio-900);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 480px;
+}
+
+.org-node.admin-node {
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.12) 0%, var(--studio-900) 100%);
+  border-color: var(--color-amber-border);
+}
+
+.org-node.manager-node {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.12) 0%, var(--studio-900) 100%);
+  border-color: var(--color-primary-border);
+}
+
+.tree-connector-line {
+  width: 2px;
+  height: 28px;
+  background: linear-gradient(180deg, #6366f1 0%, #38bdf8 100%);
+}
