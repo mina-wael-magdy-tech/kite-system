@@ -1,0 +1,56 @@
+/**
+ * KITE SYSTEM — Mobile app feel (installed PWA and phone browsers)
+ * Bottom tab bar, safe-area insets, no rubber-banding, comfortable touch targets.
+ */
+
+html { -webkit-tap-highlight-color: transparent; }
+body { overscroll-behavior-y: none; }
+
+/* installed app: respect notches / home indicator */
+.app-topbar { padding-top: env(safe-area-inset-top); height: calc(64px + env(safe-area-inset-top)); }
+.app-sidebar { padding-top: env(safe-area-inset-top); }
+
+.bottom-nav { display: none; }
+
+@media (max-width: 860px) {
+  .app-content { padding: var(--space-4) var(--space-3) calc(84px + env(safe-area-inset-bottom)); }
+  .topbar-search { display: none; }
+  /* phones: show only the current page name in the top bar */
+  .breadcrumb-list li:not(:last-child), .breadcrumb-separator { display: none; }
+  .breadcrumb-list li:last-child { white-space: nowrap; font-size: var(--text-sm); }
+
+  .bottom-nav {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: calc(var(--z-header) + 5);
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border-medium); box-shadow: 0 -6px 20px rgba(24, 48, 72, 0.08);
+  }
+  .bottom-nav a, .bottom-nav button {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    padding: 6px 2px; border-radius: var(--radius-lg); min-height: 52px;
+    font-size: 10.5px; font-weight: 600; color: var(--text-dim); cursor: pointer; transition: color var(--transition-fast), background var(--transition-fast);
+  }
+  .bottom-nav svg { width: 22px; height: 22px; }
+  .bottom-nav a.active { color: var(--kite-red-600); background: var(--tint-red-soft); }
+
+  /* modals become bottom sheets */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal-dialog { max-width: 100% !important; width: 100%; border-radius: var(--radius-2xl) var(--radius-2xl) 0 0; max-height: 92vh; padding-bottom: env(safe-area-inset-bottom); }
+  #notificationPanel { max-width: 100% !important; }
+
+  /* bigger touch targets */
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 36px; }
+  .form-control { min-height: 44px; font-size: 16px; } /* 16px stops iOS zooming into inputs */
+  .kanban-board { grid-auto-flow: column; grid-auto-columns: 82%; grid-template-columns: none; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .kanban-column { scroll-snap-align: start; }
+  .card-actions { opacity: 1; }
+  .page-container { gap: var(--space-4); }
+}
+
+/* running as an installed app */
+@media (display-mode: standalone) {
+  body { user-select: none; -webkit-user-select: none; }
+  input, textarea, [contenteditable] { user-select: text; -webkit-user-select: text; }
+}

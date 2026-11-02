@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Offline — Kite System</title>
+  <link rel="icon" href="assets/favicon-32.png" />
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/global.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/auth.css">
+</head>
+<body class="auth-page">
+  <div class="auth-card" style="text-align: center;">
+    <div class="auth-brand">
+      <img src="assets/logo-vertical-dark.png" alt="Kite Design Studio" width="112" height="121" />
+      <h1 class="auth-title">You're offline</h1>
+      <p class="auth-sub">Kite System needs a connection to load your latest tasks and messages. Check your network, then try again.</p>
+    </div>
+    <button type="button" id="retryBtn" class="btn btn-primary" style="width: 100%; height: 42px;">Try again</button>
+    <p class="text-2xs text-dim" id="statusLine" style="margin-top: var(--space-4);">Waiting for connection…</p>
+  </div>
+  <script src="js/offline.js"></script>
+</body>
+</html>

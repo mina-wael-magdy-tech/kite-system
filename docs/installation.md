@@ -17,6 +17,7 @@ Apply the migrations **in order** (CLI: `supabase db push`, or paste each into t
 | `002_rls_policies.sql` | Privileges, access-control predicates, RLS policies |
 | `003_updated_at.sql` | `updated_at` timestamp trigger (the only trigger) |
 | `004_storage.sql` | Private `task-attachments` bucket + storage policies |
+| `005_push_subscriptions.sql` | Device subscriptions for push notifications (server-written) |
 | `seed.sql` | Roles, departments, leave types, default channels, company info |
 
 The migrations are written for a **fresh** project. Do not edit them after they have been applied; add new numbered files instead.

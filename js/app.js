@@ -8,6 +8,10 @@ import { Auth } from './auth/auth-service.js';
 import { Permissions } from './permissions/permission-service.js';
 import { Notifications } from './services/notification-service.js';
 import { AppRouter } from './router.js';
+import { PWA } from './pwa.js';
+import { Push } from './services/push-service.js';
+import { Toast } from './services/toast-service.js';
+import { infoDialog } from './ui/dialogs.js';
 import { getInitials, getAccentHex, escapeHTML } from './utils/helpers.js';
 
 // Import All 14 Core Modules
@@ -24,6 +28,7 @@ import { DocumentsModule } from './modules/documents/documents.js';
 import { ChatModule } from './modules/chat/chat.js';
 import { ReportsModule } from './modules/reports/reports.js';
 import { AdminModule } from './modules/admin/admin.js';
+import { CalendarModule } from './modules/calendar/calendar.js';
 
 class PulseStudioApp {
   constructor() {
@@ -59,6 +64,7 @@ class PulseStudioApp {
 
     // 6. Setup Shell Event Handlers
     this.setupEventListeners();
+    this.setupInstallAndPush();
 
     // 7. Mount Router to Content Container
     const contentContainer = document.getElementById('mainContentContainer');
@@ -128,6 +134,12 @@ class PulseStudioApp {
       title: 'Task Management',
       breadcrumbs: ['Agency Workspace', 'Tasks & Sprints'],
       render: (container, query) => new TasksModule(this).render(container, query)
+    });
+
+    AppRouter.register('calendar', {
+      title: 'Calendar & Timeline',
+      breadcrumbs: ['Agency Workspace', 'Calendar & Timeline'],
+      render: (container, query) => new CalendarModule(this).render(container, query)
     });
 
     AppRouter.register('projects', {
@@ -263,7 +275,85 @@ class PulseStudioApp {
     });
   }
 
+  // ====================================================================
+  // PWA: install button + per-device push notification card
+  // ====================================================================
+  setupInstallAndPush() {
+    Push.sync();
+
+    const installBtn = document.getElementById('installAppBtn');
+    const refreshInstall = () => {
+      installBtn?.classList.toggle('hidden', !(PWA.canPromptInstall() || PWA.needsManualInstall()));
+    };
+    refreshInstall();
+    PWA.onChange(() => { refreshInstall(); this.renderPushCard(); });
+    installBtn?.addEventListener('click', () => this.handleInstall());
+
+    // "More" on the phone tab bar opens the full navigation drawer
+    document.getElementById('bottomMoreBtn')?.addEventListener('click', () => {
+      document.getElementById('appSidebar')?.classList.add('mobile-open');
+      document.getElementById('sidebarOverlay')?.classList.add('active');
+    });
+    this.renderPushCard();
+  }
+
+  async handleInstall() {
+    if (PWA.canPromptInstall()) { await PWA.promptInstall(); return; }
+    if (PWA.needsManualInstall()) {
+      await infoDialog({
+        title: 'Install Kite System',
+        message: 'On iPhone/iPad: tap the Share button in Safari, choose "Add to Home Screen", then open Kite from your home screen. Notifications work once it is installed.'
+      });
+    }
+  }
+
+  async renderPushCard() {
+    const card = document.getElementById('pushCard');
+    if (!card) return;
+    const state = await Push.state();
+
+    const panel = (icon, title, text, actions = '') => `
+      <div class="push-card">
+        <div class="push-card-icon"><i data-lucide="${icon}"></i></div>
+        <div style="flex: 1; min-width: 0;">
+          <div class="text-xs font-bold text-white">${title}</div>
+          <div class="text-2xs text-muted" style="margin-top: 2px; line-height: 1.45;">${text}</div>
+          ${actions ? `<div style="display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap;">${actions}</div>` : ''}
+        </div>
+      </div>`;
+
+    const html = {
+      'unsupported': '',
+      'not-configured': panel('bell-off', 'Push notifications are not set up', 'An administrator still needs to enable push on the server. In-app notifications keep working.'),
+      'needs-install': panel('smartphone', 'Get alerts on your iPhone', 'Add Kite System to your Home Screen first, then turn notifications on.',
+        '<button type="button" class="btn btn-primary btn-sm" data-push="install">How to install</button>'),
+      'denied': panel('bell-off', 'Notifications are blocked', 'Allow notifications for this site in your browser settings, then come back here.'),
+      'off': panel('bell-ring', 'Get alerts on this device', 'Be told about new tasks, approvals and deadlines even when Kite is closed.',
+        '<button type="button" class="btn btn-primary btn-sm" data-push="enable">Turn on notifications</button>'),
+      'on': panel('bell-ring', 'Notifications are on for this device', 'You will get alerts for assignments, approvals and deadlines.',
+        '<button type="button" class="btn btn-secondary btn-sm" data-push="test">Send a test</button><button type="button" class="btn btn-ghost btn-sm" data-push="disable">Turn off</button>')
+    }[state] || '';
+
+    card.innerHTML = html;
+    if (window.lucide) window.lucide.createIcons();
+
+    card.querySelectorAll('[data-push]').forEach(btn => btn.addEventListener('click', async () => {
+      const act = btn.getAttribute('data-push');
+      btn.disabled = true;
+      try {
+        if (act === 'install') await this.handleInstall();
+        if (act === 'enable') { await Push.enable(); Toast.success('You will now get notifications on this device', 'Notifications on'); }
+        if (act === 'disable') { await Push.disable(); Toast.info('Notifications are off for this device', 'Notifications off'); }
+        if (act === 'test') { await Push.sendTest(); Toast.success('Test sent: it should arrive in a moment', 'Sent'); }
+      } catch (err) {
+        Toast.error(err.message || 'Something went wrong', 'Notifications');
+      }
+      this.renderPushCard();
+    }));
+  }
+
   renderNotificationSlidePanel() {
+    this.renderPushCard();
     const feed = document.getElementById('notificationPanelFeed');
     if (!feed) return;
 

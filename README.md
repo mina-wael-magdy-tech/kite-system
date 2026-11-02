@@ -43,6 +43,7 @@ A complete, production-ready, multi-user company management operating system bui
 | **Documents Vault** | Secure digital asset management with Supabase Storage private buckets. |
 | **Role Chat & Handoffs** | Direct role-to-role messaging, studio channels, and instant task dispatch cards in chat. |
 | **Reports & Analytics** | Agency productivity metrics, priority breakdown, and one-click CSV spreadsheet export. |
+| **Calendar & Timeline** | Month, agenda and Gantt-style timeline of deadlines, launches, leave and holidays; drag a task to reschedule. |
 | **Admin Control Center** | Access-model overview, task override/reassignment, and the server-written audit log. |
 
 ---
@@ -92,5 +93,6 @@ Kite Design Studio identity lives in `css/tokens.css` (single source of truth): 
 - [Database Schema Reference](docs/database.md)
 - [Cybersecurity & Access Control](docs/security.md)
 - [Production Checklist](docs/production-checklist.md)
+- [PWA, Push Notifications & Calendar](docs/pwa-and-notifications.md)
 - [Production Deployment Guide](docs/deployment.md)
 - [Google Sites Embedding Instructions](docs/google-sites-embedding.md)

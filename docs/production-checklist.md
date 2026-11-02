@@ -36,11 +36,19 @@ For each of: admin, department manager, employee A, employee B, HR, finance, sus
 - [ ] Suspending a profile (`employment_status = 'suspended'`) blocks that user immediately, even with an open session
 - [ ] File upload works for a task you can see, fails for one you can't; download works through the signed link
 
+## 4b. PWA & push (see docs/pwa-and-notifications.md)
+- [ ] Migration `005` applied; `workflow` and `due-reminders` deployed; VAPID secrets set; `VAPID_PUBLIC_KEY` in Vercel
+- [ ] On a real phone: install the app, turn on notifications, **Send a test** arrives with the screen locked
+- [ ] Assign yourself a task from another account: a push arrives and tapping it opens Tasks
+- [ ] iPhone: installed to Home Screen before enabling notifications
+- [ ] Daily Cron job created for `due-reminders` (header `x-cron-secret`)
+- [ ] Sign out on a shared device and confirm that device no longer receives your alerts
+
 ## 5. Re-verify the access model after any change to policies
 ```bash
 cd supabase/tests
 npm install            # installs @electric-sql/pglite (in-process Postgres, no Docker needed)
-node verify-rls.mjs    # applies all migrations and runs 71 attack scenarios; expect "71 passed, 0 failed"
+node verify-rls.mjs    # applies all migrations and runs 79 attack scenarios; expect "79 passed, 0 failed"
 ```
 
 ## 6. Operations

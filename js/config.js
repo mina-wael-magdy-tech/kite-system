@@ -10,6 +10,7 @@ const SUPABASE_ANON_KEY = window.ENV_SUPABASE_ANON_KEY || '';
 export const CONFIG = {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+  VAPID_PUBLIC_KEY: window.ENV_VAPID_PUBLIC_KEY || '',
 
   // True once env.js was filled in with real values.
   IS_CONFIGURED:

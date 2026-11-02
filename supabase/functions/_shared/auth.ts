@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 import { HttpError } from "./http.ts";
+import { sendPush } from "./push.ts";
 
 export const ADMIN_ROLES = ["super_admin", "owner", "general_manager"] as const;
 export const MANAGER_ROLES = [...ADMIN_ROLES, "department_manager", "project_manager", "team_leader"] as const;
@@ -119,5 +120,10 @@ export async function notify(
     content: n.content,
     link: n.link ?? null,
   });
-  if (error) console.error("notification insert failed:", error.message);
+  if (error) {
+    console.error("notification insert failed:", error.message);
+    return;
+  }
+  // Same message on the user's phone / desktop (no-op when push is not configured)
+  await sendPush(admin, n.userId, { title: n.title, body: n.content, url: n.link, tag: n.type });
 }

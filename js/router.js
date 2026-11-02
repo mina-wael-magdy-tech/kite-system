@@ -52,7 +52,7 @@ export class Router {
     this.currentRoute = targetRoute;
 
     // Update active nav item in sidebar
-    document.querySelectorAll('.nav-item').forEach(el => {
+    document.querySelectorAll('.nav-item, .bottom-nav a').forEach(el => {
       const routeAttr = el.getAttribute('data-route');
       if (routeAttr === targetRoute) {
         el.classList.add('active');

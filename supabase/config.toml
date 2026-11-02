@@ -51,5 +51,9 @@ verify_jwt = true
 [functions.setup-admin]
 verify_jwt = true
 
+[functions.due-reminders]
+# Scheduled daily; protected by the CRON_SECRET header as well as the gateway JWT check.
+verify_jwt = true
+
 [storage]
 file_size_limit = "25MiB"

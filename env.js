@@ -8,3 +8,5 @@
  */
 window.ENV_SUPABASE_URL = 'https://YOUR_SUPABASE_PROJECT_ID.supabase.co';
 window.ENV_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+// Public VAPID key for push notifications (safe to expose). Leave empty to disable push.
+window.ENV_VAPID_PUBLIC_KEY = '';

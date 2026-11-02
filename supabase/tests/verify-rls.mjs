@@ -20,7 +20,7 @@ ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY; GRANT ALL ON storage.obje
 `;
 await db.exec(stubs);
 
-for (const f of ['migrations/001_initial_schema.sql','migrations/002_rls_policies.sql','migrations/003_updated_at.sql','migrations/004_storage.sql','seed.sql']) {
+for (const f of ['migrations/001_initial_schema.sql','migrations/002_rls_policies.sql','migrations/003_updated_at.sql','migrations/004_storage.sql','migrations/005_push_subscriptions.sql','seed.sql']) {
   try { await db.exec(fs.readFileSync(M + f, 'utf8')); console.log('OK   ', f); }
   catch (e) { console.log('FAIL ', f, '->', e.message); process.exit(1); }
 }
@@ -208,6 +208,25 @@ r = await as('emp2', `INSERT INTO storage.objects(bucket_id,name,owner_id) VALUE
 check('peer cannot upload into others’ task', denied(r), JSON.stringify(r));
 r = await as('emp2', `INSERT INTO storage.objects(bucket_id,name,owner_id) VALUES ('task-attachments','not-a-uuid/x.pdf','${U.emp2}')`);
 check('malformed path rejected without error leak', denied(r), JSON.stringify(r));
+// push subscriptions (written only by the server)
+await db.query(`INSERT INTO public.push_subscriptions(user_id,endpoint,p256dh,auth) VALUES ($1,'https://fcm.googleapis.com/fcm/send/aaa','KEYA','AUTHA'),($2,'https://fcm.googleapis.com/fcm/send/bbb','KEYB','AUTHB')`, [U.emp, U.emp2]);
+r = await as('emp', `SELECT count(*)::int c FROM public.push_subscriptions`);
+check('user sees only their own push subscriptions', r.rows[0].c === 1, JSON.stringify(r));
+r = await as('emp', `SELECT p256dh FROM public.push_subscriptions`);
+check('push secret keys (p256dh/auth) are not readable from the browser', denied(r), JSON.stringify(r));
+r = await as('emp', `SELECT auth FROM public.push_subscriptions`);
+check('push auth secret is not readable from the browser', denied(r), JSON.stringify(r));
+r = await as('emp', `INSERT INTO public.push_subscriptions(user_id,endpoint,p256dh,auth) VALUES ('${U.emp}','https://evil.example/x','k','a')`);
+check('browser cannot insert a push subscription (server validates the endpoint)', denied(r), JSON.stringify(r));
+r = await as('emp', `UPDATE public.push_subscriptions SET endpoint='https://evil.example/x'`);
+check('browser cannot rewrite a push endpoint (SSRF guard)', denied(r), JSON.stringify(r));
+r = await as('emp', `DELETE FROM public.push_subscriptions`);
+check('browser cannot delete subscriptions directly', denied(r), JSON.stringify(r));
+r = await as('stranger', `SELECT count(*)::int c FROM public.push_subscriptions`);
+check('stranger sees no push subscriptions', denied(r) || r.rows[0].c === 0, JSON.stringify(r));
+r = await as(null, `SELECT 1 FROM public.push_subscriptions`);
+check('anon cannot touch push subscriptions', denied(r), JSON.stringify(r));
+
 // updated_at trigger is the only trigger
 const trg = await db.query(`SELECT count(DISTINCT tgname)::int c, string_agg(DISTINCT tgname, ',') n FROM pg_trigger WHERE NOT tgisinternal`);
 check('only trigger in DB is trg_set_updated_at', trg.rows[0].n === 'trg_set_updated_at', trg.rows[0].n);

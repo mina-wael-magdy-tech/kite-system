@@ -19,6 +19,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
 import { adminClient, audit, Caller, getCaller, notify, requireStaff, userClient } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
+import { isAllowedPushEndpoint, pushConfigured, sendPush } from "../_shared/push.ts";
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 const TASK_STATUSES = [
@@ -66,6 +67,9 @@ serveJson(async (req) => {
     case "task.update": return json(req, await taskUpdate(req, admin, caller, body));
     case "task.delete": return json(req, await taskDelete(req, admin, caller, body));
     case "employee.update": return json(req, await employeeUpdate(req, admin, caller, body));
+    case "push.subscribe": return json(req, await pushSubscribe(admin, caller, body));
+    case "push.unsubscribe": return json(req, await pushUnsubscribe(admin, caller, body));
+    case "push.test": return json(req, await pushTest(admin, caller));
     case "expense.decide": return json(req, await expenseDecide(req, admin, caller, body));
     case "leave.decide": return json(req, await leaveDecide(req, admin, caller, body));
     default: throw new HttpError(400, "Unknown action");
@@ -458,4 +462,44 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     newData: { ...patch, role: newRole?.name },
   }, req);
   return { success: true };
+}
+
+// ---------------------------------------------------------------- push.*
+
+const B64URL = /^[A-Za-z0-9_-]+={0,2}$/;
+
+async function pushSubscribe(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const endpoint = v.text(b.endpoint, "endpoint", 20, 2048);
+  const p256dh = v.text(b.p256dh, "p256dh", 20, 200);
+  const auth = v.text(b.auth, "auth", 10, 100);
+  if (!isAllowedPushEndpoint(endpoint)) throw new HttpError(400, "Unsupported push service");
+  if (!B64URL.test(p256dh) || !B64URL.test(auth)) throw new HttpError(400, "Invalid subscription keys");
+  const userAgent = typeof b.userAgent === "string" ? b.userAgent.slice(0, 250) : null;
+
+  // An endpoint identifies a browser profile. If another account used it before (shared device),
+  // ownership moves to the person who is signed in now: the previous user stops receiving it.
+  const { error } = await admin.from("push_subscriptions").upsert(
+    { user_id: caller.id, endpoint, p256dh, auth, user_agent: userAgent, last_seen_at: new Date().toISOString() },
+    { onConflict: "endpoint" },
+  );
+  if (error) throw error;
+  return { success: true, configured: pushConfigured() };
+}
+
+async function pushUnsubscribe(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const endpoint = v.text(b.endpoint, "endpoint", 20, 2048);
+  const { error } = await admin.from("push_subscriptions").delete().eq("endpoint", endpoint).eq("user_id", caller.id);
+  if (error) throw error;
+  return { success: true };
+}
+
+async function pushTest(admin: SupabaseClient, caller: Caller) {
+  if (!pushConfigured()) throw new HttpError(503, "Push notifications are not configured on the server yet");
+  const { count } = await admin.from("push_subscriptions").select("id", { count: "exact", head: true }).eq("user_id", caller.id);
+  if (!count) throw new HttpError(409, "This device is not subscribed yet. Enable notifications first.");
+  const result = await sendPush(admin, caller.id, {
+    title: "Kite System", body: "Notifications are working on this device.", url: "#dashboard", tag: "push-test",
+  });
+  if (result.sent === 0) throw new HttpError(502, "The push service did not accept the message. Try turning notifications off and on again.");
+  return { success: true, sent: result.sent };
 }

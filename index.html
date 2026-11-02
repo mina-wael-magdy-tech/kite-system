@@ -2,14 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Kite System — Kite Design Studio</title>
   <link rel="icon" type="image/x-icon" href="assets/favicon.ico" />
   <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <meta name="theme-color" content="#eef6fb" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Kite" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <link rel="preload" href="fonts/poppins-400.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="fonts/sour-gummy-500.woff2" as="font" type="font/woff2" crossorigin />
   
@@ -19,7 +24,9 @@
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/calendar.css">
   <link rel="stylesheet" href="css/responsive.css">
+  <link rel="stylesheet" href="css/mobile.css">
   
   <!-- Vendored libraries (pinned versions, served from this origin) -->
   <script src="env.js"></script>
@@ -68,6 +75,10 @@
             <i data-lucide="check-square"></i>
             <span>Task Management</span>
             <span class="nav-badge" id="tasksBadge">0</span>
+          </a>
+          <a class="nav-item" data-route="calendar" href="#calendar">
+            <i data-lucide="calendar-days"></i>
+            <span>Calendar &amp; Timeline</span>
           </a>
           <a class="nav-item" data-route="projects" href="#projects">
             <i data-lucide="folder-kanban"></i>
@@ -204,6 +215,9 @@
               <a href="#admin" class="nav-item" id="menuAdminLink" style="padding: var(--space-2) var(--space-3);">
                 <i data-lucide="settings"></i> System Settings
               </a>
+              <button type="button" id="installAppBtn" class="nav-item hidden" style="width: 100%; padding: var(--space-2) var(--space-3);">
+                <i data-lucide="download"></i> Install app
+              </button>
               <div style="height: 1px; background: var(--border-subtle); margin: var(--space-1) 0;"></div>
               <button type="button" id="signOutBtn" class="nav-item" style="width: 100%; color: var(--color-rose-light); padding: var(--space-2) var(--space-3);">
                 <i data-lucide="log-out"></i> Sign Out
@@ -236,11 +250,21 @@
           <button type="button" class="btn btn-ghost btn-sm" id="btnCloseNotifPanel">&times;</button>
         </div>
       </div>
+      <div id="pushCard" style="padding: var(--space-3) var(--space-3) 0;"></div>
       <div class="card-body" id="notificationPanelFeed" style="flex: 1; overflow-y: auto; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2);">
         <!-- Populated dynamically -->
       </div>
     </div>
   </div>
+
+  <!-- Mobile bottom tab bar -->
+  <nav class="bottom-nav" id="bottomNav" aria-label="Main">
+    <a href="#dashboard" data-route="dashboard"><i data-lucide="layout-dashboard"></i><span>Home</span></a>
+    <a href="#tasks" data-route="tasks"><i data-lucide="check-square"></i><span>Tasks</span></a>
+    <a href="#calendar" data-route="calendar"><i data-lucide="calendar-days"></i><span>Calendar</span></a>
+    <a href="#chat" data-route="chat"><i data-lucide="message-square"></i><span>Chat</span></a>
+    <button type="button" id="bottomMoreBtn"><i data-lucide="menu"></i><span>More</span></button>
+  </nav>
 
   <!-- Global Modal Mount Point -->
   <div id="globalModalBackdrop" class="modal-backdrop">
@@ -254,5 +278,6 @@
 
   <!-- Main Application Orchestrator -->
   <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/pwa.js"></script>
 </body>
 </html>

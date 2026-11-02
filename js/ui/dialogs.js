@@ -151,3 +151,29 @@ export function formDialog({ title, subtitle = '', fields, submitLabel = 'Save c
 
   d.querySelector('input, textarea, select')?.focus();
 }
+
+/** Simple message with one button. */
+export function infoDialog({ title = '', message = '', buttonLabel = 'Got it' } = {}) {
+  return new Promise((resolve) => {
+    const d = show(`
+      <div class="modal-header"><h2 class="modal-title font-display">${escapeHTML(title)}</h2></div>
+      <div class="modal-body"><p class="text-sm text-muted" style="line-height: 1.55;">${escapeHTML(message)}</p></div>
+      <div class="modal-footer"><button type="button" class="btn btn-primary btn-sm" data-act="ok">${escapeHTML(buttonLabel)}</button></div>
+    `, '440px');
+    d.querySelector('[data-act="ok"]').addEventListener('click', () => { closeDialog(); resolve(); });
+  });
+}
+
+/** Dialog with custom (already-escaped) HTML in the body and a Close button. Returns the dialog element. */
+export function htmlDialog({ title = '', html = '', buttonLabel = 'Close', maxWidth = '480px' } = {}) {
+  const d = show(`
+    <div class="modal-header">
+      <h2 class="modal-title font-display">${escapeHTML(title)}</h2>
+      <button type="button" class="modal-close-btn" data-act="close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">${html}</div>
+    <div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" data-act="close">${escapeHTML(buttonLabel)}</button></div>
+  `, maxWidth);
+  d.querySelectorAll('[data-act="close"]').forEach(b => b.addEventListener('click', closeDialog));
+  return d;
+}

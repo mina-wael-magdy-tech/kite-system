@@ -34,6 +34,11 @@ class AuthService {
   }
 
   async signOut() {
+    // A shared phone/PC must stop receiving the previous person's alerts
+    try {
+      const { Push } = await import('../services/push-service.js');
+      await Push.disable();
+    } catch { /* never block sign-out */ }
     const supabase = getSupabase();
     if (supabase) {
       await supabase.auth.signOut();

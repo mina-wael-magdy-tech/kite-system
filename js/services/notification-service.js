@@ -45,6 +45,11 @@ class NotificationService {
       dot.style.display = unread > 0 ? 'block' : 'none';
     }
 
+    // Unread count on the installed app icon (supported browsers only)
+    try {
+      if (navigator.setAppBadge) { unread > 0 ? navigator.setAppBadge(unread) : navigator.clearAppBadge(); }
+    } catch { /* optional */ }
+
     const badge = document.getElementById('notifBadge');
     if (badge) {
       badge.textContent = unread > 0 ? String(unread) : '';

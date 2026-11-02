@@ -64,6 +64,9 @@
 
 Human-readable IDs (`EMP-001`, `TSK-101`) are plain column defaults backed by sequences.
 
+## 4b. Push notifications
+Devices subscribe through the server (never directly), only real push-service endpoints are accepted (SSRF guard), the device keys are not readable from the browser, sign-out removes the device, and notification taps cannot open external sites. Details: `docs/pwa-and-notifications.md` §4.
+
 ## 5. Known limitations (be aware, not blockers)
 - **Emergency contacts are write-only for users** (not selectable from the browser); HR reads them via the service role or SQL editor.
 - Attendance timestamps are client-reported; RLS cannot verify their truthfulness.
@@ -73,4 +76,4 @@ Human-readable IDs (`EMP-001`, `TSK-101`) are plain column defaults backed by se
 - Sessions use `localStorage` (standard for supabase-js). The CSP is the main defence against token theft.
 
 ## 6. Verification
-The access model was tested by running all migrations against PostgreSQL and attacking them as anonymous, stranger, suspended, client-role, employee, HR, finance and admin users (71 scenarios: escalation, forgery, cross-user reads, storage paths). Re-run after any policy change; see `docs/production-checklist.md` §5.
+The access model was tested by running all migrations against PostgreSQL and attacking them as anonymous, stranger, suspended, client-role, employee, HR, finance and admin users (79 scenarios: escalation, forgery, cross-user reads, storage paths). Re-run after any policy change; see `docs/production-checklist.md` §5.

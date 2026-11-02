@@ -1,0 +1,25 @@
+{
+  "id": "/index.html",
+  "name": "Kite System",
+  "short_name": "Kite",
+  "description": "Kite Design Studio: tasks, projects, calendar, chat and team in one app.",
+  "start_url": "/index.html?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef6fb",
+  "theme_color": "#eef6fb",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "My tasks", "short_name": "Tasks", "url": "/index.html#tasks", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Calendar", "short_name": "Calendar", "url": "/index.html#calendar", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Team chat", "short_name": "Chat", "url": "/index.html#chat", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
