@@ -115,10 +115,17 @@ export class CampaignsModule {
     `).join('');
   }
 
-  openCampaignModal() {
+  async openCampaignModal() {
     const modalBackdrop = document.getElementById('globalModalBackdrop');
     const modalDialog = document.getElementById('globalModalDialog');
     if (!modalBackdrop || !modalDialog) return;
+
+    // Real client list (RLS-scoped) instead of free text that was never saved
+    const { data: clientRows } = await getSupabase()
+      .from('clients')
+      .select('id, company_name')
+      .order('company_name', { ascending: true });
+    const clients = clientRows || [];
 
     modalDialog.style.maxWidth = '500px';
     modalDialog.innerHTML = `
@@ -135,8 +142,11 @@ export class CampaignsModule {
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="campClient">Client Name *</label>
-            <input id="campClient" type="text" required placeholder="e.g. Apex Holdings" class="form-control" />
+            <label class="form-label" for="campClient">Client</label>
+            <select id="campClient" class="form-control">
+              <option value="">No client (internal campaign)</option>
+              ${clients.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.company_name)}</option>`).join('')}
+            </select>
           </div>
 
           <div class="form-group">
@@ -170,7 +180,7 @@ export class CampaignsModule {
     document.getElementById('createCampaignForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = document.getElementById('campName').value.trim();
-      const clientName = document.getElementById('campClient').value.trim();
+      const clientId = document.getElementById('campClient').value || null;
       const endDate = document.getElementById('campDate').value;
       const description = document.getElementById('campDesc').value.trim();
 
@@ -178,6 +188,7 @@ export class CampaignsModule {
       try {
         const { error } = await supabase.from('campaigns').insert({
           name,
+          client_id: clientId,
           end_date: endDate,
           description,
           status: 'active',
