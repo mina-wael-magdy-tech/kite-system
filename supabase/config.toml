@@ -5,13 +5,13 @@
 #
 # Replace project_id and the URLs with your own before pushing.
 
-project_id = "pulse-studio-os"
+project_id = "qsollulgrbxksenovaee"
 
 [auth]
 enabled = true
 # Where invitation / reset links send people. Must be your real HTTPS origin.
-site_url = "https://os.example.com"
-additional_redirect_urls = ["https://os.example.com/invitation.html", "https://os.example.com/reset-password.html"]
+site_url = "https://kite-system.vercel.app"
+additional_redirect_urls = ["https://kite-system.vercel.app/invitation.html", "https://kite-system.vercel.app/reset-password.html"]
 
 # CRITICAL: employees are invited by an administrator. Nobody may self-register.
 enable_signup = false
@@ -27,7 +27,8 @@ minimum_password_length = 12
 password_requirements = "lower_upper_letters_digits"
 
 [auth.email]
-enable_signup = false
+# Email/password login MUST stay enabled. New-user signups are blocked by auth.enable_signup above.
+enabled = true
 enable_confirmations = true
 double_confirm_changes = true
 secure_password_change = true

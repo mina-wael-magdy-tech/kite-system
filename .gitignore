@@ -2,3 +2,4 @@ dist
 node_modules
 .env*
 supabase/tests/node_modules
+supabase/.temp/
