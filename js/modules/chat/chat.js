@@ -31,8 +31,8 @@ export class ChatModule {
     this.teardownRealtime();
     this.activeChannelId = new URLSearchParams(query || '').get('c') || this.activeChannelId;
     container.innerHTML = `
-      <div class="page-container animate-fade-in" style="height: calc(100vh - 120px); display: flex; flex-direction: column;">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3);">
+      <div class="page-container chat-page animate-fade-in" id="chatPage">
+        <div class="chat-head" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3);">
           <div>
             <h1 class="font-display font-bold text-xl text-white">Studio Channels & Role Handoffs</h1>
             <p class="text-xs text-muted">Collaborate with any role & dispatch deliverables directly in chat.</p>
@@ -60,9 +60,12 @@ export class ChatModule {
           <!-- Right: Active chat -->
           <div class="chat-window">
             <div id="chatActiveHeader" style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-subtle); background: var(--studio-950); display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap;">
-              <div>
-                <div class="font-bold text-sm text-white" id="activeChannelTitle">Channels</div>
-                <div class="text-2xs text-muted" id="activeChannelDesc"></div>
+              <div style="display: flex; align-items: center; gap: var(--space-2); min-width: 0;">
+                <button type="button" class="chat-back card-act" id="btnChatBack" aria-label="Back to conversations" style="opacity:1;"><i data-lucide="chevron-left"></i></button>
+                <div style="min-width: 0;">
+                  <div class="font-bold text-sm text-white truncate" id="activeChannelTitle">Channels</div>
+                  <div class="text-2xs text-muted truncate" id="activeChannelDesc"></div>
+                </div>
               </div>
 
               <div style="display: flex; gap: var(--space-2); flex-wrap: wrap; justify-content: flex-end;">
@@ -109,7 +112,9 @@ export class ChatModule {
     `;
 
     this.attachEventListeners();
+    const fromLink = new URLSearchParams(query || '').get('c');
     await this.loadChatData();
+    if (fromLink && this.activeChannelId === fromLink) this.setMobileView(true);
     this.subscribeRealtime();
   }
 
@@ -120,12 +125,18 @@ export class ChatModule {
     });
     document.getElementById('btnCancelHandoff')?.addEventListener('click', () => { handoffBar.style.display = 'none'; });
     document.getElementById('btnDispatchChatTask')?.addEventListener('click', () => this.handleDispatchTaskFromChat());
+    document.getElementById('btnChatBack')?.addEventListener('click', () => this.setMobileView(false));
     document.getElementById('btnNewChannel')?.addEventListener('click', () => this.openCreateChannel());
     document.getElementById('btnNewDm')?.addEventListener('click', () => this.openNewDm());
     document.getElementById('chatMessageForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       await this.handleSendMessage();
     });
+  }
+
+  /** Phones show either the conversation list or one conversation (like Slack / WhatsApp). */
+  setMobileView(open) {
+    document.getElementById('chatPage')?.classList.toggle('chat-open', !!open);
   }
 
   // ------------------------------------------------------------ data
@@ -159,6 +170,7 @@ export class ChatModule {
 
       this.renderChannelsList();
       this.renderHeader();
+      if (selectId && this.activeChannelId === selectId) this.setMobileView(true);
 
       if (!this.activeChannelId) {
         this.messages = [];
@@ -342,6 +354,7 @@ export class ChatModule {
     container.querySelectorAll('.nav-item').forEach(btn => {
       btn.addEventListener('click', async () => {
         this.activeChannelId = btn.getAttribute('data-channel-id');
+        this.setMobileView(true);
         delete this.unread[this.activeChannelId];
         this.renderChannelsList();
         this.renderHeader();
