@@ -10,7 +10,7 @@
 
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
 import { ADMIN_ROLES, adminClient, audit, notify, userIdsWithRoles } from "../_shared/auth.ts";
-import { oneOf, optText, text } from "../_shared/validate.ts";
+import { oneOf, optText, text, uuid } from "../_shared/validate.ts";
 
 const ACTIONS = ["get", "feedback", "approve_all"] as const;
 const KINDS = ["note", "change", "approve"] as const;
@@ -101,7 +101,7 @@ serveJson(async (req) => {
     let slideTitle: string | null = null;
     if (body.postId) {
       const { data: p } = await admin.from("content_posts").select("id, title, publisher_id")
-        .eq("id", String(body.postId)).eq("plan_id", plan.id).maybeSingle();
+        .eq("id", uuid(body.postId, "postId")).eq("plan_id", plan.id).maybeSingle();
       if (!p) throw new HttpError(400, "That page does not belong to this plan");
       postId = p.id; slideTitle = p.title; postPublisher = p.publisher_id;
     }
