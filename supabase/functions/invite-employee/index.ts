@@ -21,6 +21,28 @@ serveJson(async (req) => {
   }
 
   const b = await readJson(req);
+
+  // --- delete an employee (removes the auth user; cascades to profile / roles)
+  if (b.action === "delete") {
+    const targetId = v.uuid(b.userId, "userId");
+    if (targetId === caller.id) throw new HttpError(400, "You cannot delete your own account");
+    const { data: target } = await admin.from("profiles").select("id, email, employment_status").eq("id", targetId).maybeSingle();
+    if (!target) throw new HttpError(404, "Employee not found");
+    const { data: targetRoles } = await admin.from("user_roles").select("roles(name)").eq("user_id", targetId);
+    // deno-lint-ignore no-explicit-any
+    const isTargetAdmin = (targetRoles ?? []).some((r: any) => ADMIN_LEVEL.includes(r.roles?.name));
+    if (isTargetAdmin && !caller.isAdmin) throw new HttpError(403, "Only an administrator can delete this account");
+
+    await admin.from("invitations").delete().eq("email", target.email);
+    const { error: delErr } = await admin.auth.admin.deleteUser(targetId);
+    if (delErr) {
+      console.error("delete employee failed:", delErr);
+      throw new HttpError(409, "Could not delete: this employee has linked records (tasks, expenses...). Set their status to Inactive instead.");
+    }
+    await audit(admin, { userId: caller.id, action: "EMPLOYEE_DELETED", entityType: "profiles", entityId: targetId, oldData: { email: target.email } }, req);
+    return json(req, { success: true });
+  }
+
   const email = v.email(b.email);
   const fullName = v.text(b.fullName, "fullName", 2, 120);
   const roleId = v.uuid(b.roleId, "roleId");
@@ -42,8 +64,24 @@ serveJson(async (req) => {
     if (!dept) throw new HttpError(400, "Unknown department");
   }
 
-  const { data: existing } = await admin.from("profiles").select("id").eq("email", email).maybeSingle();
-  if (existing) throw new HttpError(409, "An employee with this email already exists");
+  const { data: existing } = await admin.from("profiles").select("id, employment_status").eq("email", email).maybeSingle();
+  if (existing) {
+    // Re-invite: only allowed while the person has never accepted (still onboarding)
+    if (existing.employment_status !== "onboarding") {
+      throw new HttpError(409, "An employee with this email already exists");
+    }
+    await admin.from("invitations").delete().eq("email", email);
+    const { error } = await admin.auth.admin.deleteUser(existing.id);
+    if (error) throw new HttpError(500, "Could not reset the previous invitation");
+  } else {
+    // Leftover auth user from a failed earlier attempt (no profile) blocks a new invite
+    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const stale = list?.users?.find((u) => (u.email ?? "").toLowerCase() === email.toLowerCase());
+    if (stale) {
+      await admin.from("invitations").delete().eq("email", email);
+      await admin.auth.admin.deleteUser(stale.id);
+    }
+  }
 
   // --- create the auth user + invitation email
   const appUrl = (Deno.env.get("APP_URL") ?? "").replace(/\/+$/, "");

@@ -37,5 +37,6 @@ export const Api = {
   decideLeave: (leaveId, decision, notes) => Api.workflow('leave.decide', { leaveId, decision, notes }),
 
   inviteEmployee: (p) => invoke('invite-employee', p),
+  deleteEmployee: (userId) => invoke('invite-employee', { action: 'delete', userId }),
   acceptInvitation: () => invoke('accept-invitation', {})
 };

@@ -166,7 +166,7 @@ export class EmployeesModule {
               <div class="avatar avatar-md" style="background-color: ${accent};">
                 ${initials}
               </div>
-              ${(Permissions.isAdmin() || Permissions.hasRole('hr_manager')) ? `<span class="card-actions" style="margin-left: auto; margin-right: var(--space-2);"><button type="button" class="card-act card-act-edit" data-id="${emp.id}" title="Edit employee" aria-label="Edit employee"><i data-lucide="pencil"></i></button></span>` : ''}
+              ${(Permissions.isAdmin() || Permissions.hasRole('hr_manager')) ? `<span class="card-actions" style="margin-left: auto; margin-right: var(--space-2);"><button type="button" class="card-act card-act-edit" data-id="${emp.id}" title="Edit employee" aria-label="Edit employee"><i data-lucide="pencil"></i></button>${emp.employment_status === 'onboarding' ? `<button type="button" class="card-act card-act-resend" data-id="${emp.id}" title="Resend invitation" aria-label="Resend invitation"><i data-lucide="mail"></i></button>` : ''}${emp.id !== this.app.currentUser.id ? `<button type="button" class="card-act card-act-delete" data-id="${emp.id}" title="Delete employee" aria-label="Delete employee"><i data-lucide="trash-2"></i></button>` : ''}</span>` : ''}
               ${formatEmploymentStatusBadge(emp.employment_status)}
             </div>
 
@@ -197,7 +197,37 @@ export class EmployeesModule {
     }).join('');
 
     container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
+    container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteEmployee(b.dataset.id)));
+    container.querySelectorAll('.card-act-resend').forEach(b => b.addEventListener('click', () => this.resendInvitation(b.dataset.id)));
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  async deleteEmployee(id) {
+    const emp = this.employees.find(x => x.id === id);
+    if (!emp) return;
+    const ok = await confirmDialog({ title: 'Delete this employee?', message: `${emp.full_name || emp.email} will lose access and their account will be removed. This cannot be undone.`, confirmLabel: 'Delete employee', danger: true });
+    if (!ok) return;
+    try {
+      await Api.deleteEmployee(id);
+      Toast.success('Employee deleted', 'Deleted');
+      await this.loadEmployees();
+    } catch (err) {
+      Toast.error(err.message || 'Could not delete employee', 'Delete refused');
+    }
+  }
+
+  async resendInvitation(id) {
+    const emp = this.employees.find(x => x.id === id);
+    if (!emp) return;
+    const roleId = emp.user_roles?.[0]?.roles?.id;
+    if (!roleId) { Toast.error('This employee has no role assigned', 'Cannot resend'); return; }
+    try {
+      await Api.inviteEmployee({ fullName: emp.full_name, email: emp.email, departmentId: emp.department_id || undefined, roleId, jobTitle: emp.job_title || undefined });
+      Toast.success(`New invitation sent to ${emp.email}`, 'Invitation Resent');
+      await this.loadEmployees();
+    } catch (err) {
+      Toast.error(err.message || 'Could not resend invitation', 'Error');
+    }
   }
 
   openEditDialog(id) {
