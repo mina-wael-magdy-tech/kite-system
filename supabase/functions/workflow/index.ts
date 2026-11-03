@@ -146,6 +146,15 @@ async function taskCreate(req: Request, admin: SupabaseClient, caller: Caller, b
 
   const assignee = await requireActiveStaffMember(admin, assignedTo, "Assignee");
 
+  // Task department: the assignee's primary one, or any other department they belong to.
+  let taskDeptId = assignee.department_id;
+  const requestedDept = v.optUuid(b.departmentId, "departmentId");
+  if (requestedDept && requestedDept !== assignee.department_id) {
+    const { data: member } = await admin.from("user_departments").select("id").eq("user_id", assignedTo).eq("department_id", requestedDept).maybeSingle();
+    if (!member) throw new HttpError(400, "The assignee is not a member of that department");
+    taskDeptId = requestedDept;
+  }
+
   if (projectId) {
     // RLS decides whether this caller may see (and therefore attach to) the project.
     const { data } = await userClient(caller.token).from("projects").select("id").eq("id", projectId).maybeSingle();
@@ -156,7 +165,7 @@ async function taskCreate(req: Request, admin: SupabaseClient, caller: Caller, b
     title,
     description,
     assigned_to: assignedTo,
-    department_id: assignee.department_id, // derived server-side, never client-supplied
+    department_id: taskDeptId, // validated server-side against the assignee's departments
     project_id: projectId,
     priority,
     due_date: dueDate,

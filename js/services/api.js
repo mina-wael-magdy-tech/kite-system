@@ -6,10 +6,9 @@
 
 import { getSupabase } from '../supabase-client.js';
 
-async function invoke(name, body) {
-  const supabase = getSupabase();
-  if (!supabase) throw new Error('Application is not configured');
+const SESSION_ERROR = /invalid or expired session|missing authorization/i;
 
+async function callFunction(supabase, name, body) {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (error) {
     let message = error.message;
@@ -18,10 +17,35 @@ async function invoke(name, body) {
       const payload = await error.context?.json?.();
       if (payload?.error) message = payload.error;
     } catch { /* keep generic message */ }
-    throw new Error(message || 'Request failed');
+    return { error: message || 'Request failed' };
   }
-  if (data?.error) throw new Error(data.error);
-  return data;
+  if (data?.error) return { error: data.error };
+  return { data };
+}
+
+async function invoke(name, body) {
+  const supabase = getSupabase();
+  if (!supabase) throw new Error('Application is not configured');
+
+  // getSession() refreshes an expired access token before we call the function
+  await supabase.auth.getSession();
+  let result = await callFunction(supabase, name, body);
+
+  // Token rejected: force one refresh and retry; if that fails the login is really gone.
+  if (result.error && SESSION_ERROR.test(result.error)) {
+    const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+    if (!refreshErr && refreshed?.session) {
+      result = await callFunction(supabase, name, body);
+    }
+    if (result.error && SESSION_ERROR.test(result.error)) {
+      await supabase.auth.signOut();
+      window.location.href = 'login.html';
+      throw new Error('Your session has expired. Please sign in again.');
+    }
+  }
+
+  if (result.error) throw new Error(result.error);
+  return result.data;
 }
 
 export const Api = {

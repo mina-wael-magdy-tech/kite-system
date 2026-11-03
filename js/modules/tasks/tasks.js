@@ -3,6 +3,7 @@
  * Complete task engine: Kanban & Table views, 9 lifecycle stages, checklists, comments, and role privacy.
  */
 
+import { ASSIGNEE_SELECT, assigneeOptionsHTML, selectedDeptId } from '../../utils/assignees.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
@@ -709,7 +710,7 @@ export class TasksModule {
     const supabase = getSupabase();
     const { data: employees } = await supabase
       .from('profiles')
-      .select('id, full_name, job_title, department_id, departments!profiles_department_id_fkey(name)')
+      .select(ASSIGNEE_SELECT)
       .eq('employment_status', 'active');
 
     modalDialog.style.maxWidth = '580px';
@@ -739,11 +740,7 @@ export class TasksModule {
             <div class="form-group">
               <label class="form-label" for="taskAssigneeSelect">Assignee Specialist *</label>
               <select id="taskAssigneeSelect" required class="form-control">
-                ${(employees || []).map(emp => `
-                  <option value="${emp.id}" data-dept="${emp.department_id || ''}">
-                    ${escapeHTML(emp.full_name)} (${emp.departments?.name || 'Studio'})
-                  </option>
-                `).join('')}
+                ${assigneeOptionsHTML(employees)}
               </select>
             </div>
 
@@ -819,7 +816,7 @@ export class TasksModule {
       if (submitBtn) submitBtn.disabled = true;
 
       try {
-        await Api.createTask({ title, assignedTo, projectId, priority, dueDate, description });
+        await Api.createTask({ title, assignedTo, departmentId: selectedDeptId(assigneeSelect) || undefined, projectId, priority, dueDate, description });
 
         Toast.success('Deliverable task dispatched successfully', 'Created');
         modalBackdrop.classList.remove('active');

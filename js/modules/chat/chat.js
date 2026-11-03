@@ -10,6 +10,7 @@ import { Api } from '../../services/api.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatRelativeTime } from '../../utils/helpers.js';
+import { ASSIGNEE_SELECT, assigneeOptionsHTML, selectedDeptId } from '../../utils/assignees.js';
 
 const MESSAGE_SELECT = '*, sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)';
 
@@ -140,14 +141,11 @@ export class ChatModule {
 
       if (!this.employees.length) {
         const { data: emps } = await supabase.from('profiles')
-          .select('id, full_name, job_title, employment_status, department_id, departments!profiles_department_id_fkey(name)');
+          .select(ASSIGNEE_SELECT + ', employment_status');
         this.employees = emps || [];
         const select = document.getElementById('quickTaskAssignee');
         if (select) {
-          select.innerHTML = this.employees.map(e => `
-            <option value="${e.id}" data-dept="${e.department_id || ''}">
-              To: ${escapeHTML(e.full_name)} (${escapeHTML(e.departments?.name || 'Studio')})
-            </option>`).join('');
+          select.innerHTML = assigneeOptionsHTML(this.employees.filter(e => e.employment_status === 'active'), 'To: ');
         }
       }
 
@@ -609,6 +607,7 @@ export class ChatModule {
     }
 
     const assignedTo = assigneeSelect.value;
+    const deptId = selectedDeptId(assigneeSelect);
     const assigneeName = assigneeSelect.selectedOptions[0]?.text.split('(')[0].replace('To: ', '').trim();
 
     titleInput.value = '';
@@ -621,6 +620,7 @@ export class ChatModule {
       const { task: newTask } = await Api.createTask({
         title,
         assignedTo,
+        departmentId: deptId || undefined,
         priority: 'high',
         dueDate: d.toISOString().split('T')[0],
         description: `Dispatched directly in studio chat by ${this.app.currentProfile.full_name}.`
