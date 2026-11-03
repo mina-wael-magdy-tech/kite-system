@@ -156,7 +156,7 @@ export class ClientHubModule {
       const pct = total ? Math.round((s.done / total) * 100) : 0;
       const regular = c.client_type === 'retainer';
       const depts = (c.client_departments || []).map(x => deptName.get(x.department_id)).filter(Boolean);
-      return `<a href="#clients?client=${c.id}" class="card entity-card ch-card">
+      return `<a href="#clients?client=${c.id}" class="card entity-card ch-card ${regular ? 'is-regular' : 'is-project'}">
         <div class="ch-card-top">
           <div class="ch-avatar">${escapeHTML(clientName(c).slice(0, 1).toUpperCase())}</div>
           <div style="min-width:0;flex:1;">
@@ -169,10 +169,10 @@ export class ClientHubModule {
           ? `<strong>${formatCurrency(c.monthly_budget)}</strong><span>per month</span>` : '<span>Budget set per project</span>'}</div>
         <div class="ch-depts">${depts.length ? depts.slice(0, 4).map(n => `<span class="ch-chip">${escapeHTML(n)}</span>`).join('') + (depts.length > 4 ? `<span class="ch-chip">+${depts.length - 4}</span>` : '') : '<span class="text-2xs text-dim">No departments yet</span>'}</div>
         <div>
-          <div class="ch-row"><span>${s.open} open · ${s.done} done${s.late ? ` · <b style="color:#e01b28">${s.late} late</b>` : ''}</span><span>${pct}%</span></div>
+          <div class="ch-row"><span>${s.open} open · ${s.done} done${s.late ? ` · <b class="ch-late">${s.late} late</b>` : ''}</span><span>${pct}%</span></div>
           <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
         </div>
-        <div class="ch-row text-2xs"><span>${s.projects} active project${s.projects === 1 ? '' : 's'}</span><span class="ch-open">Open →</span></div>
+        <div class="ch-foot"><span>${s.projects} active project${s.projects === 1 ? '' : 's'}</span><span class="ch-open">Open →</span></div>
       </a>`;
     }).join('');
   }
@@ -282,7 +282,7 @@ export class ClientHubModule {
     const late = open.filter(t => t.due_date && t.due_date.slice(0, 10) < today);
     const done = tasks.filter(t => DONE.has(t.status));
     const next = open.filter(t => t.due_date && t.due_date.slice(0, 10) >= today)[0];
-    const kpi = (v, l, tone) => `<div class="ch-kpi"><strong style="${tone ? `color:${tone}` : ''}">${v}</strong><span>${l}</span></div>`;
+    const kpi = (v, l, icon, tone) => `<div class="ch-kpi t-${tone}"><div class="ch-kpi-ic"><i data-lucide="${icon}"></i></div><div><strong>${v}</strong><span>${l}</span></div></div>`;
 
     const deptIds = new Set((c.client_departments || []).map(x => x.department_id));
     tasks.forEach(t => t.department_id && deptIds.add(t.department_id));
@@ -298,21 +298,21 @@ export class ClientHubModule {
 
     return `
       <div class="ch-kpis">
-        ${kpi(open.length, 'Open tasks')}${kpi(late.length, 'Late', late.length ? '#e01b28' : '')}${kpi(done.length, 'Delivered')}
-        ${kpi(projects.filter(p => !['completed', 'cancelled'].includes(p.status)).length, 'Active projects')}
-        ${kpi(plans.length + ' / ' + posts.length, 'Plans / posts')}${kpi(assets.length + attachments.length, 'Files')}
+        ${kpi(open.length, 'Open tasks', 'list-checks', 'blue')}${kpi(late.length, 'Late', 'alarm-clock', late.length ? 'red' : 'green')}${kpi(done.length, 'Delivered', 'package-check', 'green')}
+        ${kpi(projects.filter(p => !['completed', 'cancelled'].includes(p.status)).length, 'Active projects', 'folder-kanban', 'amber')}
+        ${kpi(plans.length + ' / ' + posts.length, 'Plans / posts', 'sparkles', 'red')}${kpi(assets.length + attachments.length, 'Files', 'folder-open', 'blue')}
       </div>
       <div class="ch-cols">
         <section class="glass-panel ch-sec"><h3>Departments working on ${escapeHTML(clientName(c))}</h3>
-          ${deptRows || '<p class="text-xs text-muted">No departments are linked yet. Tag them from Manage clients &amp; deals, or assign a task from a department.</p>'}</section>
+          ${deptRows || '<p class="ch-empty">No departments are linked yet. Tag them from Manage clients &amp; deals, or assign a task from a department.</p>'}</section>
         <section class="glass-panel ch-sec"><h3>Next up</h3>
-          ${next ? `<a class="ch-item" href="#tasks?q=${encodeURIComponent(next.task_number)}"><b>${escapeHTML(next.title)}</b><span>${escapeHTML(next.task_number)} · due ${formatDate(next.due_date)}</span></a>` : '<p class="text-xs text-muted">No upcoming deadlines.</p>'}
+          ${next ? `<a class="ch-item" href="#tasks?q=${encodeURIComponent(next.task_number)}"><b>${escapeHTML(next.title)}</b><span>${escapeHTML(next.task_number)} · due ${formatDate(next.due_date)}</span></a>` : '<p class="ch-empty">No upcoming deadlines.</p>'}
           ${late.slice(0, 3).map(t => `<a class="ch-item ch-late" href="#tasks?q=${encodeURIComponent(t.task_number)}"><b>${escapeHTML(t.title)}</b><span>Late since ${formatDate(t.due_date)}</span></a>`).join('')}
         </section>
       </div>
       <section class="glass-panel ch-sec"><h3>Projects</h3>
         ${projects.length ? `<div class="ch-projects">${projects.map(p => this.projectCard(p)).join('')}</div>`
-          : '<p class="text-xs text-muted">No projects for this client yet. Use “New project” above.</p>'}</section>`;
+          : '<p class="ch-empty">No projects for this client yet. Use “New project” above.</p>'}</section>`;
   }
 
   projectCard(p) {
@@ -421,8 +421,8 @@ export class ClientHubModule {
           : `<span class="ch-ev" style="--c:${TONE_VAR[it.tone]}" title="${escapeHTML(it.label)}">${escapeHTML(it.label)}</span>`).join('')}
         ${list.length > 3 ? `<span class="text-2xs text-dim">+${list.length - 3} more</span>` : ''}</div>`;
     }
-    return `<div class="glass-panel" style="padding:var(--space-3);">
-      <div class="ch-row" style="margin-bottom:var(--space-2);">
+    return `<div class="glass-panel ch-cal-card">
+      <div class="ch-row" style="margin-bottom:var(--space-3);">
         <div style="display:flex;gap:6px;"><button type="button" class="btn btn-secondary btn-sm" id="chPrev" aria-label="Previous month">‹</button>
           <button type="button" class="btn btn-secondary btn-sm" id="chNow">Today</button>
           <button type="button" class="btn btn-secondary btn-sm" id="chNext" aria-label="Next month">›</button></div>
@@ -441,15 +441,15 @@ export class ClientHubModule {
     return `
       <section class="glass-panel ch-sec"><h3>Milestones</h3>${ms.length ? ms.sort((a, b) => String(a.due_date || '9').localeCompare(String(b.due_date || '9'))).map(x =>
         `<div class="ch-item"><div class="ch-row"><b>${escapeHTML(x.title)}</b>${badge(String(x.status).replace('_', ' '), x.status === 'completed' ? 'emerald' : x.status === 'in_progress' ? 'indigo' : 'slate')}</div>
-          <span>${escapeHTML(x.project)}${x.due_date ? ' · due ' + formatDate(x.due_date) : ''}</span></div>`).join('') : '<p class="text-xs text-muted">No milestones set on this client’s projects.</p>'}</section>
+          <span>${escapeHTML(x.project)}${x.due_date ? ' · due ' + formatDate(x.due_date) : ''}</span></div>`).join('') : '<p class="ch-empty">No milestones set on this client’s projects.</p>'}</section>
       <section class="glass-panel ch-sec"><h3>Content plans for the client</h3>${plans.length ? plans.map(pl => {
         const mine = posts.filter(p => p.plan_id === pl.id), pub = mine.filter(p => p.status === 'published').length;
         const [label, tone] = planStatus[pl.status] || [pl.status, 'slate'];
         return `<a class="ch-item" href="#campaigns?plan=${pl.id}"><div class="ch-row"><b>${escapeHTML(pl.title)}</b>${badge(label, tone)}</div><span>${pub}/${mine.length} posts published</span></a>`;
-      }).join('') : '<p class="text-xs text-muted">No content plans yet. Create one from Studio Campaigns.</p>'}</section>
+      }).join('') : '<p class="ch-empty">No content plans yet. Create one from Studio Campaigns.</p>'}</section>
       <section class="glass-panel ch-sec"><h3>Delivered work (${delivered.length})</h3>${delivered.length ? delivered.slice(0, 40).map(t =>
         `<a class="ch-item" href="#tasks?q=${encodeURIComponent(t.task_number)}"><b>${escapeHTML(t.title)}</b><span>${escapeHTML(t.task_number)} · ${escapeHTML(t.assignee?.full_name || '')}${t.due_date ? ' · ' + formatDate(t.due_date) : ''}</span></a>`).join('')
-        : '<p class="text-xs text-muted">Completed and approved tasks will be listed here.</p>'}</section>`;
+        : '<p class="ch-empty">Completed and approved tasks will be listed here.</p>'}</section>`;
   }
 
   // ---------------------------------------------------------------- Files
