@@ -67,6 +67,18 @@ export class PermissionService {
     return this.roles.some(r => r.name === roleName);
   }
 
+  /** Owner / CEO: the only people who see every department and all money. */
+  isOwner() {
+    return this.roles.some(r => ['super_admin', 'owner', 'ceo'].includes(r.name));
+  }
+
+  /** Ids of the departments this person belongs to. */
+  myDeptIds() {
+    const ids = new Set((this.departments || []).map(d => d.id));
+    if (this.userProfile?.department_id) ids.add(this.userProfile.department_id);
+    return ids;
+  }
+
   isAdmin() {
     return this.roles.some(r => ['super_admin', 'owner', 'general_manager'].includes(r.name));
   }

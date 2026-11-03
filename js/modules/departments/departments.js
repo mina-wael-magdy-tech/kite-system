@@ -68,7 +68,8 @@ export class DepartmentsModule {
 
       if (error) throw error;
       this.budgets = await Money.map('department_budget'); // empty unless you are the owner / CEO
-      this.departments = depts || [];
+      const mine = Permissions.myDeptIds();
+      this.departments = (depts || []).filter(d => Permissions.isOwner() || mine.has(d.id) || d.manager_id === this.app.currentUser?.id);
       this.renderDepartments();
     } catch (err) {
       console.warn('Departments error:', err);

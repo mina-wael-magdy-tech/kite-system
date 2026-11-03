@@ -92,7 +92,9 @@ export class EmployeesModule {
     try {
       // 1. Fetch departments
       const { data: depts } = await supabase.from('departments').select('id, name, code');
-      this.departments = depts || [];
+      const mine = Permissions.myDeptIds();
+      // everyone below the owner / CEO sees only their own department(s)
+      this.departments = (depts || []).filter(d => Permissions.isOwner() || mine.has(d.id));
 
       const deptSelect = document.getElementById('empDeptFilter');
       if (deptSelect) {
@@ -116,7 +118,8 @@ export class EmployeesModule {
         .order('created_at', { ascending: true });
 
       if (error) throw error;
-      this.employees = profiles || [];
+      const me = this.app.currentUser?.id;
+      this.employees = (profiles || []).filter(e => Permissions.isOwner() || e.id === me || this.deptIdsOf(e).some(id => mine.has(id)));
       this.filterAndRender('', 'ALL');
     } catch (err) {
       console.warn('Employees fetch error:', err);
