@@ -24,9 +24,46 @@ function showAlert(message, isSuccess = false) {
 }
 
 // Hydrate invitation details if user is currently in invite session
+// Admin-sent invite links return tokens in the URL hash (implicit flow), which a
+// PKCE client does not pick up on its own — establish the session manually.
+async function establishSessionFromUrl(supabase) {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const query = new URLSearchParams(window.location.search);
+
+  const urlError = hash.get('error_description') || query.get('error_description');
+  if (urlError) {
+    showAlert(`${urlError.replace(/\+/g, ' ')}. Please ask your admin to send a new invitation.`);
+    return;
+  }
+
+  const accessToken = hash.get('access_token');
+  const refreshToken = hash.get('refresh_token');
+  if (accessToken && refreshToken) {
+    const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    if (error) showAlert(error.message);
+    history.replaceState(null, '', window.location.pathname);
+    return;
+  }
+
+  const code = query.get('code');
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) showAlert(error.message);
+    history.replaceState(null, '', window.location.pathname);
+    return;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    showAlert('This invitation link is invalid or has expired. Please ask your admin to send a new invitation.');
+  }
+}
+
 async function checkInviteSession() {
   const supabase = getSupabase();
   if (!supabase) return;
+
+  await establishSessionFromUrl(supabase);
 
   const { data: { user } } = await supabase.auth.getUser();
   if (user) {
