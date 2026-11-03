@@ -248,7 +248,7 @@ export class ClientHubModule {
           </div>
           <div class="ch-actions">
             <button type="button" class="btn btn-primary btn-sm" id="chNewProject"><i data-lucide="folder-plus"></i> New project</button>
-            <a class="btn btn-secondary btn-sm" href="#campaigns"><i data-lucide="sparkles"></i> Content plans</a>
+            <a class="btn btn-secondary btn-sm" href="#campaigns"><i data-lucide="layout-template"></i> Content plans</a>
           </div>
         </div>
         <div class="ch-tabs" role="tablist">${TABS.map(([k, label, icon]) =>
@@ -300,7 +300,7 @@ export class ClientHubModule {
       <div class="ch-kpis">
         ${kpi(open.length, 'Open tasks', 'list-checks', 'blue')}${kpi(late.length, 'Late', 'alarm-clock', late.length ? 'red' : 'green')}${kpi(done.length, 'Delivered', 'package-check', 'green')}
         ${kpi(projects.filter(p => !['completed', 'cancelled'].includes(p.status)).length, 'Active projects', 'folder-kanban', 'amber')}
-        ${kpi(plans.length + ' / ' + posts.length, 'Plans / posts', 'sparkles', 'red')}${kpi(assets.length + attachments.length, 'Files', 'folder-open', 'blue')}
+        ${kpi(plans.length + ' / ' + posts.length, 'Plans / posts', 'layout-template', 'red')}${kpi(assets.length + attachments.length, 'Files', 'folder-open', 'blue')}
       </div>
       <div class="ch-cols">
         <section class="glass-panel ch-sec"><h3>Departments working on ${escapeHTML(clientName(c))}</h3>
