@@ -267,20 +267,14 @@
   gap: var(--space-2);
 }
 
-.stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 4px;
-}
-
-.stat-card.border-indigo::before { background-color: var(--color-primary); }
-.stat-card.border-sky::before    { background-color: var(--color-sky); }
-.stat-card.border-amber::before  { background-color: var(--color-amber); }
-.stat-card.border-emerald::before{ background-color: var(--color-emerald); }
-.stat-card.border-purple::before { background-color: var(--color-purple); }
+.stat-card { background-color: var(--sc-bg, var(--color-primary)); border-color: transparent; --sc-fg: #fff; color: var(--sc-fg); }
+.stat-card.border-indigo { --sc-bg: var(--color-primary); }
+.stat-card.border-sky    { --sc-bg: var(--color-sky); }
+.stat-card.border-amber  { --sc-bg: var(--color-amber); --sc-fg: #3d2a00; }
+.stat-card.border-emerald{ --sc-bg: #158f63; }
+.stat-card.border-purple { --sc-bg: var(--color-purple); }
+.stat-card .stat-card-label, .stat-card .stat-card-value, .stat-card .stat-card-footer, .stat-card svg { color: var(--sc-fg); }
+.stat-card .stat-card-label, .stat-card .stat-card-footer { opacity: .85; }
 
 .stat-card-header {
   display: flex;
@@ -646,8 +640,7 @@ textarea.form-control {
   pointer-events: auto;
   background-color: var(--studio-900);
   border: 1px solid var(--border-medium);
-  border-left-width: 4px;
-  border-radius: var(--radius-xl);
+    border-radius: var(--radius-xl);
   padding: var(--space-3-5) var(--space-4);
   display: flex;
   align-items: flex-start;
@@ -657,10 +650,10 @@ textarea.form-control {
   animation: fadeIn var(--transition-fast) forwards;
 }
 
-.toast-indigo { border-left-color: var(--color-primary); color: var(--text-strong); }
-.toast-emerald { border-left-color: var(--color-emerald); color: var(--text-strong); }
-.toast-amber   { border-left-color: var(--color-amber); color: var(--text-strong); }
-.toast-rose    { border-left-color: var(--color-rose); color: var(--text-strong); }
+.toast-indigo { background-color: var(--color-primary); border-color: transparent; color: #fff; }
+.toast-emerald { background-color: #158f63; border-color: transparent; color: #fff; }
+.toast-amber   { background-color: var(--color-amber); border-color: transparent; color: #3d2a00; }
+.toast-rose    { background-color: var(--kite-red-600, #c31a21); border-color: transparent; color: #fff; }
 
 .toast-content {
   flex: 1;

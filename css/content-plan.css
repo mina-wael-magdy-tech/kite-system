@@ -83,7 +83,7 @@ input[type="color"].form-control { height: 40px; padding: 3px 4px; cursor: point
 .cps[dir="rtl"] .cps-field h4, .cps[dir="rtl"] .cps-caption h4 { letter-spacing: 0; font-size: 13px; }
 .cps-field p, .cps-caption p { margin: 0; font-size: clamp(12px, 1.55cqw, 15px); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; color: #2c3a4a; }
 .cps-caption {
-  background: #f6f8fb; border-radius: 12px; padding: 10px 14px; border-inline-start: 4px solid var(--cps-accent);
+  background: #f6f8fb; border-radius: 12px; padding: 10px 14px;
 }
 .cps-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .cps-links a {

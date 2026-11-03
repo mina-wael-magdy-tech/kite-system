@@ -104,7 +104,7 @@ export class ContentPlansSection {
       const open = (p.content_feedback || []).filter(f => !f.resolved && f.kind !== 'approve' && f.kind !== 'approve_all').length;
       const who = p.clients?.company_name || p.clients?.name || p.campaigns?.name || 'Internal';
       return `
-      <div class="card entity-card cpe-plan-card" style="border-top: 4px solid ${escapeHTML(p.accent)};">
+      <div class="card entity-card cpe-plan-card" >
         <div class="card-header">
           <div style="min-width: 0;">
             <span class="badge badge-indigo font-bold">${escapeHTML(who)}</span>

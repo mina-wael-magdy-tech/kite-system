@@ -3,12 +3,12 @@
  */
 
 /* ---- tone tokens used by chips, rows, bars (palette tints with readable ink) ---- */
-.tone-blue  { --t-bg: var(--tint-blue);  --t-bd: rgba(18, 171, 227, 0.45); --t-ink: #0a5f84; --t-solid: var(--kite-blue-700); }
-.tone-red   { --t-bg: var(--tint-red);   --t-bd: rgba(224, 27, 40, 0.40);  --t-ink: #a81a1f; --t-solid: var(--kite-red-500); }
-.tone-amber { --t-bg: var(--tint-amber); --t-bd: rgba(251, 186, 72, 0.70); --t-ink: #7a5000; --t-solid: var(--kite-amber-400); }
-.tone-green { --t-bg: var(--tint-green); --t-bd: rgba(34, 197, 139, 0.50); --t-ink: #0b6b49; --t-solid: var(--color-emerald); }
-.tone-rose  { --t-bg: #fbd3d6;           --t-bd: rgba(224, 27, 40, 0.55);  --t-ink: #9c1218; --t-solid: var(--kite-red-400); }
-.tone-gray  { --t-bg: var(--studio-800); --t-bd: var(--border-medium);     --t-ink: var(--studio-300); --t-solid: var(--studio-500); }
+.tone-blue  { --t-bg: var(--tint-blue);  --t-bd: rgba(18, 171, 227, 0.45); --t-ink: #0a5f84; --t-solid: var(--kite-blue-700); --t-on: #fff; }
+.tone-red   { --t-bg: var(--tint-red);   --t-bd: rgba(224, 27, 40, 0.40);  --t-ink: #a81a1f; --t-solid: var(--kite-red-500); --t-on: #fff; }
+.tone-amber { --t-bg: var(--tint-amber); --t-bd: rgba(251, 186, 72, 0.70); --t-ink: #7a5000; --t-solid: var(--kite-amber-400); --t-on: #3d2a00; }
+.tone-green { --t-bg: var(--tint-green); --t-bd: rgba(34, 197, 139, 0.50); --t-ink: #0b6b49; --t-solid: #158f63; --t-on: #fff; }
+.tone-rose  { --t-bg: #fbd3d6;           --t-bd: rgba(224, 27, 40, 0.55);  --t-ink: #9c1218; --t-solid: var(--kite-red-400); --t-on: #fff; }
+.tone-gray  { --t-bg: var(--studio-800); --t-bd: var(--border-medium);     --t-ink: var(--studio-300); --t-solid: var(--studio-500); --t-on: #fff; }
 
 /* ---- toolbar ---- */
 .cal-toolbar { padding: var(--space-3); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -50,13 +50,13 @@
 .cal-events { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .cal-event {
   display: flex; align-items: center; gap: 4px; width: 100%; padding: 2px 6px; text-align: left; border-radius: 6px;
-  font-size: 11px; line-height: 1.35; font-weight: 600; color: var(--t-ink);
-  background: var(--t-bg); border: 1px solid var(--t-bd); border-left: 3px solid var(--t-solid);
+  font-size: 11px; line-height: 1.35; font-weight: 600; color: var(--t-on, #fff);
+  background: var(--t-solid); border: 0;
   overflow: hidden; cursor: pointer; transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 .cal-event span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-event svg { width: 11px; height: 11px; flex-shrink: 0; }
-.cal-event:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.cal-event:hover { filter: brightness(.92); }
 .cal-event[draggable="true"] { cursor: grab; }
 .cal-event.dragging { opacity: 0.45; }
 .cal-more { font-size: 10px; font-weight: 700; color: var(--text-muted); text-align: left; padding: 1px 6px; cursor: pointer; }
@@ -100,11 +100,11 @@
 .tl-weekend { position: absolute; top: 0; bottom: 0; background: rgba(123, 203, 227, 0.14); pointer-events: none; }
 .tl-bar {
   position: absolute; top: 6px; height: 26px; border-radius: 8px; padding: 0 8px; display: flex; align-items: center;
-  font-size: 11px; font-weight: 700; color: var(--t-ink); background: var(--t-bg); border: 1px solid var(--t-bd);
-  border-left: 4px solid var(--t-solid); cursor: pointer; overflow: hidden; white-space: nowrap; box-shadow: var(--shadow-sm);
+  font-size: 11px; font-weight: 700; color: var(--t-on, #fff); background: var(--t-solid); border: 0;
+  cursor: pointer; overflow: hidden; white-space: nowrap; 
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
 }
-.tl-bar:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); z-index: 2; }
+.tl-bar:hover { filter: brightness(.92); z-index: 2; }
 .tl-bar.clip-l { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .tl-bar.clip-r { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-style: dashed; }
 .tl-bar span { overflow: hidden; text-overflow: ellipsis; }
@@ -129,7 +129,7 @@
   .cal-cell { min-height: 74px; padding: 3px; }
   .cal-daynum { font-size: 11px; width: 20px; height: 20px; }
   .cal-add { display: none; }
-  .cal-event { padding: 1px 3px; font-size: 9.5px; border-left-width: 2px; }
+  .cal-event { padding: 1px 3px; font-size: 9.5px;  }
   .cal-grid-head > div { padding: 6px 2px; text-align: center; font-size: 9px; letter-spacing: 0; }
   .cal-mine { margin-left: 0; width: 100%; }
   .tl-label { width: 130px; min-width: 130px; }

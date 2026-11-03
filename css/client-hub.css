@@ -90,7 +90,7 @@
 a.ch-item:hover { background: var(--tint-red-soft); border-color: rgba(224, 27, 40, .25); }
 .ch-item span { color: var(--text-muted); font-size: var(--text-2xs); }
 .ch-item .ch-row { margin: 0; color: inherit; font-size: var(--text-xs); }
-.ch-item.ch-late { border-inline-start: 3px solid var(--kite-red-500); background: var(--tint-red-soft); font-weight: inherit; }
+.ch-item.ch-late { background: var(--tint-red); font-weight: inherit; }
 
 .ch-projects { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-3); }
 .ch-project { display: flex; flex-direction: column; gap: 8px; padding: var(--space-4); border-radius: var(--radius-lg); background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-sm); }
@@ -135,7 +135,7 @@ a.ch-item:hover { background: var(--tint-red-soft); border-color: rgba(224, 27, 
   background: color-mix(in srgb, var(--c) 18%, #fff); border-inline-start: 3px solid var(--c);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none;
 }
-a.ch-ev:hover { background: color-mix(in srgb, var(--c) 32%, #fff); }
+a.ch-ev:hover { filter: brightness(.9); }
 
 /* files */
 .ch-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: var(--space-3); }
