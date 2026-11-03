@@ -229,10 +229,24 @@ export class ChatModule {
         const live = status === 'SUBSCRIBED';
         badge.textContent = live ? 'Live Realtime' : (status === 'CONNECTING' || status === 'JOINING' ? 'Connecting…' : 'Reconnecting…');
         badge.className = `badge ${live ? 'badge-emerald' : 'badge-amber'}`;
+        this.setFallbackPolling(!live);
       });
   }
 
+  /** Safety net while the WebSocket is down: refresh the open conversation every few seconds. */
+  setFallbackPolling(on) {
+    clearInterval(this.pollTimer);
+    this.pollTimer = null;
+    if (!on) return;
+    this.pollTimer = setInterval(() => {
+      if (!document.getElementById('chatFeed') || document.hidden || !this.activeChannelId) return;
+      this.loadMessages(this.activeChannelId);
+    }, 4000);
+  }
+
   teardownRealtime() {
+    clearInterval(this.pollTimer);
+    this.pollTimer = null;
     const supabase = getSupabase();
     if (this.realtimeSub && supabase) supabase.removeChannel(this.realtimeSub);
     this.realtimeSub = null;
