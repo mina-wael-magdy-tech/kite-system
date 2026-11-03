@@ -18,6 +18,7 @@ import { getInitials, getAccentHex, escapeHTML, formatRelativeTime } from './uti
 import { DashboardModule } from './modules/dashboard/dashboard.js';
 import { TasksModule } from './modules/tasks/tasks.js';
 import { ProjectsModule } from './modules/projects/projects.js';
+import { ClientHubModule } from './modules/clients/client-hub.js';
 import { CampaignsModule } from './modules/campaigns/campaigns.js';
 import { EmployeesModule } from './modules/employees/employees.js';
 import { DepartmentsModule } from './modules/departments/departments.js';
@@ -144,6 +145,12 @@ class PulseStudioApp {
       title: 'Calendar & Timeline',
       breadcrumbs: ['Agency Workspace', 'Calendar & Timeline'],
       render: (container, query) => new CalendarModule(this).render(container, query)
+    });
+
+    AppRouter.register('clients', {
+      title: 'Clients',
+      breadcrumbs: ['Agency Workspace', 'Clients'],
+      render: (container, query) => new ClientHubModule(this).render(container, query)
     });
 
     AppRouter.register('projects', {

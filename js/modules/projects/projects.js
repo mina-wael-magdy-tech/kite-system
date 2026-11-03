@@ -140,9 +140,9 @@ export class ProjectsModule {
           </div>
 
           <div class="card-footer">
-            <a href="#tasks" class="btn btn-secondary btn-sm" style="width: 100%;">
-              View Linked Deliverables →
-            </a>
+            ${p.client_id
+              ? `<a href="#clients?client=${p.client_id}" class="btn btn-secondary btn-sm" style="width: 100%;">Open client page →</a>`
+              : `<a href="#tasks" class="btn btn-secondary btn-sm" style="width: 100%;">View Linked Deliverables →</a>`}
           </div>
         </div>
       `;
@@ -158,14 +158,18 @@ export class ProjectsModule {
     return Permissions.isAdmin() || p.project_manager_id === me || p.created_by === me;
   }
 
-  openEditDialog(id) {
+  async openEditDialog(id) {
     const p = this.projects.find(x => x.id === id);
     if (!p) return;
+    const { data: clients } = await getSupabase().from('clients').select('id, name, company_name').order('company_name');
     formDialog({
       title: `Edit ${p.name}`,
       subtitle: 'Change the project name, code, status, budget, deadline or description.',
       fields: [
         { name: 'name', label: 'Project name', required: true, value: p.name, maxlength: 160 },
+        { name: 'clientId', label: 'Client', type: 'select', value: p.client_id || '', options: [
+          { value: '', label: 'No client (internal work)' },
+          ...(clients || []).map(c => ({ value: c.id, label: c.company_name || c.name }))] },
         { name: 'code', label: 'Code', required: true, half: true, value: p.code, maxlength: 20 },
         { name: 'status', label: 'Status', type: 'select', half: true, value: p.status, options: [
           { value: 'planning', label: 'Planning' }, { value: 'active', label: 'Active' }, { value: 'on_hold', label: 'On hold' },
@@ -176,7 +180,7 @@ export class ProjectsModule {
       ],
       onSubmit: async (v) => {
         const { data, error } = await getSupabase().from('projects')
-          .update({ name: v.name, code: v.code, status: v.status, budget: v.budget ?? 0, deadline: v.deadline, description: v.description })
+          .update({ name: v.name, code: v.code, client_id: v.clientId || null, status: v.status, budget: v.budget ?? 0, deadline: v.deadline, description: v.description })
           .eq('id', id).select('id');
         if (error) throw new Error(error.code === '23505' ? 'That project code is already used.' : error.message);
         if (!data?.length) throw new Error('You do not have permission to edit this project.');
@@ -219,6 +223,11 @@ export class ProjectsModule {
             <input id="projNameInput" type="text" required placeholder="e.g. Aura Coffee Brand Flagship Launch" class="form-control" />
           </div>
 
+          <div class="form-group">
+            <label class="form-label" for="projClientSelect">Client</label>
+            <select id="projClientSelect" class="form-control"><option value="">No client (internal work)</option></select>
+          </div>
+
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
             <div class="form-group">
               <label class="form-label" for="projCodeInput">Project Code *</label>
@@ -256,6 +265,11 @@ export class ProjectsModule {
 
     modalBackdrop.classList.add('active');
 
+    getSupabase().from('clients').select('id, name, company_name').order('company_name').then(({ data }) => {
+      const sel = document.getElementById('projClientSelect');
+      if (sel) sel.insertAdjacentHTML('beforeend', (data || []).map(c => `<option value="${c.id}">${escapeHTML(c.company_name || c.name)}</option>`).join(''));
+    });
+
     document.getElementById('btnCancelProj')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
     document.getElementById('btnCancelProjAction')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
 
@@ -276,6 +290,7 @@ export class ProjectsModule {
           budget,
           deadline,
           description,
+          client_id: document.getElementById('projClientSelect')?.value || null,
           status: 'active',
           created_by: this.app.currentUser.id
         });
