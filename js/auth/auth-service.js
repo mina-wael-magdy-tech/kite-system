@@ -26,7 +26,7 @@ class AuthService {
       .single();
 
     if (profile && (profile.employment_status === 'suspended' || profile.employment_status === 'inactive')) {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
       throw new Error('Your employee account has been deactivated or suspended. Please contact your studio administrator.');
     }
 
@@ -41,7 +41,7 @@ class AuthService {
     } catch { /* never block sign-out */ }
     const supabase = getSupabase();
     if (supabase) {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
     }
     localStorage.removeItem('pulse_studio_auth_token');
     window.location.href = 'login.html';

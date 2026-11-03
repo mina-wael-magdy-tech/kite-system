@@ -38,7 +38,7 @@ async function invoke(name, body) {
       result = await callFunction(supabase, name, body);
     }
     if (result.error && SESSION_ERROR.test(result.error)) {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
       window.location.href = 'login.html';
       throw new Error('Your session has expired. Please sign in again.');
     }
