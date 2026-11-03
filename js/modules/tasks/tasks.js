@@ -28,7 +28,7 @@ export class TasksModule {
     this.selectedPriority = 'ALL';
   }
 
-  async render(container) {
+  async render(container, query) {
     container.innerHTML = `
       <div class="page-container animate-fade-in">
         <!-- Header & Action Bar -->
@@ -106,6 +106,13 @@ export class TasksModule {
     `;
 
     this.attachEventListeners();
+    // #tasks?q=... comes from the top search box
+    const q = new URLSearchParams(query || '').get('q');
+    if (q) {
+      this.searchQuery = q.toLowerCase();
+      const field = document.getElementById('taskSearchField');
+      if (field) field.value = q;
+    }
     await this.loadData();
     Realtime.watch(['tasks', 'task_comments', 'task_attachments', 'task_links'], async () => {
       await this.loadData();

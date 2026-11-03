@@ -234,6 +234,43 @@ class PulseStudioApp {
       overlay?.classList.remove('active');
     });
 
+    // Close the phone drawer after any navigation (link tap, back button, notification)
+    const closeDrawer = () => {
+      sidebar?.classList.remove('mobile-open');
+      overlay?.classList.remove('active');
+    };
+    document.querySelector('.sidebar-nav')?.addEventListener('click', (e) => {
+      if (e.target.closest('a[href^="#"]')) closeDrawer();
+    });
+    window.addEventListener('hashchange', closeDrawer);
+
+    // Escape closes the notification panel, drawer and user menu
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      document.getElementById('notificationPanelBackdrop')?.classList.remove('active');
+      closeDrawer();
+      const menu = document.getElementById('userDropdownMenu');
+      if (menu) menu.style.display = 'none';
+    });
+
+    // Top search: Enter jumps to the task list filtered by what was typed
+    const search = document.getElementById('globalSearchInput');
+    search?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const q = search.value.trim();
+      if (!q) return;
+      const target = `#tasks?q=${encodeURIComponent(q)}`;
+      search.value = '';
+      search.blur();
+      window.location.hash = target;
+    });
+
+    // Hide menu entries the person is not allowed to open (instead of "Access Denied")
+    document.querySelectorAll('.sidebar-nav .nav-item[data-route]').forEach(el => {
+      const route = el.getAttribute('data-route');
+      if (!Permissions.canAccessModule(route)) el.style.display = 'none';
+    });
+
     // User menu toggle
     const userMenuBtn = document.getElementById('userMenuBtn');
     const userDropdownMenu = document.getElementById('userDropdownMenu');
