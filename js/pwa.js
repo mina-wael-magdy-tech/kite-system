@@ -49,11 +49,38 @@ window.addEventListener('appinstalled', () => {
 });
 
 // -------------------------------------------------- service worker + updates
-function watchForUpdates(reg) {
-  const announce = (worker) => {
-    Toast.info('A new version of Kite System is ready. Reloading to update…', 'Update available');
-    worker.postMessage({ type: 'SKIP_WAITING' });
+function showUpdatePopup(worker) {
+  if (document.getElementById('kiteUpdatePopup')) return;
+  const css = (el, rules) => { Object.assign(el.style, rules); return el; };
+  const wrap = css(document.createElement('div'), { position: 'fixed', inset: '0', zIndex: '10000', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(20,32,48,.5)', padding: '16px' });
+  wrap.id = 'kiteUpdatePopup';
+  wrap.setAttribute('role', 'dialog');
+  wrap.setAttribute('aria-modal', 'true');
+  wrap.setAttribute('aria-labelledby', 'kiteUpdateTitle');
+  const card = css(document.createElement('div'), { background: '#fff', color: '#14202e', borderRadius: '12px', padding: '24px', width: '100%', maxWidth: '380px', fontFamily: "'Poppins','Cairo','Segoe UI',sans-serif", boxShadow: '0 8px 24px rgba(20,32,48,.25)', textAlign: 'center' });
+  const bar = css(document.createElement('div'), { height: '6px', margin: '-24px -24px 20px', borderRadius: '12px 12px 0 0', background: 'linear-gradient(90deg,#e01b28 0 50%,#fbba48 50% 78%,#7bcbe3 78% 100%)' });
+  const title = css(document.createElement('h2'), { margin: '0 0 8px', fontSize: '18px', fontWeight: '700' });
+  title.id = 'kiteUpdateTitle'; title.textContent = 'New update available';
+  const text = css(document.createElement('p'), { margin: '0 0 20px', fontSize: '14px', lineHeight: '1.6', color: '#4b5a6b' });
+  text.textContent = 'A newer version of Kite System is ready. Update now to get the latest changes. The page will reload.';
+  const row = css(document.createElement('div'), { display: 'flex', gap: '8px' });
+  const btn = (label, primary) => {
+    const b = css(document.createElement('button'), { flex: '1', padding: '11px 12px', borderRadius: '8px', font: 'inherit', fontSize: '14px', fontWeight: '600', cursor: 'pointer', border: primary ? '1px solid #e01b28' : '1px solid #d4dce6', background: primary ? '#e01b28' : '#fff', color: primary ? '#fff' : '#14202e' });
+    b.type = 'button'; b.textContent = label; return b;
   };
+  const later = btn('Later', false);
+  const now = btn('Update now', true);
+  later.addEventListener('click', () => wrap.remove());
+  now.addEventListener('click', () => { now.disabled = true; now.textContent = 'Updating…'; worker.postMessage({ type: 'SKIP_WAITING' }); });
+  row.append(later, now);
+  card.append(bar, title, text, row);
+  wrap.append(card);
+  document.body.append(wrap);
+  now.focus();
+}
+
+function watchForUpdates(reg) {
+  const announce = (worker) => showUpdatePopup(worker);
   if (reg.waiting && navigator.serviceWorker.controller) announce(reg.waiting);
   reg.addEventListener('updatefound', () => {
     const worker = reg.installing;
@@ -61,8 +88,9 @@ function watchForUpdates(reg) {
       if (worker.state === 'installed' && navigator.serviceWorker.controller) announce(worker);
     });
   });
-  // check for a new deploy whenever the app comes back to the foreground
+  // check for a new deploy whenever the app comes back to the foreground, and every 30 minutes
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
 }
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
