@@ -138,6 +138,9 @@ class PulseStudioApp {
     if (adminNavGroup) adminNavGroup.style.display = isAdmin ? 'block' : 'none';
     const bcNav = document.getElementById('broadcastNavItem');
     if (bcNav) bcNav.style.display = canBroadcast() ? 'flex' : 'none';
+    // money is for the owner / CEO only
+    const finNav = document.getElementById('financeNavItem');
+    if (finNav) finNav.style.display = canBroadcast() ? 'flex' : 'none';
     if (menuAdminLink) menuAdminLink.style.display = isAdmin ? 'flex' : 'none';
   }
 

@@ -11,6 +11,8 @@ import { Api } from '../../services/api.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
 import { formatExpenseStatusBadge } from '../../utils/formatters.js';
 
+import { Money } from '../../services/money.js';
+
 export class FinanceModule {
   constructor(app) {
     this.app = app;
@@ -20,6 +22,11 @@ export class FinanceModule {
   }
 
   async render(container) {
+    if (!Money.canSee()) {
+      container.innerHTML = `<div class="page-container"><div class="empty-state"><div class="empty-state-icon"><i data-lucide="lock"></i></div>
+        <div class="empty-state-title">Owner and CEO only</div><div class="empty-state-desc">Finance is only available to the owner or CEO.</div></div></div>`;
+      return;
+    }
     const isFinanceOrAdmin = Permissions.isAdmin() || Permissions.hasRole('finance_manager');
 
     container.innerHTML = `

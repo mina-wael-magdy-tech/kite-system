@@ -9,6 +9,7 @@ import { Toast } from '../../services/toast-service.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatCurrency } from '../../utils/helpers.js';
+import { Money } from '../../services/money.js';
 import { formatLeadStageBadge } from '../../utils/formatters.js';
 
 export class CrmModule {
@@ -36,14 +37,14 @@ export class CrmModule {
             <button type="button" class="btn btn-primary btn-sm" id="btnCreateClient">
               <i data-lucide="building"></i> Add New Client
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" id="btnCreateLead">
+            ${Money.canSee() ? `<button type="button" class="btn btn-secondary btn-sm" id="btnCreateLead">
               <i data-lucide="plus"></i> New Deal / Opportunity
-            </button>
+            </button>` : ''}
           </div>
         </div>
 
-        <!-- Deal Pipeline Stages (7 Stages) -->
-        <div>
+        <!-- Deal Pipeline Stages: money, so owner / CEO only -->
+        <div ${Money.canSee() ? '' : 'style="display:none"'}>
           <div style="margin-bottom: var(--space-3); display: flex; align-items: center; justify-content: space-between;">
             <h2 class="font-display font-bold text-sm text-white">Deal Funnel & Pitch Pipeline</h2>
             <span class="badge badge-emerald font-bold" id="pipelineTotalVal">Pipeline: EGP 0</span>
@@ -120,6 +121,8 @@ export class CrmModule {
 
       this.clients = clients || [];
       this.departments = depts || [];
+      this.monthly = await Money.map('client_monthly');
+      this.dealValues = await Money.map('lead_value');
       const sel = document.getElementById('clientDeptFilter');
       if (sel) {
         sel.innerHTML = '<option value="all">All departments</option>' +
@@ -133,7 +136,7 @@ export class CrmModule {
         .select('*, client:clients(name, company_name)')
         .order('created_at', { ascending: false });
 
-      this.leads = leads || [];
+      this.leads = (leads || []).map(l => ({ ...l, value: this.dealValues.get(l.id) ?? 0 }));
 
       this.renderPipeline();
       this.renderClientsTable();
@@ -263,10 +266,11 @@ export class CrmModule {
       ],
       onSubmit: async (v) => {
         const { data, error } = await getSupabase().from('leads')
-          .update({ title: v.title, value: v.value ?? 0, stage: v.stage, client_id: v.client_id, expected_close_date: v.expected_close_date, notes: v.notes })
+          .update({ title: v.title, stage: v.stage, client_id: v.client_id, expected_close_date: v.expected_close_date, notes: v.notes })
           .eq('id', id).select('id');
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error('You do not have permission to edit this deal.');
+        await Money.save('lead_value', id, v.value, this.app.currentUser.id);
         Toast.success('Deal updated', 'Saved');
         await this.loadCrmData();
       }
@@ -296,9 +300,9 @@ export class CrmModule {
 
     if (badge) badge.textContent = `${displayClients.length} Accounts`;
     const retainerTotal = displayClients.filter(c => c.client_type === 'retainer' && c.status === 'active')
-      .reduce((sum, c) => sum + Number(c.monthly_budget || 0), 0);
+      .reduce((sum, c) => sum + Number(this.monthly.get(c.id) || 0), 0);
     const totalEl = document.getElementById('clientRetainerTotal');
-    if (totalEl) totalEl.textContent = retainerTotal ? `Regular clients bring ${formatCurrency(retainerTotal)} / month` : '';
+    if (totalEl) totalEl.textContent = Money.canSee() && retainerTotal ? `Regular clients bring ${formatCurrency(retainerTotal)} / month` : '';
 
     if (displayClients.length === 0) {
       tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">${this.clients.length ? 'No clients match these filters.' : 'No client accounts yet.'}</td></tr>`;
@@ -312,8 +316,8 @@ export class CrmModule {
         </td>
         <td>
           ${c.client_type === 'retainer'
-            ? `<span class="badge badge-emerald">Regular</span><div class="font-mono text-2xs font-bold" style="margin-top: 4px;">${c.monthly_budget ? `${formatCurrency(c.monthly_budget)} / month` : 'Budget not set'}</div>`
-            : `<span class="badge badge-slate">Project-based</span><div class="text-2xs text-dim" style="margin-top: 4px;">Budget per project</div>`}
+            ? `<span class="badge badge-emerald">Regular</span>${Money.canSee() ? `<div class="font-mono text-2xs font-bold" style="margin-top: 4px;">${this.monthly.get(c.id) ? `${formatCurrency(this.monthly.get(c.id))} / month` : 'Budget not set'}</div>` : ''}`
+            : `<span class="badge badge-slate">Project-based</span>${Money.canSee() ? '<div class="text-2xs text-dim" style="margin-top: 4px;">Budget per project</div>' : ''}`}
         </td>
         <td>
           <div style="display: flex; flex-wrap: wrap; gap: 4px;">
@@ -353,19 +357,20 @@ export class CrmModule {
           { value: 'active', label: 'Active' }, { value: 'prospect', label: 'Prospect' }, { value: 'lead', label: 'Lead' }, { value: 'inactive', label: 'Inactive' }] },
         { name: 'client_type', label: 'Client type', type: 'select', half: true, value: c.client_type || 'project', options: [
           { value: 'retainer', label: 'Regular — fixed monthly budget' }, { value: 'project', label: 'Project-based — not regular' }] },
-        { name: 'monthly_budget', label: 'Monthly budget (EGP)', type: 'number', half: true, min: 0, value: c.monthly_budget ?? '', hint: 'Only for regular clients.' },
+        ...(Money.canSee() ? [{ name: 'monthly_budget', label: 'Monthly budget (EGP)', type: 'number', half: true, min: 0, value: this.monthly.get(c.id) ?? '', hint: 'Only for regular clients.' }] : []),
         { name: 'departments', label: 'Departments serving this client', type: 'checkboxes', value: (c.client_departments || []).map(x => x.department_id),
           options: this.departments.map(d => ({ value: d.id, label: d.name })) }
       ],
       onSubmit: async (v) => {
-        const budget = this.checkBudget(v.client_type, v.monthly_budget);
+        const budget = Money.canSee() ? this.checkBudget(v.client_type, v.monthly_budget) : null;
         const { data, error } = await getSupabase().from('clients')
           .update({ company_name: v.company_name, name: v.name || v.company_name, industry: v.industry, email: v.email, phone: v.phone, status: v.status,
-                    client_type: v.client_type, monthly_budget: budget })
+                    client_type: v.client_type })
           .eq('id', id).select('id');
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error('You do not have permission to edit clients.');
         await this.saveClientDepartments(id, v.departments);
+        if (Money.canSee()) await Money.save('client_monthly', id, budget, this.app.currentUser.id);
         Toast.success('Client updated', 'Saved');
         await this.loadCrmData();
       }
@@ -449,7 +454,7 @@ export class CrmModule {
                 <option value="retainer">Regular (fixed monthly budget)</option>
               </select>
             </div>
-            <div class="form-group" id="clientBudgetGroup" style="display: none;">
+            <div class="form-group" id="clientBudgetGroup" style="display: none;" data-money="${Money.canSee() ? '1' : '0'}">
               <label class="form-label" for="clientBudget">Monthly budget (EGP) *</label>
               <input id="clientBudget" type="number" min="0" step="any" placeholder="e.g. 25000" class="form-control" />
             </div>
@@ -476,7 +481,7 @@ export class CrmModule {
     document.getElementById('btnCancelClientAction')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
 
     document.getElementById('clientType')?.addEventListener('change', (e) => {
-      document.getElementById('clientBudgetGroup').style.display = e.target.value === 'retainer' ? '' : 'none';
+      document.getElementById('clientBudgetGroup').style.display = (e.target.value === 'retainer' && Money.canSee()) ? '' : 'none';
     });
 
     document.getElementById('createClientForm')?.addEventListener('submit', async (e) => {
@@ -491,7 +496,7 @@ export class CrmModule {
       const supabase = getSupabase();
       try {
         const clientType = document.getElementById('clientType').value;
-        const budget = this.checkBudget(clientType, document.getElementById('clientBudget').value);
+        const budget = Money.canSee() ? this.checkBudget(clientType, document.getElementById('clientBudget').value) : null;
         const deptIds = [...document.querySelectorAll('input[name="clientDepts"]:checked')].map(c => c.value);
         const { data: created, error } = await supabase.from('clients').insert({
           company_name: companyName,
@@ -501,12 +506,12 @@ export class CrmModule {
           phone,
           status: 'active',
           client_type: clientType,
-          monthly_budget: budget,
           created_by: this.app.currentUser.id
         }).select('id').single();
 
         if (error) throw error;
         await this.saveClientDepartments(created.id, deptIds);
+        if (Money.canSee()) await Money.save('client_monthly', created.id, budget, this.app.currentUser.id);
         Toast.success(`Client account "${companyName}" added!`, 'Client Portfolio');
         modalBackdrop.classList.remove('active');
         await this.loadCrmData();
@@ -575,14 +580,14 @@ export class CrmModule {
 
       const supabase = getSupabase();
       try {
-        const { error } = await supabase.from('leads').insert({
+        const { data: made, error } = await supabase.from('leads').insert({
           title,
-          value,
           stage,
           created_by: this.app.currentUser.id
-        });
+        }).select('id').single();
 
         if (error) throw error;
+        await Money.save('lead_value', made.id, value, this.app.currentUser.id);
         Toast.success('Deal opportunity added to funnel!', 'Pipeline Updated');
         modalBackdrop.classList.remove('active');
         await this.loadCrmData();

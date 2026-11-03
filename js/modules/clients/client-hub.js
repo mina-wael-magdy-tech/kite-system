@@ -13,6 +13,7 @@ import { CONFIG } from '../../config.js';
 import { Toast } from '../../services/toast-service.js';
 import { Realtime } from '../../services/realtime-service.js';
 import { formDialog } from '../../ui/dialogs.js';
+import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency, debounce } from '../../utils/helpers.js';
 
 const DONE = new Set(['completed', 'approved']);
@@ -113,6 +114,7 @@ export class ClientHubModule {
     const camps = await sb.from('campaigns').select('id, client_id');
     this.clients = cl.data || [];
     this.departments = dp.data || [];
+    this.monthly = await Money.map('client_monthly'); // empty unless you are the owner / CEO
 
     const projClient = new Map((pr.data || []).map(p => [p.id, p.client_id]));
     const campClient = new Map((camps.data || []).map(c => [c.id, c.client_id]));
@@ -167,8 +169,8 @@ export class ClientHubModule {
           </div>
           <span class="ch-type">${regular ? 'Regular' : 'Project-based'}</span>
         </div>
-        <div class="ch-money">${regular && c.monthly_budget != null
-          ? `<strong>${formatCurrency(c.monthly_budget)}</strong><span>per month</span>` : '<span>Budget set per project</span>'}</div>
+        ${Money.canSee() ? `<div class="ch-money">${regular && this.monthly.get(c.id) != null
+          ? `<strong>${formatCurrency(this.monthly.get(c.id))}</strong><span>per month</span>` : '<span>Budget set per project</span>'}</div>` : ''}
         <div class="ch-depts">${depts.length ? depts.slice(0, 4).map(n => `<span class="ch-chip">${escapeHTML(n)}</span>`).join('') + (depts.length > 4 ? `<span class="ch-chip">+${depts.length - 4}</span>` : '') : '<span class="text-2xs text-dim">No departments yet</span>'}</div>
         <div>
           <div class="ch-row"><span>${s.open} open · ${s.done} done${s.late ? ` · <b class="ch-late">${s.late} late</b>` : ''}</span><span>${pct}%</span></div>
@@ -226,7 +228,9 @@ export class ClientHubModule {
       attachments = data || [];
     }
     this.departments = dp.data || [];
-    this.data = { client, projects, campaigns, plans, posts: po.data || [], tasks, assets: as.data || [], attachments };
+    const monthly = (await Money.map('client_monthly')).get(id) ?? null;
+    const projMoney = await Money.map('project_budget');
+    this.data = { client, projects, campaigns, plans, posts: po.data || [], tasks, assets: as.data || [], attachments, monthly, projMoney };
     return true;
   }
 
@@ -242,7 +246,7 @@ export class ClientHubModule {
             <h1 class="font-display font-bold text-xl">${escapeHTML(clientName(c))}</h1>
             <div class="ch-meta">
               <span class="ch-type">${regular ? 'Regular client' : 'Project-based'}</span>
-              ${regular && c.monthly_budget != null ? `<span><b>${formatCurrency(c.monthly_budget)}</b> / month</span>` : ''}
+              ${regular && this.data.monthly != null ? `<span><b>${formatCurrency(this.data.monthly)}</b> / month</span>` : ''}
               ${c.industry ? `<span>${escapeHTML(c.industry)}</span>` : ''}
               ${c.email ? `<span>${escapeHTML(c.email)}</span>` : ''}
               ${c.phone ? `<span dir="ltr">${escapeHTML(c.phone)}</span>` : ''}
@@ -325,7 +329,7 @@ export class ClientHubModule {
       <div class="ch-row"><b class="ch-ellipsis">${escapeHTML(p.name)}</b>${badge(String(p.status).replace('_', ' '), p.status === 'completed' ? 'emerald' : 'indigo')}</div>
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
       <div class="ch-row text-2xs"><span>${done}/${mine.length} tasks · ${pct}%</span><span>${p.deadline ? 'Due ' + formatDate(p.deadline) : ''}</span></div>
-      <div class="ch-row text-2xs"><span>${escapeHTML(p.code || '')}</span><span>Budget ${formatCurrency(p.budget || 0)}</span></div>
+      <div class="ch-row text-2xs"><span>${escapeHTML(p.code || '')}</span><span>${Money.canSee() ? 'Budget ' + formatCurrency(this.data.projMoney.get(p.id) || 0) : ''}</span></div>
     </div>`;
   }
 
@@ -512,16 +516,17 @@ export class ClientHubModule {
       fields: [
         { name: 'name', label: 'Project name', required: true, maxlength: 160, placeholder: 'e.g. Summer menu launch' },
         { name: 'code', label: 'Code', required: true, half: true, maxlength: 20, placeholder: 'e.g. TAL-01' },
-        { name: 'budget', label: 'Budget (EGP)', type: 'number', half: true, min: 0, value: 0 },
+        ...(Money.canSee() ? [{ name: 'budget', label: 'Budget (EGP)', type: 'number', half: true, min: 0, value: 0 }] : []),
         { name: 'deadline', label: 'Deadline', type: 'date', required: true, value: iso(d) },
         { name: 'description', label: 'Scope', type: 'textarea', rows: 3 }
       ],
       onSubmit: async (v) => {
-        const { error } = await this.supabase.from('projects').insert({
-          name: v.name, code: String(v.code).toUpperCase(), budget: v.budget ?? 0, deadline: v.deadline, description: v.description,
+        const { data: made, error } = await this.supabase.from('projects').insert({
+          name: v.name, code: String(v.code).toUpperCase(), deadline: v.deadline, description: v.description,
           client_id: c.id, status: 'active', created_by: this.app.currentUser.id
-        });
+        }).select('id').single();
         if (error) throw new Error(error.code === '23505' ? 'That project code is already used.' : error.message);
+        await Money.save('project_budget', made.id, v.budget, this.app.currentUser.id);
         Toast.success('Project created', 'Added');
         if (await this.loadClient()) this.paintTab();
       }

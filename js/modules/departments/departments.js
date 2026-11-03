@@ -9,6 +9,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatCurrency } from '../../utils/helpers.js';
+import { Money } from '../../services/money.js';
 
 export class DepartmentsModule {
   constructor(app) {
@@ -66,6 +67,7 @@ export class DepartmentsModule {
         .order('name', { ascending: true });
 
       if (error) throw error;
+      this.budgets = await Money.map('department_budget'); // empty unless you are the owner / CEO
       this.departments = depts || [];
       this.renderDepartments();
     } catch (err) {
@@ -109,10 +111,10 @@ export class DepartmentsModule {
                 <span class="text-dim block">Department Manager</span>
                 <strong class="text-white">${escapeHTML(d.manager?.full_name || 'Not assigned')}</strong>
               </div>
-              <div>
+              ${Money.canSee() ? `<div>
                 <span class="text-dim block">Annual Budget</span>
-                <strong class="font-mono text-emerald">${formatCurrency(d.budget || 0)}</strong>
-              </div>
+                <strong class="font-mono text-emerald">${formatCurrency(this.budgets.get(d.id) || 0)}</strong>
+              </div>` : ''}
             </div>
           </div>
 
@@ -140,7 +142,7 @@ export class DepartmentsModule {
       fields: [
         { name: 'name', label: 'Department name', required: true, value: d.name, maxlength: 100 },
         { name: 'code', label: 'Code', half: true, value: d.code || '', maxlength: 12 },
-        { name: 'budget', label: 'Annual budget', type: 'number', half: true, min: 0, value: d.budget ?? 0 },
+        ...(Money.canSee() ? [{ name: 'budget', label: 'Annual budget', type: 'number', half: true, min: 0, value: this.budgets.get(d.id) ?? 0 }] : []),
         { name: 'manager_id', label: 'Department manager', type: 'select', value: d.manager_id || '', options: [
           { value: '', label: 'Not assigned' }, ...(people || []).map(p => ({ value: p.id, label: p.full_name }))],
           hint: 'The manager can see and manage every task in this department.' },
@@ -148,10 +150,11 @@ export class DepartmentsModule {
       ],
       onSubmit: async (v) => {
         const { data, error } = await getSupabase().from('departments')
-          .update({ name: v.name, code: v.code, budget: v.budget ?? 0, manager_id: v.manager_id, description: v.description })
+          .update({ name: v.name, code: v.code, manager_id: v.manager_id, description: v.description })
           .eq('id', id).select('id');
         if (error) throw new Error(error.code === '23505' ? 'That name or code is already used.' : error.message);
         if (!data?.length) throw new Error('Only an administrator can edit departments.');
+        await Money.save('department_budget', id, v.budget, this.app.currentUser.id);
         Toast.success('Department updated', 'Saved');
         await this.loadDepartments();
       }
@@ -193,10 +196,10 @@ export class DepartmentsModule {
             <input id="deptCodeInput" type="text" required placeholder="e.g. CGI" class="form-control" />
           </div>
 
-          <div class="form-group">
+          ${Money.canSee() ? `<div class="form-group">
             <label class="form-label" for="deptBudgetInput">Department Budget (EGP)</label>
             <input id="deptBudgetInput" type="number" value="40000" class="form-control" />
-          </div>
+          </div>` : ''}
 
           <div class="form-group">
             <label class="form-label" for="deptDescInput">Specialty Description</label>
@@ -221,19 +224,19 @@ export class DepartmentsModule {
 
       const name = document.getElementById('deptNameInput').value.trim();
       const code = document.getElementById('deptCodeInput').value.trim().toUpperCase();
-      const budget = Number(document.getElementById('deptBudgetInput').value) || 0;
+      const budget = Number(document.getElementById('deptBudgetInput')?.value) || 0;
       const description = document.getElementById('deptDescInput').value.trim();
 
       const supabase = getSupabase();
       try {
-        const { error } = await supabase.from('departments').insert({
+        const { data: made, error } = await supabase.from('departments').insert({
           name,
           code,
-          budget,
           description
-        });
+        }).select('id').single();
 
         if (error) throw error;
+        await Money.save('department_budget', made.id, budget, this.app.currentUser.id);
         Toast.success(`Department "${name}" created!`, 'Department Added');
         modalBackdrop.classList.remove('active');
         await this.loadDepartments();

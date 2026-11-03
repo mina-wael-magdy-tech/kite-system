@@ -9,6 +9,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
+import { Money } from '../../services/money.js';
 
 export class ProjectsModule {
   constructor(app) {
@@ -65,6 +66,7 @@ export class ProjectsModule {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
+      this.budgets = await Money.map('project_budget'); // empty unless you are the owner / CEO
       this.projects = projects || [];
       this.renderProjectsGrid();
     } catch (err) {
@@ -128,10 +130,10 @@ export class ProjectsModule {
                 <span class="text-dim block">Project Manager</span>
                 <strong class="text-white">${escapeHTML(p.project_manager?.full_name || 'Not assigned')}</strong>
               </div>
-              <div>
+              ${Money.canSee() ? `<div>
                 <span class="text-dim block">Budget</span>
-                <strong class="font-mono text-emerald">${formatCurrency(p.budget || 0)}</strong>
-              </div>
+                <strong class="font-mono text-emerald">${formatCurrency(this.budgets.get(p.id) || 0)}</strong>
+              </div>` : ''}
               <div>
                 <span class="text-dim block">Launch Date</span>
                 <strong class="font-mono text-white">${(p.deadline ? formatDate(p.deadline) : 'Not set')}</strong>
@@ -174,16 +176,17 @@ export class ProjectsModule {
         { name: 'status', label: 'Status', type: 'select', half: true, value: p.status, options: [
           { value: 'planning', label: 'Planning' }, { value: 'active', label: 'Active' }, { value: 'on_hold', label: 'On hold' },
           { value: 'under_review', label: 'Under review' }, { value: 'completed', label: 'Completed' }, { value: 'cancelled', label: 'Cancelled' }] },
-        { name: 'budget', label: 'Budget', type: 'number', half: true, min: 0, value: p.budget ?? 0 },
+        ...(Money.canSee() ? [{ name: 'budget', label: 'Budget', type: 'number', half: true, min: 0, value: this.budgets.get(p.id) ?? 0 }] : []),
         { name: 'deadline', label: 'Deadline', type: 'date', half: true, value: (p.deadline || '').slice(0, 10) },
         { name: 'description', label: 'Description', type: 'textarea', value: p.description || '', rows: 3 }
       ],
       onSubmit: async (v) => {
         const { data, error } = await getSupabase().from('projects')
-          .update({ name: v.name, code: v.code, client_id: v.clientId || null, status: v.status, budget: v.budget ?? 0, deadline: v.deadline, description: v.description })
+          .update({ name: v.name, code: v.code, client_id: v.clientId || null, status: v.status, deadline: v.deadline, description: v.description })
           .eq('id', id).select('id');
         if (error) throw new Error(error.code === '23505' ? 'That project code is already used.' : error.message);
         if (!data?.length) throw new Error('You do not have permission to edit this project.');
+        await Money.save('project_budget', id, v.budget, this.app.currentUser.id);
         Toast.success('Project updated', 'Saved');
         await this.loadProjects();
       }
@@ -233,10 +236,10 @@ export class ProjectsModule {
               <label class="form-label" for="projCodeInput">Project Code *</label>
               <input id="projCodeInput" type="text" required placeholder="e.g. AUR-2026" class="form-control" />
             </div>
-            <div class="form-group">
+            ${Money.canSee() ? `<div class="form-group">
               <label class="form-label" for="projBudgetInput">Budget (EGP)</label>
               <input id="projBudgetInput" type="number" value="25000" class="form-control" />
-            </div>
+            </div>` : '<div></div>'}
           </div>
 
           <div class="form-group">
@@ -278,24 +281,24 @@ export class ProjectsModule {
 
       const name = document.getElementById('projNameInput').value.trim();
       const code = document.getElementById('projCodeInput').value.trim().toUpperCase();
-      const budget = Number(document.getElementById('projBudgetInput').value) || 0;
+      const budget = Number(document.getElementById('projBudgetInput')?.value) || 0;
       const deadline = document.getElementById('projDeadlineInput').value;
       const description = document.getElementById('projDescInput').value.trim();
 
       const supabase = getSupabase();
       try {
-        const { error } = await supabase.from('projects').insert({
+        const { data: made, error } = await supabase.from('projects').insert({
           name,
           code,
-          budget,
           deadline,
           description,
           client_id: document.getElementById('projClientSelect')?.value || null,
           status: 'active',
           created_by: this.app.currentUser.id
-        });
+        }).select('id').single();
 
         if (error) throw error;
+        await Money.save('project_budget', made.id, budget, this.app.currentUser.id);
         Toast.success('Client project created successfully', 'Project Added');
         modalBackdrop.classList.remove('active');
         await this.loadProjects();
