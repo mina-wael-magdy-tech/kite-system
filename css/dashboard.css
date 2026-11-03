@@ -155,7 +155,7 @@
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-emerald) 100%);
+  background: var(--color-primary);
   border-radius: var(--radius-full);
 }
 
@@ -231,7 +231,7 @@
 }
 
 .msg-outgoing .chat-msg-bubble {
-  background: linear-gradient(135deg, #e8222f 0%, #c31a21 100%);
+  background: #e01b28;
   color: #ffffff;
   border-bottom-right-radius: var(--radius-xs);
 }
@@ -279,19 +279,19 @@
 }
 
 .org-node.admin-node {
-  background: linear-gradient(180deg, rgba(251, 186, 72, 0.13) 0%, var(--studio-900) 100%);
+  background: var(--studio-900);
   border-color: var(--color-amber-border);
 }
 
 .org-node.manager-node {
-  background: linear-gradient(180deg, rgba(224, 27, 40, 0.11) 0%, var(--studio-900) 100%);
+  background: var(--studio-900);
   border-color: var(--color-primary-border);
 }
 
 .tree-connector-line {
   width: 2px;
   height: 28px;
-  background: linear-gradient(180deg, #e01b28 0%, #fbba48 100%);
+  background: var(--border-medium);
 }
 
 /* ====================================================================

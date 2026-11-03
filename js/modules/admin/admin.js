@@ -23,7 +23,7 @@ export class AdminModule {
       container.innerHTML = `
         <div class="page-container animate-fade-in">
           <div class="glass-panel" style="padding: var(--space-8); text-align: center; max-width: 520px; margin: 40px auto; border-color: var(--color-amber-border);">
-            <div style="font-size: 36px; margin-bottom: var(--space-3);">🔒</div>
+            <div style="margin-bottom: var(--space-3);"><i data-lucide="lock"></i></div>
             <h2 class="font-display font-bold text-lg text-white">Administrator Access Required</h2>
             <p class="text-xs text-muted" style="margin-top: var(--space-2); line-height: 1.5;">
               You are signed in as <strong>${escapeHTML(this.app.currentProfile.full_name || 'Specialist')}</strong>. Only authorized agency administrators (Super Admin, Owner, General Manager) can configure system policies or inspect security audit ledgers.

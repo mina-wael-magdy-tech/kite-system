@@ -92,7 +92,7 @@ export class CampaignsModule {
     if (displayCampaigns.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">📣</div>
+          <div class="empty-state-icon"><i data-lucide="megaphone"></i></div>
           <div class="empty-state-title">No campaigns yet</div>
           <div class="empty-state-desc">Create a cross-department campaign to coordinate branding, media, web and digital work.</div>
         </div>
@@ -111,7 +111,7 @@ export class CampaignsModule {
             <span class="badge badge-indigo font-bold">${escapeHTML(c.client?.company_name || c.client?.name || 'No client assigned')}</span>
             <div class="card-title" style="margin-top: 6px;">${escapeHTML(c.name)}</div>
           </div>
-          <span class="badge badge-emerald font-mono">📅 ${formatDate(c.end_date)}</span>
+          <span class="badge badge-emerald font-mono">${formatDate(c.end_date)}</span>
         </div>
 
         <div class="card-body" style="display: flex; flex-direction: column; gap: var(--space-3);">

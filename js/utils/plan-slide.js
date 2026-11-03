@@ -7,12 +7,12 @@
 import { escapeHTML } from './helpers.js';
 
 export const POST_TYPES = {
-  static:   { en: 'Static',   ar: 'ستاتيك',   icon: '📷' },
-  carousel: { en: 'Carousel', ar: 'كاروسيل',  icon: '🖼️' },
-  reel:     { en: 'Reel',     ar: 'ريل',      icon: '🎬' },
-  story:    { en: 'Story',    ar: 'ستوري',    icon: '⏳' },
-  video:    { en: 'Video',    ar: 'فيديو',    icon: '🎥' },
-  other:    { en: 'Other',    ar: 'أخرى',     icon: '📌' }
+  static:   { en: 'Static',   ar: 'ستاتيك',   icon: '' },
+  carousel: { en: 'Carousel', ar: 'كاروسيل',  icon: '' },
+  reel:     { en: 'Reel',     ar: 'ريل',      icon: '' },
+  story:    { en: 'Story',    ar: 'ستوري',    icon: '' },
+  video:    { en: 'Video',    ar: 'فيديو',    icon: '' },
+  other:    { en: 'Other',    ar: 'أخرى',     icon: '' }
 };
 
 export const POST_STATUSES = {
@@ -148,14 +148,14 @@ function itemHTML({ v, box }, i) {
     ? `<video class="cps-main" style="${fit}" src="${escapeHTML(v.url)}" controls playsinline preload="metadata"></video>`
     : isImage(v)
       ? `<img class="cps-main" style="${fit}" src="${escapeHTML(v.url)}" alt="${escapeHTML(v.name || '')}" loading="lazy" draggable="false">`
-      : `<a class="cps-file" href="${escapeHTML(v.url)}" target="_blank" rel="noopener noreferrer">📎 ${escapeHTML(v.name || 'File')}</a>`;
+      : `<a class="cps-file" href="${escapeHTML(v.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(v.name || 'File')}</a>`;
   return `<div class="cps-item" data-id="${escapeHTML(v.id || String(i))}" style="${style}">${body}</div>`;
 }
 
 function visualHTML(visuals = []) {
   const items = visualBoxes(visuals);
   if (!items.length) {
-    return `<div class="cps-visual cps-visual-empty"><span>🖼️</span><small>Visual coming soon</small></div>`;
+    return `<div class="cps-visual cps-visual-empty"><span></span><small>Visual coming soon</small></div>`;
   }
   return `<div class="cps-visual"><div class="cps-canvas">${items.map(itemHTML).join('')}</div></div>`;
 }
@@ -206,7 +206,7 @@ export function slideHTML({ plan, post, visuals = [], page = null, pages = null 
         ${field(L.idea, post.idea)}
       </div>
       ${post.caption ? `<section class="cps-caption"><h4>${escapeHTML(L.caption)}</h4><p>${escapeHTML(post.caption)}</p></section>` : ''}
-      ${links.length ? `<div class="cps-links">${links.map(l => `<a href="${escapeHTML(l.href)}" target="_blank" rel="noopener noreferrer">🔗 ${escapeHTML(l.label || l.href)}</a>`).join('')}</div>` : ''}
+      ${links.length ? `<div class="cps-links">${links.map(l => `<a href="${escapeHTML(l.href)}" target="_blank" rel="noopener noreferrer">${escapeHTML(l.label || l.href)}</a>`).join('')}</div>` : ''}
     </div>
     ${page ? `<footer class="cps-foot"><span>${escapeHTML(L.page)} ${page}${pages ? ` / ${pages}` : ''}</span><span>Kite</span></footer>` : ''}
   </article>`;

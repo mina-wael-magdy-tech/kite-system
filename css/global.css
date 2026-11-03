@@ -162,15 +162,12 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {
 /* Glass Panel Utility (Signature Look) */
 .glass-panel {
   background: var(--bg-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xl);
 }
 
 .glass-panel-subtle {
   background: var(--surface-translucent);
-  backdrop-filter: blur(8px);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
 }
@@ -211,5 +208,5 @@ button:disabled, input:disabled, select:disabled, textarea:disabled {
 }
 
 .animate-pulse-subtle {
-  animation: pulseGlow 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: none;
 }

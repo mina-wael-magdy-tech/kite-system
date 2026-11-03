@@ -75,6 +75,16 @@ class PulseStudioApp {
     const contentContainer = document.getElementById('mainContentContainer');
     AppRouter.init(contentContainer);
 
+    // Draw any icon placeholders that modules add after the first render
+    if (window.lucide && contentContainer) {
+      let queued = false;
+      new MutationObserver(() => {
+        if (queued || !contentContainer.querySelector('i[data-lucide]')) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; window.lucide.createIcons(); });
+      }).observe(contentContainer, { childList: true, subtree: true });
+    }
+
     // 8. Re-render Lucide Icons
     if (window.lucide) {
       window.lucide.createIcons();
@@ -416,7 +426,7 @@ class PulseStudioApp {
     if (list.length === 0) {
       feed.innerHTML = tabs + `
         <div class="empty-state" style="border:none; padding: 40px 10px;">
-          <div class="empty-state-icon">🔔</div>
+          <div class="empty-state-icon"><i data-lucide="bell"></i></div>
           <div class="empty-state-title">${filter === 'unread' ? 'Nothing unread' : 'No notifications yet'}</div>
           <div class="empty-state-desc">You're completely up to date with chats, tasks and approvals.</div>
         </div>`;

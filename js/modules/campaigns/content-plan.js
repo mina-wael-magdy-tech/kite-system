@@ -90,7 +90,7 @@ export class ContentPlansSection {
     if (!this.plans.length) {
       box.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">🗓️</div>
+          <div class="empty-state-icon"><i data-lucide="calendar"></i></div>
           <div class="empty-state-title">No content plans yet</div>
           <div class="empty-state-desc">Create one to design a month of posts, send it to the client and track publishing.</div>
         </div>`;
@@ -222,7 +222,7 @@ export class ContentPlanEditor {
     ]);
     if (!plan.data) {
       if (first) {
-        this.container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🗓️</div><div class="empty-state-title">Content plan not found</div>
+        this.container.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><i data-lucide="calendar"></i></div><div class="empty-state-title">Content plan not found</div>
           <div class="empty-state-desc">It may have been deleted, or you may not have access.</div><a href="#campaigns" class="btn btn-secondary btn-sm">Back to campaigns</a></div>`;
       }
       return false;
@@ -848,7 +848,7 @@ export class ContentPlanEditor {
           <div class="cpe-asset${v.id === this.selVis && !isCover ? ' sel' : ''}" data-pick="${escapeHTML(v.id)}">
             ${/^image\//.test(v.type) ? `<img src="${escapeHTML(v.url)}" alt="${escapeHTML(v.name)}" loading="lazy">`
               : /^video\//.test(v.type) ? `<video src="${escapeHTML(v.url)}" muted preload="metadata"></video>`
-              : `<div class="file"><span>📎</span>${escapeHTML(v.name)}</div>`}
+              : `<div class="file"><span></span>${escapeHTML(v.name)}</div>`}
             ${this.canEdit ? `<button type="button" data-del="${escapeHTML(v.id)}" aria-label="Remove">×</button>` : ''}
           </div>`).join('')}</div>` : ''}
         ${this.canEdit ? `

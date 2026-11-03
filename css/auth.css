@@ -8,20 +8,14 @@ body.auth-page {
   justify-content: center;
   min-height: 100vh;
   padding: var(--space-4);
-  background:
-    radial-gradient(900px 520px at 92% -8%, rgba(224, 27, 40, 0.16), transparent 60%),
-    radial-gradient(720px 520px at -8% 108%, rgba(123, 203, 227, 0.45), transparent 58%),
-    radial-gradient(520px 320px at 55% 118%, rgba(251, 186, 72, 0.30), transparent 60%),
-    #f4f9fc;
+  background: var(--bg-app);
 }
 
 .auth-card {
   width: 100%;
   max-width: 440px;
   padding: var(--space-8);
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: #fff;
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-2xl);
   box-shadow: var(--shadow-xl);

@@ -63,14 +63,14 @@
 
 /* Button Variants */
 .btn-primary {
-  background: linear-gradient(135deg, #e8222f 0%, #e01b28 55%, #c31a21 100%);
+  background: #e01b28;
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(224, 27, 40, 0.32);
+  box-shadow: none;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #e01b28 0%, #c31a21 55%, #a81a1f 100%);
-  box-shadow: 0 6px 18px rgba(224, 27, 40, 0.42);
+  background: #c31a21;
+  box-shadow: none;
 }
 
 .btn-secondary {
@@ -458,7 +458,6 @@ textarea.form-control {
   position: fixed;
   inset: 0;
   background-color: rgba(20, 32, 48, 0.5);
-  backdrop-filter: blur(6px);
   z-index: var(--z-modal-backdrop);
   display: flex;
   align-items: center;

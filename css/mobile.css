@@ -23,8 +23,8 @@ body { overscroll-behavior-y: none; }
     display: grid; grid-template-columns: repeat(5, 1fr);
     position: fixed; left: 0; right: 0; bottom: 0; z-index: calc(var(--z-header) + 5);
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
-    background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    border-top: 1px solid var(--border-medium); box-shadow: 0 -6px 20px rgba(24, 48, 72, 0.08);
+    background: #fff;
+    border-top: 1px solid var(--border-medium); box-shadow: none;
   }
   .bottom-nav a, .bottom-nav button {
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
@@ -80,7 +80,7 @@ img, video, canvas { max-width: 100%; }
 
   /* ---- navigation drawer ---- */
   .app-sidebar { width: min(86vw, 320px); box-shadow: var(--shadow-xl); }
-  .sidebar-overlay.active { background: rgba(22, 27, 34, 0.45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+  .sidebar-overlay.active { background: rgba(22, 27, 34, 0.45); }
   .nav-item { min-height: 44px; }
 
   /* ---- bottom tab bar ---- */

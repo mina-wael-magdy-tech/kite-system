@@ -80,7 +80,7 @@ export class ProjectsModule {
     if (this.projects.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">📁</div>
+          <div class="empty-state-icon"><i data-lucide="folder"></i></div>
           <div class="empty-state-title">No client projects active</div>
           <div class="empty-state-desc">Create your first client engagement to coordinate cross-department deliverables.</div>
           <button class="btn btn-primary btn-sm" id="btnCreateFirstProject">Create First Project</button>

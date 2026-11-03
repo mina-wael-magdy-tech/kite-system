@@ -154,7 +154,7 @@ export class EmployeesModule {
     if (filtered.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">👥</div>
+          <div class="empty-state-icon"><i data-lucide="users"></i></div>
           <div class="empty-state-title">No specialists found</div>
           <div class="empty-state-desc">Try clearing your filters or invite new team members.</div>
         </div>
@@ -189,13 +189,13 @@ export class EmployeesModule {
           </div>
 
           <div style="border-top: 1px solid var(--border-subtle); padding-top: var(--space-3); font-size: var(--text-2xs); color: var(--text-dim); display: flex; flex-direction: column; gap: 4px;">
-            <span>✉️ ${escapeHTML(emp.email)}</span>
-            <span>📅 Joined: ${formatDate(emp.joining_date)}</span>
+            <span>✉${escapeHTML(emp.email)}</span>
+            <span>Joined: ${formatDate(emp.joining_date)}</span>
           </div>
 
           <div style="display: flex; gap: var(--space-2); border-top: 1px solid var(--border-subtle); padding-top: var(--space-3);">
             <a href="#chat" class="btn btn-secondary btn-sm" style="flex: 1;">
-              💬 Chat
+              Chat
             </a>
             <a href="#tasks" class="btn btn-outline btn-sm" style="flex: 1;">
               Tasks

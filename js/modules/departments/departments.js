@@ -80,7 +80,7 @@ export class DepartmentsModule {
 
     const displayDepts = this.departments;
     if (displayDepts.length === 0) {
-      container.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1;"><div class="empty-state-icon">🏢</div><div class="empty-state-title">No departments yet</div><div class="empty-state-desc">Add your first department to start organizing the studio.</div></div>';
+      container.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1;"><div class="empty-state-icon"><i data-lucide="building-2"></i></div><div class="empty-state-title">No departments yet</div><div class="empty-state-desc">Add your first department to start organizing the studio.</div></div>';
       return;
     }
 

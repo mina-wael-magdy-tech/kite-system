@@ -79,7 +79,7 @@ export class ChatModule {
             <!-- Instant Task Handoff Bar -->
             <div id="chatHandoffBar" class="glass-panel" style="display: none; padding: var(--space-3); margin: var(--space-3); background: rgba(99, 102, 241, 0.1); border-color: var(--color-primary-border); flex-direction: column; gap: var(--space-2);">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span class="text-xs font-bold text-primary">⚡ Instant Task Handoff in Chat</span>
+                <span class="text-xs font-bold text-primary">Instant Task Handoff in Chat</span>
                 <button type="button" id="btnCancelHandoff" class="text-2xs text-muted">&times; Cancel</button>
               </div>
 
@@ -380,7 +380,7 @@ export class ChatModule {
       return;
     }
 
-    const prefix = ch.type === 'direct' ? '' : (ch.is_public ? '# ' : '🔒 ');
+    const prefix = ch.type === 'direct' ? '' : (ch.is_public ? '# ' : '');
     title.textContent = prefix + this.channelLabel(ch);
     const count = (ch.conversation_members || []).length;
     desc.textContent = ch.type === 'direct'
@@ -502,7 +502,7 @@ export class ChatModule {
     if (this.messages.length === 0) {
       feed.innerHTML = `
         <div class="empty-state" style="border:none; padding: 40px 0;">
-          <div class="empty-state-icon">💬</div>
+          <div class="empty-state-icon"><i data-lucide="message-square"></i></div>
           <div class="empty-state-title">No messages yet</div>
           <div class="empty-state-desc">Say hello or dispatch a task handoff to your creative peers.</div>
         </div>
@@ -650,7 +650,7 @@ export class ChatModule {
 
       const { message: data } = await Api.sendMessage(
         this.activeChannelId,
-        `⚡ Dispatched new deliverable to ${assigneeName}: "${title}"`,
+        `Dispatched new deliverable to ${assigneeName}: "${title}"`,
         { messageType: 'task_handoff', metadata: {
           task_id: newTask.id, task_number: newTask.task_number, task_title: title, assignee_name: assigneeName
         } }

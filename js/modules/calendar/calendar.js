@@ -162,7 +162,7 @@ export class CalendarModule {
     }
     for (const c of posts) {
       const late = c.post_date < today && c.status !== 'published';
-      const icon = { reel: '🎬', carousel: '🖼️', static: '📷', story: '⏳', video: '🎥' }[c.content_type] || '📌';
+      const icon = { reel: '', carousel: '', static: '', story: '', video: '' }[c.content_type] || '';
       out.push({
         key: `post:${c.id}`, kind: 'post', id: c.id, title: `${c.content_plans?.title || 'Content'}: ${c.title}`,
         short: `${icon} ${c.title}`, start: c.post_date, end: c.post_date, due: c.post_date,
@@ -375,7 +375,7 @@ export class CalendarModule {
     for (const d of days) {
       html += `<section class="agenda-day ${d === today ? 'is-today' : ''}"><h3>${prettyDate(d)}${d === today ? ' <span class="badge badge-brand">Today</span>' : ''}</h3>${map.get(d).map(row).join('')}</section>`;
     }
-    if (!html) html = `<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-title">Nothing scheduled in ${monthName(this.cursor)}</div><div class="empty-state-desc">Tasks with deadlines, project dates, leave and holidays appear here.</div></div>`;
+    if (!html) html = `<div class="empty-state"><div class="empty-state-icon"><i data-lucide="calendar"></i></div><div class="empty-state-title">Nothing scheduled in ${monthName(this.cursor)}</div><div class="empty-state-desc">Tasks with deadlines, project dates, leave and holidays appear here.</div></div>`;
 
     body.innerHTML = `<div class="agenda">${html}</div>`;
     body.querySelectorAll('[data-ev]').forEach(b => b.addEventListener('click', () => this.openEvent(this.events.find(e => e.key === b.dataset.ev))));
@@ -450,7 +450,7 @@ export class CalendarModule {
             <div class="tl-axis" style="width:${width}px"><div class="tl-months">${months}</div><div class="tl-days">${days}</div>${todayLine}</div>
           </div>
           <div class="tl-body" style="min-width:${width + 230}px">
-            ${rows || '<div class="empty-state" style="border:none; padding: 40px 0;"><div class="empty-state-icon">🗓️</div><div class="empty-state-title">Nothing in this period</div><div class="empty-state-desc">Move the window with the arrows, or change the filters.</div></div>'}
+            ${rows || '<div class="empty-state" style="border:none; padding: 40px 0;"><div class="empty-state-icon"><i data-lucide="calendar"></i></div><div class="empty-state-title">Nothing in this period</div><div class="empty-state-desc">Move the window with the arrows, or change the filters.</div></div>'}
             <div class="tl-overlay" style="left:230px;width:${width}px">${todayLine}</div>
           </div>
         </div>

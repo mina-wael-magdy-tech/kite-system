@@ -145,7 +145,7 @@ export class ClientHubModule {
       return true;
     });
     if (!list.length) {
-      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon">🏢</div>
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon"><i data-lucide="building-2"></i></div>
         <div class="empty-state-title">${this.clients.length ? 'No clients match' : 'No clients yet'}</div>
         <div class="empty-state-desc">${this.clients.length ? 'Try another filter.' : 'Add your first client from the CRM page.'}</div></div>`;
       return;
@@ -192,7 +192,7 @@ export class ClientHubModule {
     const sb = this.supabase, id = this.clientId;
     const { data: client, error } = await sb.from('clients').select('*, client_departments(department_id)').eq('id', id).maybeSingle();
     if (error || !client) {
-      this.root.innerHTML = `<div class="page-container"><div class="empty-state"><div class="empty-state-icon">🏢</div>
+      this.root.innerHTML = `<div class="page-container"><div class="empty-state"><div class="empty-state-icon"><i data-lucide="building-2"></i></div>
         <div class="empty-state-title">Client not found</div><a href="#clients" class="btn btn-secondary btn-sm">Back to clients</a></div></div>`;
       return false;
     }
@@ -330,7 +330,7 @@ export class ClientHubModule {
   // ---------------------------------------------------------------- Tasks
   tasksHTML() {
     const { tasks, projects } = this.data;
-    if (!tasks.length) return `<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-title">No tasks for this client yet</div>
+    if (!tasks.length) return `<div class="empty-state"><div class="empty-state-icon"><i data-lucide="inbox"></i></div><div class="empty-state-title">No tasks for this client yet</div>
       <div class="empty-state-desc">Create a project for the client, then add tasks to it from the Tasks page.</div><a class="btn btn-secondary btn-sm" href="#tasks">Open Tasks</a></div>`;
     const name = new Map(projects.map(p => [p.id, p.name]));
     const today = todayISO();
@@ -352,7 +352,7 @@ export class ClientHubModule {
     const { tasks, projects } = this.data;
     const dated = tasks.filter(t => t.due_date);
     if (!dated.length && !projects.some(p => p.deadline)) {
-      return '<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-title">Nothing to plot yet</div><div class="empty-state-desc">Tasks with a deadline appear here as bars.</div></div>';
+      return '<div class="empty-state"><div class="empty-state-icon"><i data-lucide="calendar"></i></div><div class="empty-state-title">Nothing to plot yet</div><div class="empty-state-desc">Tasks with a deadline appear here as bars.</div></div>';
     }
     const barOf = (t) => {
       const end = day(t.due_date);
@@ -409,7 +409,7 @@ export class ClientHubModule {
     tasks.forEach(t => add(t.due_date, { kind: 'task', label: t.title, tone: DONE.has(t.status) ? 'emerald' : (t.due_date.slice(0, 10) < todayISO() && !CLOSED.has(t.status) ? 'rose' : 'indigo'), href: `#tasks?q=${encodeURIComponent(t.task_number)}` }));
     posts.forEach(p => add(p.post_date, { kind: 'post', label: p.title, tone: p.status === 'published' ? 'emerald' : 'blue', href: `#campaigns?plan=${p.plan_id}&post=${p.id}` }));
     projects.forEach(p => {
-      add(p.deadline, { kind: 'project', label: `🏁 ${p.name}`, tone: 'amber', href: null });
+      add(p.deadline, { kind: 'project', label: `${p.name}`, tone: 'amber', href: null });
       (p.milestones || []).forEach(ms => add(ms.due_date, { kind: 'milestone', label: `◆ ${ms.title}`, tone: ms.status === 'completed' ? 'emerald' : 'amber', href: null }));
     });
     const today = todayISO();
@@ -465,7 +465,7 @@ export class ClientHubModule {
       <label class="btn btn-primary btn-sm" style="cursor:pointer;"><i data-lucide="upload"></i> Upload files<input id="chUpload" type="file" multiple hidden /></label></div>
       ${rows.length ? `<div class="ch-files">${rows.map((f, i) => `<button type="button" class="ch-file" data-file="${i}">
         <i data-lucide="file"></i><span class="ch-ellipsis"><b>${escapeHTML(f.name)}</b><em>${escapeHTML(f.from)} · ${sizeText(f.size || 0)} · ${formatDate(f.at)}</em></span><i data-lucide="download"></i></button>`).join('')}</div>`
-      : '<div class="empty-state"><div class="empty-state-icon">📂</div><div class="empty-state-title">No files yet</div><div class="empty-state-desc">Upload briefs, logos, contracts or finished work.</div></div>'}`;
+      : '<div class="empty-state"><div class="empty-state-icon"><i data-lucide="folder-open"></i></div><div class="empty-state-title">No files yet</div><div class="empty-state-desc">Upload briefs, logos, contracts or finished work.</div></div>'}`;
   }
 
   // ---------------------------------------------------------------- shared wiring

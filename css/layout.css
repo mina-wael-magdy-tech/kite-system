@@ -269,9 +269,7 @@
 /* Topbar */
 .app-topbar {
   height: 64px;
-  background-color: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: #ffffff;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
@@ -435,7 +433,6 @@
   position: fixed;
   inset: 0;
   background-color: rgba(20, 32, 48, 0.45);
-  backdrop-filter: blur(4px);
   z-index: calc(var(--z-sidebar) - 1);
 }
 

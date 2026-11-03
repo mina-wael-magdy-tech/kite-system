@@ -71,10 +71,10 @@ export class TasksModule {
             <!-- Priority Filter -->
             <select id="filterPrioritySelect" class="form-control" style="width: auto; height: 36px;">
               <option value="ALL">All Priorities</option>
-              <option value="urgent">🔥 Urgent</option>
-              <option value="high">⚡ High</option>
-              <option value="medium">📌 Medium</option>
-              <option value="low">🌿 Low</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
             </select>
 
             <!-- Employee Scope Toggle -->
@@ -473,13 +473,13 @@ export class TasksModule {
         <div class="task-card-desc line-clamp-2">${escapeHTML(t.description || '')}</div>
 
         <div class="task-card-route">
-          <span>📁 ${escapeHTML(projectName)}</span>
+          <span>${escapeHTML(projectName)}</span>
           <span class="badge badge-indigo" style="font-size: 10px;">${escapeHTML(deptName)}</span>
         </div>
 
         <div class="task-card-footer">
-          <span class="text-2xs text-muted">👤 ${escapeHTML(assigneeName)}</span>
-          <span class="text-2xs font-mono text-dim">📅 ${formatDate(t.due_date)}</span>
+          <span class="text-2xs text-muted">${escapeHTML(assigneeName)}</span>
+          <span class="text-2xs font-mono text-dim">${formatDate(t.due_date)}</span>
         </div>
       </div>
     `;
@@ -645,7 +645,7 @@ export class TasksModule {
 
       <div class="modal-footer">
         <a href="#chat" class="btn btn-secondary btn-sm" id="btnDiscussChat">
-          💬 Message Collaborator in Chat
+          Message Collaborator in Chat
         </a>
         ${this.canEditTask(task) ? '<button type="button" class="btn btn-secondary btn-sm" id="btnModalEditTask"><i data-lucide="pencil"></i> Edit</button>' : ''}
         <button type="button" class="btn btn-ghost btn-sm" id="btnModalCloseAction">Close</button>
@@ -953,10 +953,10 @@ export class TasksModule {
             <div class="form-group">
               <label class="form-label" for="taskPrioritySelect">Priority Level</label>
               <select id="taskPrioritySelect" class="form-control">
-                <option value="urgent">🔥 Urgent Priority</option>
-                <option value="high">⚡ High Priority</option>
-                <option value="medium" selected>📌 Medium Priority</option>
-                <option value="low">🌿 Low Priority</option>
+                <option value="urgent">Urgent Priority</option>
+                <option value="high">High Priority</option>
+                <option value="medium" selected>Medium Priority</option>
+                <option value="low">Low Priority</option>
               </select>
             </div>
 

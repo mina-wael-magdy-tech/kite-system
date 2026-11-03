@@ -24,10 +24,10 @@ export function formatTaskStatusBadge(status) {
 
 export function formatPriorityBadge(priority) {
   const map = {
-    urgent: { label: '🔥 Urgent', cls: 'badge-rose' },
-    high:   { label: '⚡ High',   cls: 'badge-amber' },
-    medium: { label: '📌 Medium', cls: 'badge-sky' },
-    low:    { label: '🌿 Low',    cls: 'badge-slate' }
+    urgent: { label: 'Urgent', cls: 'badge-rose' },
+    high:   { label: 'High',   cls: 'badge-amber' },
+    medium: { label: 'Medium', cls: 'badge-sky' },
+    low:    { label: 'Low',    cls: 'badge-slate' }
   };
 
   const key = String(priority || '').toLowerCase();

@@ -29,7 +29,7 @@ class ToastManager {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
 
-    let iconSymbol = 'ℹ️';
+    let iconSymbol = 'ℹ';
     if (type === 'emerald') iconSymbol = '✓';
     if (type === 'amber') iconSymbol = '⚠';
     if (type === 'rose') iconSymbol = '✕';

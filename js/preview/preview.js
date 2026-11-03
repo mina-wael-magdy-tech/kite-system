@@ -15,26 +15,26 @@ const T = {
   rtl: {
     page: 'صفحة', of: 'من', next: 'التالي', prev: 'السابق', overview: 'كل الصفحات', feedback: 'ملاحظاتك',
     yourName: 'اسمك', namePh: 'اكتب اسمك', note: 'ملاحظتك على هذه الصفحة', notePh: 'اكتب أي تعديل أو ملاحظة…',
-    approve: '✓ أوافق على الصفحة', edit: '✎ أطلب تعديل', send: '💬 أرسل ملاحظة', before: 'ملاحظات سابقة على هذه الصفحة',
+    approve: '✓ أوافق على الصفحة', edit: '✎ أطلب تعديل', send: 'أرسل ملاحظة', before: 'ملاحظات سابقة على هذه الصفحة',
     none: 'لا توجد ملاحظات على هذه الصفحة بعد.', needName: 'من فضلك اكتب اسمك أولاً', needNote: 'اكتب ملاحظتك أولاً',
     sentApprove: 'تمت الموافقة على الصفحة ✓', sentEdit: 'وصل طلب التعديل للفريق', sentNote: 'وصلت ملاحظتك للفريق',
     finalTitle: 'دورك الآن', finalText: 'راجع الصفحات وأرسل ملاحظاتك على كل صفحة، وعندما تكون جاهزاً وافق على الخطة كاملة.',
     approvedPages: 'صفحات موافق عليها', editPages: 'طلبات تعديل', approveAll: 'أوافق على الخطة كاملة',
-    approvedAll: 'شكراً لك! تمت الموافقة على الخطة 🎉', approvedAllText: 'سيبدأ الفريق في التنفيذ والنشر حسب الجدول.',
+    approvedAll: 'شكراً لك! تمت الموافقة على الخطة ', approvedAllText: 'سيبدأ الفريق في التنفيذ والنشر حسب الجدول.',
     confirmAll: 'هل تريد الموافقة على الخطة كاملة؟', resolved: 'تم التعامل معها ✓', team: 'فريق كايت', clientNote: 'ملاحظة العميل',
-    expired: 'هذا الرابط غير متاح', expiredText: 'قد يكون الرابط انتهى أو تم إيقافه. اطلب من الاستوديو رابطاً جديداً.', fab: '💬 ملاحظاتك', posts: 'منشور', close: 'إغلاق', status: 'تمت الموافقة على الخطة'
+    expired: 'هذا الرابط غير متاح', expiredText: 'قد يكون الرابط انتهى أو تم إيقافه. اطلب من الاستوديو رابطاً جديداً.', fab: 'ملاحظاتك', posts: 'منشور', close: 'إغلاق', status: 'تمت الموافقة على الخطة'
   },
   ltr: {
     page: 'Page', of: 'of', next: 'Next', prev: 'Back', overview: 'All pages', feedback: 'Your feedback',
     yourName: 'Your name', namePh: 'Type your name', note: 'Your note on this page', notePh: 'Write any edit or comment…',
-    approve: '✓ Approve this page', edit: '✎ Request an edit', send: '💬 Send a note', before: 'Earlier notes on this page',
+    approve: '✓ Approve this page', edit: '✎ Request an edit', send: 'Send a note', before: 'Earlier notes on this page',
     none: 'No notes on this page yet.', needName: 'Please type your name first', needNote: 'Please write your note first',
     sentApprove: 'Page approved ✓', sentEdit: 'Edit request sent to the team', sentNote: 'Your note was sent to the team',
     finalTitle: 'Your turn', finalText: 'Go through the pages and leave notes on any page. When you are happy, approve the whole plan.',
     approvedPages: 'pages approved', editPages: 'edit requests', approveAll: 'Approve the whole plan',
-    approvedAll: 'Thank you! The plan is approved 🎉', approvedAllText: 'The team will start producing and publishing on schedule.',
+    approvedAll: 'Thank you! The plan is approved ', approvedAllText: 'The team will start producing and publishing on schedule.',
     confirmAll: 'Approve the whole plan?', resolved: 'Handled ✓', team: 'Kite team', clientNote: 'Client note',
-    expired: 'This link is not available', expiredText: 'It may have expired or been switched off. Ask the studio for a new link.', fab: '💬 Feedback', posts: 'posts', close: 'Close', status: 'Plan approved'
+    expired: 'This link is not available', expiredText: 'It may have expired or been switched off. Ask the studio for a new link.', fab: 'Feedback', posts: 'posts', close: 'Close', status: 'Plan approved'
   }
 };
 
@@ -170,7 +170,7 @@ function finalHTML() {
   const done = state.data.plan.status === 'approved';
   return `
     <div class="pv-final" dir="${state.dir}">
-      <div class="big">${done ? '🎉' : '🪁'}</div>
+      <div class="big">${done ? '✓' : ''}</div>
       <h2>${escapeHTML(done ? tr('approvedAll') : tr('finalTitle'))}</h2>
       <p>${escapeHTML(done ? tr('approvedAllText') : tr('finalText'))}</p>
       <div class="stats"><div class="stat"><b>${approved}</b>${escapeHTML(tr('approvedPages'))}</div><div class="stat"><b>${edits}</b>${escapeHTML(tr('editPages'))}</div></div>

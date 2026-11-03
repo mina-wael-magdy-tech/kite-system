@@ -182,7 +182,7 @@ export class DocumentsModule {
     if (list.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="empty-state-icon">🗂️</div>
+          <div class="empty-state-icon"><i data-lucide="folder"></i></div>
           <div class="empty-state-title">${this.assets.length ? 'No files match your filters' : 'No assets uploaded yet'}</div>
           <div class="empty-state-desc">${this.assets.length ? 'Try clearing the search or filters.' : 'Click “Upload Assets” or drag files onto this page.'}</div>
         </div>`;
@@ -197,8 +197,8 @@ export class DocumentsModule {
       const thumb = this.thumbs[a.storage_path];
       const canManage = a.uploaded_by === me || isAdmin;
       const visBadge = a.source === 'task' ? 'Task file'
-        : a.visibility === 'private' ? '🔒 Only me'
-        : a.visibility === 'department' ? `🏢 ${escapeHTML(a.department?.name || 'Department')}` : '🌐 Studio';
+        : a.visibility === 'private' ? 'Only me'
+        : a.visibility === 'department' ? `${escapeHTML(a.department?.name || 'Department')}` : 'Studio';
       const key = `${a.source}:${a.id}`;
 
       return `
@@ -228,7 +228,7 @@ export class DocumentsModule {
             ${a.project ? `<div class="text-2xs text-muted">Project: <strong>${escapeHTML(a.project.name)}</strong></div>` : ''}
             ${a.task ? `<div class="text-2xs text-muted">Task: <strong>${escapeHTML(a.task.task_number)}</strong> ${escapeHTML(a.task.title || '')}</div>` : ''}
             <div style="margin-top: auto; padding-top: var(--space-2); border-top: 1px solid var(--border-subtle); font-size: var(--text-2xs); color: var(--text-dim); display: flex; justify-content: space-between; gap: 6px;">
-              <span class="truncate">👤 ${escapeHTML(a.uploader?.full_name || 'Specialist')}</span>
+              <span class="truncate">${escapeHTML(a.uploader?.full_name || 'Specialist')}</span>
               <span class="font-mono">${formatDate(a.created_at)}</span>
             </div>
             <button type="button" class="btn btn-secondary btn-sm asset-download" data-key="${key}" style="width: 100%;">
