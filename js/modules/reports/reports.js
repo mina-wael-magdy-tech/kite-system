@@ -3,6 +3,7 @@
  * Company-wide deliverable analytics, department productivity indicators & CSV exports.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Toast } from '../../services/toast-service.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
@@ -88,6 +89,7 @@ export class ReportsModule {
     });
 
     await this.loadReportsData();
+    Realtime.watch(['tasks'], () => this.loadReportsData()); // live updates for everyone
   }
 
   async loadReportsData() {

@@ -3,6 +3,7 @@
  * Multi-department creative projects, milestone tracking, budgets & deadlines.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
@@ -45,6 +46,7 @@ export class ProjectsModule {
     });
 
     await this.loadProjects();
+    Realtime.watch(['projects', 'milestones', 'tasks'], () => this.loadProjects()); // live updates for everyone
   }
 
   async loadProjects() {

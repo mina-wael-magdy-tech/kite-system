@@ -8,6 +8,7 @@
  * Actions: drag a task to another day to reschedule it; click a day to create a task.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
@@ -92,6 +93,7 @@ export class CalendarModule {
 
     await this.load();
     this.draw();
+    Realtime.watch(['tasks', 'milestones', 'leave_requests', 'campaigns', 'projects'], async () => { await this.load(); this.draw(); });
   }
 
   // ================================================================ data

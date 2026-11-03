@@ -6,6 +6,7 @@
 import { Permissions } from './permissions/permission-service.js';
 import { Toast } from './services/toast-service.js';
 import { escapeHTML } from './utils/helpers.js';
+import { Realtime } from './services/realtime-service.js';
 
 export class Router {
   constructor() {
@@ -50,6 +51,7 @@ export class Router {
     }
 
     this.currentRoute = targetRoute;
+    Realtime.clear(); // the previous page stops listening; the new page subscribes in its render()
 
     // Update active nav item in sidebar
     document.querySelectorAll('.nav-item, .bottom-nav a').forEach(el => {

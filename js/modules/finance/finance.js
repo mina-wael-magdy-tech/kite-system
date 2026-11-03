@@ -3,6 +3,7 @@
  * Department budgets, studio expense submissions, invoice tracking & manager approvals.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
@@ -114,6 +115,7 @@ export class FinanceModule {
     document.getElementById('btnSubmitExpense')?.addEventListener('click', () => this.openExpenseModal());
 
     await this.loadFinanceData();
+    Realtime.watch(['expenses', 'invoices', 'budgets'], () => this.loadFinanceData()); // live updates for everyone
   }
 
   async loadFinanceData() {

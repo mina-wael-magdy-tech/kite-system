@@ -3,6 +3,7 @@
  * Client accounts, deal pipeline, pitch proposals & client communication history.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Toast } from '../../services/toast-service.js';
 import { Permissions } from '../../permissions/permission-service.js';
@@ -84,6 +85,7 @@ export class CrmModule {
     document.getElementById('btnCreateLead')?.addEventListener('click', () => this.openLeadModal());
 
     await this.loadCrmData();
+    Realtime.watch(['leads', 'clients'], () => this.loadCrmData()); // live updates for everyone
   }
 
   async loadCrmData() {

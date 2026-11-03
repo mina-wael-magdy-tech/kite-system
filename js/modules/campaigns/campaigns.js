@@ -3,6 +3,7 @@
  * Cross-department Studio Campaigns coordinating Branding, BTL, Digital, Media & Web Dev.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Toast } from '../../services/toast-service.js';
 import { Permissions } from '../../permissions/permission-service.js';
@@ -46,6 +47,7 @@ export class CampaignsModule {
     });
 
     await this.loadCampaigns();
+    Realtime.watch(['campaigns'], () => this.loadCampaigns()); // live updates for everyone
   }
 
   async loadCampaigns() {

@@ -3,6 +3,7 @@
  * Complete task engine: Kanban & Table views, 9 lifecycle stages, checklists, comments, and role privacy.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { ASSIGNEE_SELECT, assigneeOptionsHTML, selectedDeptId } from '../../utils/assignees.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
@@ -104,6 +105,7 @@ export class TasksModule {
 
     this.attachEventListeners();
     await this.loadData();
+    Realtime.watch(['tasks', 'task_comments', 'task_attachments'], () => this.loadData()); // live updates for everyone
   }
 
   attachEventListeners() {

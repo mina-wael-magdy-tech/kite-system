@@ -3,6 +3,7 @@
  * Overview & control for the 5 initial creative studio hubs: Branding, BTL, Digital, Media & Web Dev.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
@@ -47,6 +48,7 @@ export class DepartmentsModule {
     });
 
     await this.loadDepartments();
+    Realtime.watch(['departments'], () => this.loadDepartments()); // live updates for everyone
   }
 
   async loadDepartments() {

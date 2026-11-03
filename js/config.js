@@ -30,16 +30,20 @@ export const CONFIG = {
   TOAST_AUTO_DISMISS_MS: 3500,
 
   // Upload limits (must match the bucket limit in supabase/migrations/004_storage.sql)
-  MAX_FILE_SIZE_BYTES: 25 * 1024 * 1024, // 25 MB
+  MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024, // 50 MB (task-attachments bucket is 25 MB, studio-assets is 50 MB)
+  MAX_TASK_FILE_SIZE_BYTES: 25 * 1024 * 1024,
   ALLOWED_FILE_EXTENSIONS: [
-    'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif',
-    'mp4', 'mov', 'zip', 'psd', 'ai', 'fig'
-    // SVG intentionally excluded: it can carry scripts.
+    'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg',
+    'mp4', 'mov', 'webm', 'mp3', 'wav',
+    'zip', 'rar', 'psd', 'ai', 'eps', 'indd', 'fig', 'sketch', 'xd',
+    'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv'
+    // SVG is allowed but only ever shown through <img> and downloaded as an attachment, never opened inline.
   ],
 
   // Storage buckets that exist (see 004_storage.sql)
   STORAGE_BUCKETS: {
-    TASK_ATTACHMENTS: 'task-attachments'
+    TASK_ATTACHMENTS: 'task-attachments',
+    STUDIO_ASSETS: 'studio-assets'
   },
 
   // profiles columns the browser may read. Must match the column-level GRANT in

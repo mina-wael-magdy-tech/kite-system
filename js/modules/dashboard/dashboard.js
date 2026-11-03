@@ -3,6 +3,7 @@
  * Real-time agency analytics, Chart.js performance trends, pending approvals & recent activities.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { escapeHTML, formatCurrency, formatDate } from '../../utils/helpers.js';
@@ -167,6 +168,7 @@ export class DashboardModule {
     `;
 
     await this.loadDashboardData();
+    Realtime.watch(['tasks', 'departments'], () => this.loadDashboardData()); // live updates for everyone
   }
 
   async loadDashboardData() {

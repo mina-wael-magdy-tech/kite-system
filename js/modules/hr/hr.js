@@ -3,6 +3,7 @@
  * Attendance check-in/out, leave requests, manager approvals & studio holiday calendar.
  */
 
+import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
@@ -86,6 +87,7 @@ export class HrModule {
 
     this.attachEventListeners();
     await this.loadHrData();
+    Realtime.watch(['leave_requests', 'attendance_records'], () => this.loadHrData()); // live updates for everyone
   }
 
   attachEventListeners() {
