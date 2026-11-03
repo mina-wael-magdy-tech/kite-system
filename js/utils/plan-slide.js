@@ -36,6 +36,21 @@ export const LABELS = {
   ltr: { pillar: 'Pillar', objective: 'Objective', idea: 'Idea', caption: 'Caption', links: 'Links', page: 'Page', cover: 'Cover' }
 };
 
+export const DEFAULT_COLOURS = { accent: '#e01b28', accent2: '#fbba48', accent3: '#7bcbe3' };
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/** The plan's three colours; anything that is not a plain #rrggbb falls back to the default (nothing else reaches CSS). */
+export function planColours(plan = {}) {
+  const pick = (k) => (HEX.test(plan[k] || '') ? plan[k] : DEFAULT_COLOURS[k]);
+  return { accent: pick('accent'), accent2: pick('accent2'), accent3: pick('accent3') };
+}
+
+/** Inline CSS variables for a slide. */
+export function colourStyle(plan) {
+  const c = planColours(plan);
+  return `--cps-accent:${c.accent};--cps-accent2:${c.accent2};--cps-accent3:${c.accent3}`;
+}
+
 export function safeUrl(url) {
   try {
     const u = new URL(String(url).trim());
@@ -154,7 +169,7 @@ const field = (label, value) => value ? `
 export function coverHTML({ plan, cover, total = 0 }) {
   const dir = plan.direction || 'rtl';
   return `
-  <article class="cps cps-cover" dir="${dir}" style="--cps-accent:${escapeHTML(plan.accent || '#e01b28')}">
+  <article class="cps cps-cover" dir="${dir}" style="${colourStyle(plan)}">
     ${cover?.url ? `<img class="cps-cover-img" src="${escapeHTML(cover.url)}" alt="">` : ''}
     <div class="cps-cover-shade"></div>
     <div class="cps-cover-body">
@@ -176,7 +191,7 @@ export function slideHTML({ plan, post, visuals = [], page = null, pages = null 
   const date = post.date || post.post_date;
 
   return `
-  <article class="cps" dir="${dir}" style="--cps-accent:${escapeHTML(plan.accent || '#e01b28')}">
+  <article class="cps" dir="${dir}" style="${colourStyle(plan)}">
     ${visualHTML(visuals)}
     <div class="cps-body">
       <div class="cps-top">

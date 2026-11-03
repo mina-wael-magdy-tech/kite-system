@@ -4,7 +4,7 @@
  * language and direction (Arabic plans are written right-to-left), with the visuals and clickable links.
  */
 
-import { LABELS, POST_TYPES, formatPlanDate, typeLabel, safeUrl, visualBoxes } from '../../utils/plan-slide.js';
+import { LABELS, POST_TYPES, formatPlanDate, typeLabel, safeUrl, visualBoxes, planColours } from '../../utils/plan-slide.js';
 
 const W = 10, H = 5.625; // 16:9 in inches
 
@@ -77,7 +77,8 @@ export async function exportPlanToPptx({ plan, cover, posts, onProgress = () => 
   const dir = plan.direction || 'rtl';
   const rtl = dir === 'rtl';
   const L = LABELS[dir] || LABELS.ltr;
-  const accent = hex(plan.accent);
+  const colours = planColours(plan);
+  const accent = hex(colours.accent);
   const font = 'Arial';
   const align = rtl ? 'right' : 'left';
   // PowerPoint reads direction/alignment per run, so multi-part text boxes need it on every part
@@ -93,8 +94,8 @@ export async function exportPlanToPptx({ plan, cover, posts, onProgress = () => 
   {
     const s = pptx.addSlide();
     s.background = { color: accent };
-    s.addShape(pptx.ShapeType.ellipse, { x: -1.2, y: -1.4, w: 4.4, h: 4.4, fill: { color: 'FBBA48', transparency: 35 }, line: { type: 'none' } });
-    s.addShape(pptx.ShapeType.ellipse, { x: 7.2, y: 3.2, w: 4.6, h: 4.6, fill: { color: '7BCBE3', transparency: 35 }, line: { type: 'none' } });
+    s.addShape(pptx.ShapeType.ellipse, { x: -1.2, y: -1.4, w: 4.4, h: 4.4, fill: { color: hex(colours.accent2), transparency: 35 }, line: { type: 'none' } });
+    s.addShape(pptx.ShapeType.ellipse, { x: 7.2, y: 3.2, w: 4.6, h: 4.6, fill: { color: hex(colours.accent3), transparency: 35 }, line: { type: 'none' } });
     if (cover?.url) {
       try {
         onProgress('Cover image…');

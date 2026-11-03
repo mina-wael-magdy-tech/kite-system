@@ -28,7 +28,7 @@ serveJson(async (req) => {
   if (share.expires_at && new Date(share.expires_at) < new Date()) throw new HttpError(410, "This link has expired. Please ask the studio for a new one.");
 
   const { data: plan } = await admin.from("content_plans")
-    .select("id, title, subtitle, direction, accent, status, created_by, department_id, clients(name, company_name)")
+    .select("*, clients(name, company_name)") // "*" so it keeps working before migration 013 adds the glow colours
     .eq("id", share.plan_id).maybeSingle();
   if (!plan) throw new HttpError(404, "This plan no longer exists");
 
@@ -60,7 +60,7 @@ serveJson(async (req) => {
     return json(req, {
       success: true,
       plan: {
-        title: plan.title, subtitle: plan.subtitle, direction: plan.direction, accent: plan.accent, status: plan.status,
+        title: plan.title, subtitle: plan.subtitle, direction: plan.direction, accent: plan.accent, accent2: plan.accent2 ?? null, accent3: plan.accent3 ?? null, status: plan.status,
         clientName: client?.company_name || client?.name || null,
       },
       cover: withUrl.find((a) => a.postId === null) ?? null,

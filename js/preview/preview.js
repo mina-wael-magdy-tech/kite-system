@@ -5,7 +5,7 @@
  */
 
 import { escapeHTML, formatRelativeTime } from '../utils/helpers.js';
-import { slideHTML, coverHTML, bindSlides, formatPlanDate, typeLabel } from '../utils/plan-slide.js';
+import { slideHTML, coverHTML, bindSlides, formatPlanDate, typeLabel, colourStyle, planColours } from '../utils/plan-slide.js';
 
 const root = document.getElementById('pvRoot');
 const token = decodeURIComponent(window.location.hash.replace(/^#/, '')).trim();
@@ -78,12 +78,13 @@ function pageState(pageNo) {
 
 function planForSlides() {
   const d = state.data.plan;
-  return { title: d.title, subtitle: d.subtitle, direction: d.direction, accent: d.accent, clientName: d.clientName };
+  return { title: d.title, subtitle: d.subtitle, direction: d.direction, accent: d.accent, accent2: d.accent2, accent3: d.accent3, clientName: d.clientName };
 }
 
 // ------------------------------------------------------------------ rendering
 function render() {
   const { plan } = state.data;
+  { const c = planColours(plan); const r = document.documentElement.style; r.setProperty('--pv-a1', c.accent); r.setProperty('--pv-a2', c.accent2); r.setProperty('--pv-a3', c.accent3); }
   const list = pages();
   const total = list.length;
   const pageNo = state.index + 1;
@@ -184,7 +185,7 @@ function gridHTML(list) {
   const plan = planForSlides();
   const dir = state.dir;
   return `
-    <main class="pv-grid" style="--cps-accent:${escapeHTML(plan.accent)}">
+    <main class="pv-grid" style="${colourStyle(plan)}">
       ${list.map((p, i) => {
         if (p.type === 'final') return '';
         const st = pageState(i + 1);

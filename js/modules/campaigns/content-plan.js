@@ -19,15 +19,17 @@ import { formDialog, confirmDialog, htmlDialog, closeDialog } from '../../ui/dia
 import { escapeHTML, formatRelativeTime, getInitials } from '../../utils/helpers.js';
 import {
   POST_TYPES, POST_STATUSES, PLAN_STATUSES, slideHTML, coverHTML, bindSlides, safeUrl, formatPlanDate,
-  LAYOUT_PRESETS, presetBoxes, visualBoxes
+  LAYOUT_PRESETS, presetBoxes, visualBoxes, DEFAULT_COLOURS, planColours
 } from '../../utils/plan-slide.js';
 import { exportPlanToPptx } from './pptx-export.js';
 
 const BADGE = { gray: 'badge-slate', blue: 'badge-sky', amber: 'badge-amber', green: 'badge-emerald', rose: 'badge-rose' };
 const badge = (map, key) => `<span class="badge ${BADGE[map[key]?.tone] || 'badge-slate'}">${escapeHTML(map[key]?.label || key)}</span>`;
-const ACCENTS = [
-  { value: '#e01b28', label: 'Kite red' }, { value: '#d79f3e', label: 'Amber' },
-  { value: '#12abe3', label: 'Sky blue' }, { value: '#2c3a4a', label: 'Charcoal' }, { value: '#0d7a53', label: 'Green' }
+/** The three colour pickers of a plan: the main colour and the two soft glows of the cover. */
+const colourFields = (c) => [
+  { name: 'accent', label: 'Main colour', type: 'color', half: true, value: c.accent, required: true, hint: 'Title bar, labels and the cover background.' },
+  { name: 'accent2', label: 'Cover glow — top corner', type: 'color', half: true, value: c.accent2, required: true },
+  { name: 'accent3', label: 'Cover glow — bottom corner', type: 'color', half: true, value: c.accent3, required: true }
 ];
 const MAX_VISUAL_BYTES = 50 * 1024 * 1024;
 const PLATFORMS = ['Instagram', 'Facebook', 'TikTok', 'LinkedIn', 'YouTube', 'X (Twitter)', 'Snapchat'];
@@ -150,13 +152,18 @@ export class ContentPlansSection {
           options: depts.map(d => ({ value: d.id, label: d.name })) },
         { name: 'direction', label: 'Language', type: 'select', half: true, value: 'rtl',
           options: [{ value: 'rtl', label: 'Arabic (right-to-left)' }, { value: 'ltr', label: 'English (left-to-right)' }] },
-        { name: 'accent', label: 'Colour', type: 'select', half: true, value: '#e01b28', options: ACCENTS }
+        ...colourFields(DEFAULT_COLOURS)
       ],
       onSubmit: async (v) => {
-        const { data, error } = await supabase.from('content_plans').insert({
+        const row = {
           title: v.title, subtitle: v.subtitle, client_id: v.client_id, campaign_id: v.campaign_id,
           department_id: v.department_id, direction: v.direction, accent: v.accent, created_by: this.app.currentUser.id
-        }).select('id').single();
+        };
+        // the two glow colours need migration 013; only send them when they were changed
+        if (v.accent2 !== DEFAULT_COLOURS.accent2) row.accent2 = v.accent2;
+        if (v.accent3 !== DEFAULT_COLOURS.accent3) row.accent3 = v.accent3;
+        const { data, error } = await supabase.from('content_plans').insert(row).select('id').single();
+        if (error && /accent[23]/.test(error.message)) throw new Error('Run migration 013_plan_colours.sql in Supabase to use custom glow colours.');
         if (error) throw new Error(error.message);
         Toast.success('Content plan created', 'Saved');
         window.location.hash = `#campaigns?plan=${data.id}`;
@@ -980,8 +987,8 @@ export class ContentPlanEditor {
           { name: 'campaign_id', label: 'Campaign', type: 'select', half: true, value: pl.campaign_id || '', options: [{ value: '', label: 'Not linked' }, ...(camps || []).map(c => ({ value: c.id, label: c.name }))] },
           { name: 'department_id', label: 'Team that edits it', type: 'select', half: true, value: pl.department_id || '', options: depts.map(d => ({ value: d.id, label: d.name })) },
           { name: 'direction', label: 'Language', type: 'select', half: true, value: pl.direction, options: [{ value: 'rtl', label: 'Arabic (right-to-left)' }, { value: 'ltr', label: 'English (left-to-right)' }] },
-          { name: 'accent', label: 'Colour', type: 'select', half: true, value: pl.accent, options: ACCENTS.some(a => a.value === pl.accent) ? ACCENTS : [{ value: pl.accent, label: pl.accent }, ...ACCENTS] },
-          { name: 'status', label: 'Status', type: 'select', half: true, value: pl.status, options: Object.entries(PLAN_STATUSES).map(([k, v]) => ({ value: k, label: v.label })) }
+          { name: 'status', label: 'Status', type: 'select', half: true, value: pl.status, options: Object.entries(PLAN_STATUSES).map(([k, v]) => ({ value: k, label: v.label })) },
+          ...colourFields(planColours(pl))
         ],
         onDelete: Permissions.isAdmin() || pl.created_by === this.me ? async () => {
           // files first: the storage rule needs the plan to still exist
@@ -995,7 +1002,7 @@ export class ContentPlanEditor {
         deleteLabel: 'Delete plan', deleteMessage: 'The plan, all its posts, visuals and client notes will be removed. The client link stops working.',
         onSubmit: async (v) => {
           const { error } = await supabase.from('content_plans').update(v).eq('id', pl.id);
-          if (error) throw new Error(error.message);
+          if (error) throw new Error(/accent[23]/.test(error.message) ? 'Run migration 013_plan_colours.sql in Supabase to save the glow colours.' : error.message);
           await this.load(false);
           this.drawAll();
           Toast.success('Plan updated', 'Saved');

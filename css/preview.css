@@ -4,9 +4,9 @@
 .pv-body { margin: 0; min-height: 100vh; background: #0f1623; color: #e9eef5; font-family: 'Poppins', 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Arial, sans-serif; overflow-x: hidden; }
 .pv-blobs { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
 .pv-blobs i { position: absolute; width: 46vmax; height: 46vmax; border-radius: 50%; filter: blur(90px); opacity: .28; animation: pvFloat 18s ease-in-out infinite alternate; }
-.pv-blobs i:nth-child(1) { background: #e01b28; top: -20vmax; left: -12vmax; }
-.pv-blobs i:nth-child(2) { background: #fbba48; bottom: -24vmax; right: -14vmax; animation-delay: -6s; }
-.pv-blobs i:nth-child(3) { background: #7bcbe3; top: 30%; left: 45%; width: 30vmax; height: 30vmax; opacity: .16; animation-delay: -11s; }
+.pv-blobs i:nth-child(1) { background: var(--pv-a1, #e01b28); top: -20vmax; left: -12vmax; }
+.pv-blobs i:nth-child(2) { background: var(--pv-a2, #fbba48); bottom: -24vmax; right: -14vmax; animation-delay: -6s; }
+.pv-blobs i:nth-child(3) { background: var(--pv-a3, #7bcbe3); top: 30%; left: 45%; width: 30vmax; height: 30vmax; opacity: .16; animation-delay: -11s; }
 @keyframes pvFloat { to { transform: translate(6vmax, 5vmax) scale(1.12); } }
 
 .pv-loading, .pv-message { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px; }
@@ -27,7 +27,7 @@
 .pv-btn.primary { background: #e01b28; border-color: #e01b28; } .pv-btn.primary:hover { background: #c31a21; }
 .pv-btn.good { background: #1f9d6b; border-color: #1f9d6b; } .pv-btn.warn { background: #d79f3e; border-color: #d79f3e; color: #1b1405; }
 .pv-progress { height: 3px; background: rgba(255, 255, 255, .1); }
-.pv-progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #e01b28, #fbba48, #7bcbe3); transition: width .35s ease; }
+.pv-progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--pv-a1, #e01b28), var(--pv-a2, #fbba48), var(--pv-a3, #7bcbe3)); transition: width .35s ease; }
 
 .pv-work { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: clamp(12px, 2vw, 24px); padding: clamp(10px, 2vw, 24px); align-items: start; min-height: 0; }
 .pv-stage { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; }
