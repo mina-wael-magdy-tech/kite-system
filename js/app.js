@@ -23,6 +23,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.js';
 import { EmployeesModule } from './modules/employees/employees.js';
 import { DepartmentsModule } from './modules/departments/departments.js';
 import { HrModule } from './modules/hr/hr.js';
+import { BroadcastModule, canBroadcast } from './modules/broadcast/broadcast.js';
 import { CrmModule } from './modules/crm/crm.js';
 import { FinanceModule } from './modules/finance/finance.js';
 import { DocumentsModule } from './modules/documents/documents.js';
@@ -135,6 +136,8 @@ class PulseStudioApp {
     const isAdmin = Permissions.isAdmin();
 
     if (adminNavGroup) adminNavGroup.style.display = isAdmin ? 'block' : 'none';
+    const bcNav = document.getElementById('broadcastNavItem');
+    if (bcNav) bcNav.style.display = canBroadcast() ? 'flex' : 'none';
     if (menuAdminLink) menuAdminLink.style.display = isAdmin ? 'flex' : 'none';
   }
 
@@ -185,6 +188,12 @@ class PulseStudioApp {
       title: 'Studio Departments',
       breadcrumbs: ['Studio Organization', '5 Departments'],
       render: (container, query) => new DepartmentsModule(this).render(container, query)
+    });
+
+    AppRouter.register('broadcast', {
+      title: 'Announcements',
+      breadcrumbs: ['System Control', 'Announcements'],
+      render: (container, query) => new BroadcastModule(this).render(container, query)
     });
 
     AppRouter.register('hr', {

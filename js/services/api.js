@@ -60,6 +60,8 @@ export const Api = {
   decideExpense: (expenseId, decision, notes) => Api.workflow('expense.decide', { expenseId, decision, notes }),
   decideLeave: (leaveId, decision, notes) => Api.workflow('leave.decide', { leaveId, decision, notes }),
 
+  broadcast: (params) => invoke('broadcast', params),
+
   chat: (action, params = {}) => invoke('chat', { action, ...params }),
   createChannel: (p) => Api.chat('channel.create', p),
   updateChannel: (p) => Api.chat('channel.update', p),
