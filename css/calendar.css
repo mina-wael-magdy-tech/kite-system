@@ -66,8 +66,8 @@
 .agenda { display: flex; flex-direction: column; gap: var(--space-3); }
 .agenda-day { background: var(--studio-900); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); padding: var(--space-3) var(--space-4); box-shadow: var(--shadow-sm); }
 .agenda-day h3 { font-family: var(--font-display); font-size: var(--text-sm); color: var(--text-strong); margin-bottom: var(--space-2); display: flex; align-items: center; gap: var(--space-2); }
-.agenda-day.is-today { box-shadow: inset 4px 0 0 var(--kite-amber-400), var(--shadow-sm); background: var(--tint-amber-soft); }
-.agenda-day.overdue { box-shadow: inset 4px 0 0 var(--kite-red-400), var(--shadow-sm); background: var(--tint-red-soft); }
+.agenda-day.is-today { background: var(--tint-amber); }
+.agenda-day.overdue { background: var(--tint-red); }
 .agenda-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-2) var(--space-2); border-radius: var(--radius-md); text-align: left; cursor: pointer; transition: background var(--transition-fast); }
 .agenda-row:hover { background: var(--t-bg); }
 .agenda-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--t-solid); flex-shrink: 0; }

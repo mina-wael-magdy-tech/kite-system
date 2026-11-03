@@ -22,18 +22,6 @@ body.auth-page {
   position: relative;
 }
 
-/* Brand-coloured top edge: red → amber → blue (the three Kite colours) */
-.auth-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: var(--space-8);
-  right: var(--space-8);
-  height: 3px;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  background: linear-gradient(90deg, var(--kite-red-500) 0 45%, var(--kite-amber-400) 45% 72%, var(--kite-blue-400) 72% 100%);
-}
-
 .auth-brand {
   text-align: center;
   margin-bottom: var(--space-6);
