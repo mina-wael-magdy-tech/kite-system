@@ -19,7 +19,7 @@
 .ch-avatar-lg { width: 64px; height: 64px; font-size: 26px; border-radius: 18px; }
 .ch-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ch-money { font-size: var(--text-xs); color: var(--text-muted); display: flex; gap: 6px; align-items: baseline; min-height: 22px; }
-.ch-money strong { color: #0d8a5f; font-size: var(--text-base); font-family: var(--font-display); }
+.ch-money strong { color: #0d8a5f; font-size: var(--text-base); font-family: var(--font-sans); font-weight: 700; font-variant-numeric: tabular-nums; }
 .ch-depts { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
 .ch-chip { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--tint-blue-soft, #eaf5fb); color: #1d6e91; border: 1px solid rgba(29, 110, 145, .15); }
 .ch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); font-size: var(--text-2xs); color: var(--text-muted); margin-bottom: 6px; }
@@ -63,11 +63,11 @@
   display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-xl);
   background: var(--bg-card); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-sm);
 }
-.ch-kpi-ic { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--tint, var(--tint-blue)); color: var(--ink, #1d6e91); }
+.ch-kpi-ic { width: 44px; height: 44px; flex: none; border-radius: 12px; display: grid; place-items: center; background: var(--tint, var(--tint-blue)); color: var(--ink, #1d6e91); }
 .ch-kpi-ic svg { width: 19px; height: 19px; }
 .ch-kpi div { display: flex; flex-direction: column; min-width: 0; }
-.ch-kpi strong { font-size: 22px; line-height: 1.1; color: var(--text-strong); font-family: var(--font-display); }
-.ch-kpi span { font-size: var(--text-2xs); color: var(--text-muted); }
+.ch-kpi strong { font-size: 24px; line-height: 1.1; color: var(--text-strong); font-family: var(--font-sans); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ch-kpi span { font-size: var(--text-2xs); color: var(--text-muted); margin-top: 2px; }
 .ch-kpi.t-red { --tint: var(--tint-red); --ink: #c4161f; }
 .ch-kpi.t-green { --tint: var(--tint-green); --ink: #0d8a5f; }
 .ch-kpi.t-amber { --tint: var(--tint-amber); --ink: #9a6a0a; }
