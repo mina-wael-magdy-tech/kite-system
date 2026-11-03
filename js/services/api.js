@@ -76,6 +76,15 @@ export const Api = {
   leaveSubmitted: (leaveId) => Api.workflow('leave.submitted', { leaveId }),
   expenseSubmitted: (expenseId) => Api.workflow('expense.submitted', { expenseId }),
 
+  // content plans (feed calendars shared with clients)
+  contentPlan: (action, params = {}) => invoke('content-plan', { action, ...params }),
+  getPlanShare: (planId) => Api.contentPlan('share.get', { planId }),
+  enablePlanShare: (planId, opts = {}) => Api.contentPlan('share.enable', { planId, ...opts }),
+  disablePlanShare: (planId) => Api.contentPlan('share.disable', { planId }),
+  assignPublisher: (postId, publisherId) => Api.contentPlan('post.assign', { postId, publisherId }),
+  contentPostChanged: (postId) => Api.contentPlan('post.changed', { postId }),
+  publishPost: (postId, publishedUrl) => Api.contentPlan('post.publish', { postId, publishedUrl }),
+
   inviteEmployee: (p) => invoke('invite-employee', p),
   deleteEmployee: (userId) => invoke('invite-employee', { action: 'delete', userId }),
   acceptInvitation: () => invoke('accept-invitation', {})

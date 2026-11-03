@@ -35,7 +35,7 @@ const walk = (dir) => readdirSync(dir).flatMap((n) => {
   return statSync(p).isDirectory() ? walk(p) : [p];
 });
 const SKIP = new Set(['env.js', 'sw.js']);
-const BIG = /(@2x|icon-512|icon-maskable|logo-vertical\.png|logo-mark\.png)/; // keep the offline cache lean
+const BIG = /(@2x|pptxgen|icon-512|icon-maskable|logo-vertical\.png|logo-mark\.png)/; // keep the offline cache lean
 const precache = walk('dist')
   .map((p) => '/' + relative('dist', p).split(sep).join('/'))
   .filter((u) => !SKIP.has(u.slice(1)) && !BIG.test(u));

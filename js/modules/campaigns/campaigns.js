@@ -9,6 +9,7 @@ import { Toast } from '../../services/toast-service.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
+import { ContentPlansSection, ContentPlanEditor } from './content-plan.js';
 
 export class CampaignsModule {
   constructor(app) {
@@ -16,7 +17,14 @@ export class CampaignsModule {
     this.campaigns = [];
   }
 
-  async render(container) {
+  async render(container, query) {
+    // #campaigns?plan=<id> opens the content-plan editor (also reached from notifications and the calendar)
+    const params = new URLSearchParams(query || '');
+    if (params.get('plan')) {
+      return new ContentPlanEditor(this.app).render(container, params.get('plan'), params.get('post'));
+    }
+
+    this.plansSection = new ContentPlansSection(this.app);
     container.innerHTML = `
       <div class="page-container animate-fade-in">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4);">
@@ -39,6 +47,8 @@ export class CampaignsModule {
             <div class="empty-state-title">Loading studio campaigns...</div>
           </div>
         </div>
+
+        ${this.plansSection.html()}
       </div>
     `;
 
@@ -48,6 +58,7 @@ export class CampaignsModule {
 
     await this.loadCampaigns();
     Realtime.watch(['campaigns'], () => this.loadCampaigns()); // live updates for everyone
+    await this.plansSection.mount();
   }
 
   async loadCampaigns() {
@@ -115,16 +126,27 @@ export class CampaignsModule {
         </div>
 
         <div class="card-footer">
-          <a href="#tasks" class="btn btn-secondary btn-sm" style="width: 100%;">
-            View Campaign Deliverables →
-          </a>
+          <div style="display: flex; gap: var(--space-2); width: 100%;">
+            <a href="#tasks" class="btn btn-secondary btn-sm" style="flex: 1;">Deliverables →</a>
+            <button type="button" class="btn btn-primary btn-sm" style="flex: 1;" data-content-plan="${c.id}"><i data-lucide="calendar-days"></i> Content plan</button>
+          </div>
         </div>
       </div>
     `).join('');
 
+    container.querySelectorAll('[data-content-plan]').forEach(b => b.addEventListener('click', () => this.openContentPlan(b.dataset.contentPlan)));
     container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
     container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteCampaign(b.dataset.id)));
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  /** One plan: open it. None yet: start one for this campaign. Several: show them in the list below. */
+  openContentPlan(campaignId) {
+    const plans = (this.plansSection?.plans || []).filter(p => p.campaign_id === campaignId);
+    if (plans.length === 1) { window.location.hash = `#campaigns?plan=${plans[0].id}`; return; }
+    if (!plans.length) { this.plansSection?.openCreate(campaignId); return; }
+    document.getElementById('plansContainer')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    Toast.info(`This campaign has ${plans.length} content plans — pick one below.`, 'Content plans');
   }
 
   canEdit(c) {

@@ -79,6 +79,47 @@ serveJson(async (req) => {
     notified++;
   }
 
-  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, today, tz } });
-  return json(req, { success: true, notified, today });
+  // ---- social posts the person has to publish (content plans) ----
+  const { data: posts } = await admin.from("content_posts")
+    .select("id, plan_id, title, post_date, post_time, publisher_id, content_plans(title)")
+    .not("publisher_id", "is", null)
+    .neq("status", "published")
+    .not("post_date", "is", null)
+    .lte("post_date", tomorrow);
+
+  const byPublisher = new Map<string, { late: string[]; today: string[]; tomorrow: string[]; planId: string }>();
+  for (const p of posts ?? []) {
+    const d = byPublisher.get(p.publisher_id) ?? { late: [], today: [], tomorrow: [], planId: p.plan_id };
+    // deno-lint-ignore no-explicit-any
+    const label = `${p.title}${(p as any).content_plans?.title ? ` (${(p as any).content_plans.title})` : ""}${p.post_time ? ` ${String(p.post_time).slice(0, 5)}` : ""}`;
+    if (p.post_date < today) d.late.push(label);
+    else if (p.post_date === today) d.today.push(label);
+    else d.tomorrow.push(label);
+    byPublisher.set(p.publisher_id, d);
+  }
+  const { data: alreadyPub } = await admin.from("notifications").select("user_id").eq("type", "publish_reminder").gte("created_at", since);
+  const donePub = new Set((alreadyPub ?? []).map((r: { user_id: string }) => r.user_id));
+  const { data: activePub } = await admin.from("profiles").select("id").in("id", [...byPublisher.keys()]).eq("employment_status", "active");
+  const activePubIds = new Set((activePub ?? []).map((p: { id: string }) => p.id));
+
+  let publishNotified = 0;
+  for (const [userId, d] of byPublisher) {
+    if (donePub.has(userId) || !activePubIds.has(userId)) continue;
+    const parts = [
+      d.today.length ? `${d.today.length} to publish today` : "",
+      d.late.length ? `${d.late.length} overdue` : "",
+      d.tomorrow.length ? `${d.tomorrow.length} tomorrow` : "",
+    ].filter(Boolean);
+    const first = [...d.today, ...d.late, ...d.tomorrow][0];
+    await notify(admin, {
+      userId, type: "publish_reminder",
+      title: "Posts to publish",
+      content: `${parts.join(", ")}. Next: ${first}`,
+      link: "#calendar",
+    });
+    publishNotified++;
+  }
+
+  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, publishNotified, today, tz } });
+  return json(req, { success: true, notified, publishNotified, today });
 });

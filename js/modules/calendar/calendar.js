@@ -35,6 +35,7 @@ const KIND = {
   task:      { label: 'Tasks',      tone: 'blue'  },
   project:   { label: 'Projects',   tone: 'red'   },
   campaign:  { label: 'Campaigns',  tone: 'amber' },
+  post:      { label: 'Posts',      tone: 'blue'  },
   leave:     { label: 'Leave',      tone: 'green' },
   holiday:   { label: 'Holidays',   tone: 'gray'  }
 };
@@ -93,7 +94,7 @@ export class CalendarModule {
 
     await this.load();
     this.draw();
-    Realtime.watch(['tasks', 'milestones', 'leave_requests', 'campaigns', 'projects'], async () => { await this.load(); this.draw(); });
+    Realtime.watch(['tasks', 'milestones', 'leave_requests', 'campaigns', 'projects', 'content_posts'], async () => { await this.load(); this.draw(); });
   }
 
   // ================================================================ data
@@ -101,7 +102,7 @@ export class CalendarModule {
     const supabase = getSupabase();
     if (!supabase) return;
     try {
-      const [tasks, projects, campaigns, milestones, leave, holidays, people] = await Promise.all([
+      const [tasks, projects, campaigns, milestones, leave, holidays, people, posts] = await Promise.all([
         supabase.from('tasks')
           .select('id, task_number, title, status, priority, start_date, due_date, assigned_to, created_by, project_id, profiles!tasks_assigned_to_fkey(full_name)')
           .not('due_date', 'is', null).limit(3000),
@@ -112,13 +113,17 @@ export class CalendarModule {
           .select('id, start_date, end_date, status, user_id, profiles!leave_requests_user_id_fkey(full_name), leave_types(name)')
           .eq('status', 'approved').limit(2000),
         supabase.from('holidays').select('id, name, date, is_recurring').limit(500),
-        supabase.from('profiles').select('id, full_name').eq('employment_status', 'active').order('full_name', { ascending: true })
+        supabase.from('profiles').select('id, full_name').eq('employment_status', 'active').order('full_name', { ascending: true }),
+        // scheduled social posts from the content plans (feed calendars)
+        supabase.from('content_posts')
+          .select('id, plan_id, title, post_date, post_time, content_type, platform, status, publisher_id, content_plans(title, department_id)')
+          .not('post_date', 'is', null).limit(3000)
       ]);
       this.people = people.data || [];
       this.projects = (projects.data || []);
       this.events = this.normalize({
         tasks: tasks.data || [], projects: projects.data || [], campaigns: campaigns.data || [],
-        milestones: milestones.data || [], leave: leave.data || [], holidays: holidays.data || []
+        milestones: milestones.data || [], leave: leave.data || [], holidays: holidays.data || [], posts: posts.data || []
       });
     } catch (err) {
       console.error('Calendar load error:', err);
@@ -126,7 +131,7 @@ export class CalendarModule {
     }
   }
 
-  normalize({ tasks, projects, campaigns, milestones, leave, holidays }) {
+  normalize({ tasks, projects, campaigns, milestones, leave, holidays, posts = [] }) {
     const out = [];
     const today = ymd(new Date());
     for (const t of tasks) {
@@ -154,6 +159,18 @@ export class CalendarModule {
       if (!c.end_date) continue;
       out.push({ key: `campaign:${c.id}`, kind: 'campaign', id: c.id, title: c.name, short: `Launch: ${c.name}`,
         start: c.start_date || c.end_date, end: c.end_date, due: c.end_date, tone: 'amber', status: c.status, route: '#campaigns', raw: c });
+    }
+    for (const c of posts) {
+      const late = c.post_date < today && c.status !== 'published';
+      const icon = { reel: '🎬', carousel: '🖼️', static: '📷', story: '⏳', video: '🎥' }[c.content_type] || '📌';
+      out.push({
+        key: `post:${c.id}`, kind: 'post', id: c.id, title: `${c.content_plans?.title || 'Content'}: ${c.title}`,
+        short: `${icon} ${c.title}`, start: c.post_date, end: c.post_date, due: c.post_date,
+        tone: c.status === 'published' ? 'green' : late ? 'rose' : 'blue', status: c.status, overdue: late,
+        who: c.platform || c.content_type, mine: c.publisher_id === this.app.currentUser.id,
+        canEdit: Permissions.isAdmin() || Permissions.isManager() || (c.content_plans?.department_id && Permissions.departments.some(d => d.id === c.content_plans.department_id)),
+        route: `#campaigns?plan=${c.plan_id}`, raw: c
+      });
     }
     for (const l of leave) {
       out.push({ key: `leave:${l.id}`, kind: 'leave', id: l.id, title: `${l.profiles?.full_name || 'Team member'}: ${l.leave_types?.name || 'Leave'}`,
@@ -279,7 +296,7 @@ export class CalendarModule {
   }
 
   chip(e) {
-    const draggable = e.kind === 'task' && e.canEdit;
+    const draggable = (e.kind === 'task' || e.kind === 'post') && e.canEdit;
     return `<button type="button" class="cal-event tone-${e.tone} kind-${e.kind}" data-ev="${escapeHTML(e.key)}" ${draggable ? 'draggable="true"' : ''}
               title="${escapeHTML(e.title)}">${e.overdue ? '<i data-lucide="alert-circle"></i>' : ''}<span>${escapeHTML(e.short || e.title)}</span></button>`;
   }
@@ -310,16 +327,23 @@ export class CalendarModule {
 
   async reschedule(key, day) {
     const ev = this.events.find(e => e.key === key);
-    if (!ev || ev.kind !== 'task' || ev.due === day) return;
+    if (!ev || (ev.kind !== 'task' && ev.kind !== 'post') || ev.due === day) return;
     const prev = { due: ev.due, end: ev.end, start: ev.start, overdue: ev.overdue, tone: ev.tone };
     const today = ymd(new Date());
     // optimistic
     ev.due = ev.end = day; if (ev.start > day) ev.start = day;
-    ev.overdue = day < today && !DONE.includes(ev.status);
-    ev.tone = DONE.includes(ev.status) ? 'green' : ev.overdue ? 'rose' : 'blue';
+    const isPost = ev.kind === 'post';
+    ev.overdue = day < today && (isPost ? ev.status !== 'published' : !DONE.includes(ev.status));
+    ev.tone = (isPost ? ev.status === 'published' : DONE.includes(ev.status)) ? 'green' : ev.overdue ? 'rose' : 'blue';
     this.draw();
     try {
-      await Api.updateTask(ev.id, { dueDate: day });
+      if (isPost) {
+        const { error } = await getSupabase().from('content_posts').update({ post_date: day }).eq('id', ev.id);
+        if (error) throw new Error(error.message);
+        Api.contentPostChanged(ev.id).catch(() => {}); // tells the person who publishes it
+      } else {
+        await Api.updateTask(ev.id, { dueDate: day });
+      }
       Toast.success(`Moved to ${prettyDate(day)}`, 'Rescheduled');
     } catch (err) {
       Object.assign(ev, { due: prev.due, end: prev.end, start: prev.start, overdue: prev.overdue, tone: prev.tone });
@@ -447,6 +471,12 @@ export class CalendarModule {
       add('Priority', escapeHTML(e.priority));
       add('Assigned to', escapeHTML(e.who));
       add('Due', escapeHTML(prettyDate(e.due)) + (e.overdue ? ' <span class="badge badge-rose">Overdue</span>' : ''));
+    } else if (e.kind === 'post') {
+      add('Date', escapeHTML(prettyDate(e.start)) + (e.overdue ? ' <span class="badge badge-rose">Not published yet</span>' : ''));
+      if (e.raw.post_time) add('Time', escapeHTML(String(e.raw.post_time).slice(0, 5)));
+      add('Format', escapeHTML(e.raw.content_type));
+      add('Platform', e.raw.platform && escapeHTML(e.raw.platform));
+      add('Status', escapeHTML(String(e.status).replace(/_/g, ' ')));
     } else if (e.kind === 'leave') {
       add('From', escapeHTML(prettyDate(e.start))); add('To', escapeHTML(prettyDate(e.end)));
     } else {

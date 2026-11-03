@@ -24,6 +24,10 @@ export const NOTIFICATION_TYPES = {
   leave_decision:      { icon: 'calendar-check',  tone: 'var(--kite-red-500)',   label: 'HR' },
   expense_request:     { icon: 'receipt',         tone: 'var(--kite-amber-400)', label: 'Finance' },
   expense_decision:    { icon: 'badge-check',     tone: 'var(--kite-red-500)',   label: 'Finance' },
+  content_publish:     { icon: 'send',            tone: 'var(--kite-red-500)',   label: 'Publishing' },
+  content_published:   { icon: 'check',           tone: 'var(--kite-blue-400)',  label: 'Publishing' },
+  content_feedback:    { icon: 'message-square',  tone: 'var(--kite-amber-400)', label: 'Client feedback' },
+  publish_reminder:    { icon: 'alarm-clock',     tone: 'var(--kite-amber-400)', label: 'Publishing' },
   employee_joined:     { icon: 'user-plus',       tone: 'var(--kite-blue-400)',  label: 'People' },
   role_changed:        { icon: 'shield',          tone: 'var(--kite-red-500)',   label: 'People' }
 };

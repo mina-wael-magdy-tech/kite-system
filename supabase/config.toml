@@ -59,3 +59,8 @@ verify_jwt = true
 
 [storage]
 file_size_limit = "25MiB"
+
+[functions.content-plan]
+verify_jwt = true
+[functions.client-preview]
+verify_jwt = false
