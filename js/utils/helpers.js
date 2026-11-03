@@ -110,15 +110,7 @@ export function getInitials(name = '') {
  * Deterministic accent color for avatars & department badges
  */
 export function getAccentHex(str = '') {
-  const colors = [
-    '#E01B28', // Kite red
-    '#E24D47', // Coral (Branding)
-    '#D79F3E', // Ochre (BTL)
-    '#22C58B', // Green
-    '#50B9E3', // Blue (Media)
-    '#98D6EA', // Pale blue (Web)
-    '#FBBA48'  // Amber (Admin)
-  ];
+  const colors = ['#E01B28', '#CB9638', '#12ABE3']; // Kite red, amber, blue
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);

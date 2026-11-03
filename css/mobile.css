@@ -165,3 +165,57 @@ img, video, canvas { max-width: 100%; }
   .chat-page .chat-layout { grid-template-columns: 250px 1fr; height: auto; min-height: 0; }
   .chat-page .chat-sidebar, .chat-page .chat-window { height: 100%; }
 }
+
+
+/* ====================================================================
+   MODERN APP SHELL (phones): clean top bar, floating tab bar, tidy drawer
+   ==================================================================== */
+@media (max-width: 860px) {
+  /* ---- top bar ---- */
+  .app-topbar { height: calc(56px + env(safe-area-inset-top)); background: #fff; border-bottom: 1px solid var(--border-subtle); padding-left: var(--space-2); padding-right: var(--space-2); gap: var(--space-1); }
+  .topbar-left { flex: 1; min-width: 0; gap: var(--space-1); }
+  .topbar-right { gap: 2px; flex: none; }
+  .sidebar-mobile-toggle { display: inline-flex; width: 42px; height: 42px; border: 0; background: transparent; color: var(--text-strong); border-radius: 12px; flex: none; }
+  .sidebar-mobile-toggle:active { background: var(--studio-850); }
+  .sidebar-mobile-toggle svg { width: 24px; height: 24px; stroke-width: 2.2; }
+  .breadcrumb-list { min-width: 0; flex: 1; }
+  .breadcrumb-list li:last-child { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 17px; font-weight: 700; color: var(--text-strong); letter-spacing: -.01em; }
+  .topbar-icon-btn { border: 0; background: transparent; width: 42px; height: 42px; border-radius: 12px; }
+  .topbar-icon-btn:active { background: var(--studio-850); }
+  .notification-dot { border-color: #fff; top: 9px; right: 10px; }
+  .user-menu-btn { padding: 0; border: 0; background: transparent; gap: 0; margin-left: 2px; }
+  .user-menu-btn #topbarUserName, .user-menu-btn > svg, .user-menu-btn > i { display: none; }
+  .user-menu-btn .avatar { width: 36px; height: 36px; border-radius: 50%; font-size: 12px; }
+
+  /* ---- floating tab bar ---- */
+  .app-content { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+  .bottom-nav {
+    left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom));
+    padding: 6px; gap: 2px; background: #fff; border: 1px solid var(--border-subtle);
+    border-radius: 22px; box-shadow: 0 6px 20px rgba(20, 32, 48, .14);
+  }
+  .bottom-nav a, .bottom-nav button { min-height: 50px; border-radius: 16px; gap: 3px; background: transparent; border: 0; font-size: 10.5px; }
+  .bottom-nav svg { width: 22px; height: 22px; }
+  .bottom-nav a.active { background: var(--kite-red-500); color: #fff; }
+  .bottom-nav a:not(.active):active, .bottom-nav button:active { background: var(--studio-850); }
+
+  /* ---- drawer (burger menu) ---- */
+  .app-sidebar { border-radius: 0 20px 20px 0; border-right: 0; background: #fff; }
+  .sidebar-header { height: 64px; border-bottom: 1px solid var(--border-subtle); }
+  .sidebar-collapse-btn { display: none; }
+  .sidebar-nav { padding: var(--space-3); gap: var(--space-5); }
+  .nav-group-label { padding-left: var(--space-2); letter-spacing: .1em; }
+  .nav-item { border-radius: 12px; min-height: 46px; font-size: var(--text-sm); border: 1px solid transparent; }
+  .nav-item svg, .nav-item i { width: 20px; height: 20px; }
+
+  /* ---- stat cards: label on top, pill below, no cramped wrapping ---- */
+  .stat-card-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .stat-card-label { font-size: var(--text-sm); line-height: 1.25; }
+  .stat-card-value { font-size: 28px; }
+  .stat-card .badge { order: 2; }
+
+  /* ---- page header + action buttons ---- */
+  .page-container > div:first-child h1 { font-size: 22px; letter-spacing: -.01em; }
+  .page-container .btn-primary, .page-container .btn-secondary { border-radius: 12px; }
+  .card, .glass-panel { border-radius: 14px; }
+}
