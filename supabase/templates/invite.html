@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Welcome to Kite System</title>
+</head>
+<body style="margin:0; padding:0; background-color:#eef6fb; font-family:'Segoe UI', Helvetica, Arial, sans-serif; color:#161b22;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#eef6fb; padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px; background-color:#ffffff; border-radius:20px; overflow:hidden; box-shadow:0 8px 30px rgba(22,27,34,0.08);">
+
+          <!-- brand stripe: red / amber / blue -->
+          <tr>
+            <td style="padding:0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="45%" height="6" style="background-color:#e01b28; font-size:0; line-height:0;">&nbsp;</td>
+                  <td width="27%" height="6" style="background-color:#fbba48; font-size:0; line-height:0;">&nbsp;</td>
+                  <td width="28%" height="6" style="background-color:#7bcbe3; font-size:0; line-height:0;">&nbsp;</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- logo -->
+          <tr>
+            <td align="center" style="padding:36px 32px 8px;">
+              <img src="{{ .SiteURL }}/assets/logo-vertical-dark.png" alt="Kite Design Studio" width="112" style="display:block; border:0; height:auto;" />
+            </td>
+          </tr>
+
+          <!-- greeting -->
+          <tr>
+            <td align="center" style="padding:16px 32px 0;">
+              <h1 style="margin:0; font-size:28px; line-height:1.25; font-weight:800; color:#161b22;">
+                Hello Kiter {{ .Data.full_name }}! 🪁
+              </h1>
+              <p style="margin:12px 0 0; font-size:16px; line-height:1.6; color:#4a5565;">
+                You have been invited to our <strong style="color:#e01b28;">new Kite System</strong> — the place where our whole studio plans, creates and delivers together.
+              </p>
+            </td>
+          </tr>
+
+          <!-- role card -->
+          <tr>
+            <td style="padding:24px 32px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#eef6fb; border-radius:14px; border-left:5px solid #e01b28;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <div style="font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b7686; font-weight:700;">Your role</div>
+                    <div style="font-size:18px; font-weight:700; color:#161b22; margin-top:2px;">{{ .Data.role }}</div>
+                    <div style="font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#6b7686; font-weight:700; margin-top:12px;">Your department</div>
+                    <div style="font-size:16px; font-weight:600; color:#161b22; margin-top:2px;">{{ .Data.departments }}</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- happy message -->
+          <tr>
+            <td align="center" style="padding:24px 32px 0;">
+              <p style="margin:0; font-size:16px; line-height:1.6; color:#4a5565;">
+                We are so happy to have you on board. Let's make something amazing together! 🎉
+              </p>
+            </td>
+          </tr>
+
+          <!-- button -->
+          <tr>
+            <td align="center" style="padding:28px 32px 8px;">
+              <a href="{{ .ConfirmationURL }}" style="display:inline-block; background-color:#e01b28; color:#ffffff; text-decoration:none; font-weight:700; font-size:16px; padding:14px 34px; border-radius:12px;">
+                Accept invitation &amp; set your password
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding:12px 32px 0;">
+              <p style="margin:0; font-size:12px; line-height:1.5; color:#8a94a3;">
+                Button not working? Copy this link into your browser:<br />
+                <span style="word-break:break-all; color:#a81a1f;">{{ .ConfirmationURL }}</span>
+              </p>
+            </td>
+          </tr>
+
+          <!-- footer -->
+          <tr>
+            <td align="center" style="padding:28px 32px 32px;">
+              <p style="margin:0; font-size:14px; font-weight:700; color:#161b22;">With love, Kite Design Studio 💛</p>
+              <p style="margin:6px 0 0; font-size:12px; color:#8a94a3;">This invitation link can be used once. If you weren't expecting it, you can ignore this email.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

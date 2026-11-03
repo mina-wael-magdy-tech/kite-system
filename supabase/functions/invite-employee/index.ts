@@ -54,7 +54,7 @@ serveJson(async (req) => {
   const jobTitle = v.optText(b.jobTitle, "jobTitle", 100) ?? "Studio Member";
 
   // --- authorize the requested role
-  const { data: role } = await admin.from("roles").select("id, name, is_active").eq("id", roleId).maybeSingle();
+  const { data: role } = await admin.from("roles").select("id, name, display_name, is_active").eq("id", roleId).maybeSingle();
   if (!role || !role.is_active) throw new HttpError(400, "Unknown or inactive role");
   if (ADMIN_LEVEL.includes(role.name) && !caller.isAdmin) {
     throw new HttpError(403, "Only an administrator can grant this role");
@@ -63,9 +63,11 @@ serveJson(async (req) => {
     throw new HttpError(403, "Only a super administrator can grant super_admin");
   }
 
+  let deptNames = "";
   if (deptIds.length) {
-    const { data: found } = await admin.from("departments").select("id").in("id", deptIds);
+    const { data: found } = await admin.from("departments").select("id, name").in("id", deptIds);
     if ((found?.length ?? 0) !== deptIds.length) throw new HttpError(400, "Unknown department");
+    deptNames = deptIds.map((id) => found?.find((d) => d.id === id)?.name).filter(Boolean).join(", ");
   }
 
   const { data: existing } = await admin.from("profiles").select("id, employment_status").eq("email", email).maybeSingle();
@@ -92,7 +94,8 @@ serveJson(async (req) => {
   if (!appUrl) throw new Error("APP_URL secret is not configured");
 
   const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
-    data: { full_name: fullName },
+    // available in the email template as {{ .Data.full_name }}, {{ .Data.role }}, {{ .Data.departments }}
+    data: { full_name: fullName, role: role.display_name ?? role.name, departments: deptNames || "Kite Design Studio" },
     redirectTo: `${appUrl}/invitation.html`,
   });
   if (inviteErr || !invited?.user) throw new HttpError(400, "Could not send invitation");
