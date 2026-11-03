@@ -4,7 +4,7 @@
  * language and direction (Arabic plans are written right-to-left), with the visuals and clickable links.
  */
 
-import { LABELS, POST_TYPES, formatPlanDate, typeLabel, safeUrl } from '../../utils/plan-slide.js';
+import { LABELS, POST_TYPES, formatPlanDate, typeLabel, safeUrl, visualBoxes } from '../../utils/plan-slide.js';
 
 const W = 10, H = 5.625; // 16:9 in inches
 
@@ -39,6 +39,23 @@ async function fetchImage(url) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   return { data: canvas.toDataURL('image/jpeg', 0.88), w: canvas.width, h: canvas.height };
+}
+
+/** Downloads an image and crops it to fill a w:h frame (like CSS object-fit: cover). */
+async function fetchCropped(url, w, h) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('image download failed');
+  const bmp = await createImageBitmap(await res.blob());
+  const canvas = document.createElement('canvas');
+  const long = 1400, ratio = w / h;
+  canvas.width = ratio >= 1 ? long : Math.round(long * ratio);
+  canvas.height = ratio >= 1 ? Math.round(long / ratio) : long;
+  const s = Math.max(canvas.width / bmp.width, canvas.height / bmp.height);
+  const sw = canvas.width / s, sh = canvas.height / s;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bmp, (bmp.width - sw) / 2, (bmp.height - sh) / 2, sw, sh, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.88);
 }
 
 /** Largest rectangle with the image's aspect ratio that fits the frame, centred. */
@@ -110,20 +127,24 @@ export async function exportPlanToPptx({ plan, cover, posts, onProgress = () => 
 
     // visuals (left half for LTR, right half for RTL — the same side as on the web)
     const vx = rtl ? 5.4 : 0.4, vw = 4.2;
-    const images = [];
-    for (const v of (post.visuals || []).filter(isImageAsset).slice(0, 5)) {
-      try { images.push(await fetchImage(v.url)); } catch { /* skip an image that cannot be read */ }
+    // the same boxes the team arranged on the slide (positions in % of the picture panel), lowest layer first
+    const vy = 0.45, vh = 4.6;
+    const placed = visualBoxes(post.visuals || []).filter(({ v }) => isImageAsset(v)).slice(0, 10).sort((a, b) => a.box.z - b.box.z);
+    s.addShape(pptx.ShapeType.roundRect, { x: vx, y: vy, w: vw, h: vh, rectRadius: 0.12, fill: { color: 'F2F4F8' }, line: { type: 'none' } });
+    let drawn = 0;
+    for (const { v, box } of placed) {
+      const bx = vx + (box.x / 100) * vw, by = vy + (box.y / 100) * vh, bw = (box.w / 100) * vw, bh = (box.h / 100) * vh;
+      try {
+        if (box.fit === 'contain') {
+          const img = await fetchImage(v.url);
+          s.addImage({ data: img.data, ...contain(img, bx, by, bw, bh) });
+        } else {
+          s.addImage({ data: await fetchCropped(v.url, bw, bh), x: bx, y: by, w: bw, h: bh });
+        }
+        drawn++;
+      } catch { /* skip an image that cannot be read */ }
     }
-    s.addShape(pptx.ShapeType.roundRect, { x: vx, y: 0.45, w: vw, h: 4.6, rectRadius: 0.12, fill: { color: 'F2F4F8' }, line: { type: 'none' } });
-    if (images.length) {
-      const mainH = images.length > 1 ? 3.55 : 4.4;
-      s.addImage({ data: images[0].data, ...contain(images[0], vx + 0.1, 0.55, vw - 0.2, mainH) });
-      const rest = images.slice(1);
-      const tw = (vw - 0.2 - 0.08 * (rest.length - 1)) / Math.max(rest.length, 1);
-      rest.forEach((img, i) => {
-        s.addImage({ data: img.data, ...contain(img, vx + 0.1 + i * (tw + 0.08), 4.18, tw, 0.8) });
-      });
-    } else {
+    if (!drawn) {
       const names = (post.visuals || []).map(v => v.name).filter(Boolean);
       s.addText(names.length ? names.join('\n') : (rtl ? 'الصورة قريباً' : 'Visual coming soon'),
         { x: vx, y: 0.45, w: vw, h: 4.6, align: 'center', valign: 'middle', fontFace: font, fontSize: 12, color: '8B97A6' });

@@ -38,7 +38,7 @@ serveJson(async (req) => {
         .select("id, position, title, post_date, post_time, content_type, platform, pillar, objective, idea, caption, links")
         .eq("plan_id", plan.id).order("position", { ascending: true }),
       admin.from("content_post_assets")
-        .select("id, post_id, storage_path, file_name, file_type, position")
+        .select("id, post_id, storage_path, file_name, file_type, position, layout")
         .eq("plan_id", plan.id).order("position", { ascending: true }),
       admin.from("content_feedback")
         .select("id, post_id, slide_no, author_name, kind, message, resolved, created_at")
@@ -52,7 +52,7 @@ serveJson(async (req) => {
     const urlByPath = new Map(signed.map((s: { path: string; signedUrl: string | null }) => [s.path, s.signedUrl]));
 
     const withUrl = list
-      .map((a) => ({ id: a.id, postId: a.post_id, name: a.file_name, type: a.file_type, url: urlByPath.get(a.storage_path) ?? null }))
+      .map((a) => ({ id: a.id, postId: a.post_id, name: a.file_name, type: a.file_type, layout: a.layout ?? null, url: urlByPath.get(a.storage_path) ?? null }))
       .filter((a) => a.url);
     // deno-lint-ignore no-explicit-any
     const client = (plan as any).clients;

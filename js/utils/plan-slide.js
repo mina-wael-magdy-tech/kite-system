@@ -60,45 +60,93 @@ export function typeLabel(type, dir) {
 const isImage = (v) => /^image\//i.test(v.type || '') || /\.(png|jpe?g|gif|webp|svg|avif)$/i.test(v.name || '');
 const isVideo = (v) => /^video\//i.test(v.type || '') || /\.(mp4|mov|webm|m4v)$/i.test(v.name || '');
 
-function visualHTML(visuals = []) {
-  const media = visuals.filter(v => v.url);
-  if (!media.length) {
-    return `<div class="cps-visual cps-visual-empty"><span>🖼️</span><small>Visual coming soon</small></div>`;
-  }
-  const first = media[0];
-  const main = isVideo(first)
-    ? `<video class="cps-main" src="${escapeHTML(first.url)}" controls playsinline preload="metadata"></video>`
-    : isImage(first)
-      ? `<img class="cps-main" src="${escapeHTML(first.url)}" alt="${escapeHTML(first.name || '')}" loading="lazy">`
-      : `<a class="cps-file" href="${escapeHTML(first.url)}" target="_blank" rel="noopener noreferrer">📎 ${escapeHTML(first.name || 'File')}</a>`;
-  const thumbs = media.length > 1 ? `
-    <div class="cps-thumbs">${media.map((v, i) => `
-      <button type="button" class="cps-thumb ${i === 0 ? 'active' : ''}" data-vis="${i}" aria-label="Visual ${i + 1}">
-        ${isImage(v) ? `<img src="${escapeHTML(v.url)}" alt="" loading="lazy">` : `<span>${isVideo(v) ? '▶' : '📎'}</span>`}
-      </button>`).join('')}</div>` : '';
-  return `<div class="cps-visual" data-media='${escapeHTML(JSON.stringify(media.map(v => ({ url: v.url, name: v.name, type: v.type }))))}'>${main}${thumbs}</div>`;
+// ---------------------------------------------------------------------------
+// Visual layout. Every visual sits in a box measured in % of the picture area:
+//   { x, y, w, h, fit: 'cover' | 'contain', z }
+// A visual without a saved layout is placed automatically (a tidy grid), so a plain upload always looks fine.
+// The same maths feeds the editor, the client page and the PowerPoint export.
+// ---------------------------------------------------------------------------
+const num = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+
+/** Clamps a saved layout to something safe to render. Returns null if it is not a layout. */
+export function cleanLayout(l) {
+  if (!l || typeof l !== 'object') return null;
+  const w = num(l.w, 5, 100, 50), h = num(l.h, 5, 100, 50);
+  return {
+    x: num(l.x, 0, 100 - w, 0), y: num(l.y, 0, 100 - h, 0), w, h,
+    fit: l.fit === 'contain' ? 'contain' : 'cover', z: num(l.z, 0, 999, 0)
+  };
 }
 
-/** Makes the small thumbnails switch the large visual. Call once on any container holding slides. */
-export function bindSlides(root) {
-  root.addEventListener('click', (e) => {
-    const thumb = e.target.closest('.cps-thumb');
-    if (!thumb) return;
-    const box = thumb.closest('.cps-visual');
-    let list = [];
-    try { list = JSON.parse(box.dataset.media || '[]'); } catch { return; }
-    const v = list[Number(thumb.dataset.vis)];
-    if (!v) return;
-    const old = box.querySelector('.cps-main, .cps-file');
-    const el = isVideo(v)
-      ? Object.assign(document.createElement('video'), { className: 'cps-main', src: v.url, controls: true, playsInline: true })
-      : isImage(v)
-        ? Object.assign(document.createElement('img'), { className: 'cps-main', src: v.url, alt: v.name || '' })
-        : Object.assign(document.createElement('a'), { className: 'cps-file', href: v.url, target: '_blank', rel: 'noopener noreferrer', textContent: '📎 ' + (v.name || 'File') });
-    old?.replaceWith(el);
-    box.querySelectorAll('.cps-thumb').forEach(t => t.classList.toggle('active', t === thumb));
-  });
+const round1 = (n) => Math.round(n * 10) / 10;
+
+function gridBoxes(n, cols, gap = 1.5) {
+  const rows = Math.ceil(n / cols), w = (100 - gap * (cols - 1)) / cols, h = (100 - gap * (rows - 1)) / rows;
+  return Array.from({ length: n }, (_, i) => ({
+    x: round1((i % cols) * (w + gap)), y: round1(Math.floor(i / cols) * (h + gap)), w: round1(w), h: round1(h), fit: 'cover', z: i
+  }));
 }
+
+export const LAYOUT_PRESETS = {
+  auto:  { label: 'Auto grid',   icon: '▦' },
+  cols:  { label: 'Side by side', icon: '▥' },
+  rows:  { label: 'Stacked',     icon: '☰' },
+  hero:  { label: 'One big + rest', icon: '◧' }
+};
+
+/** Boxes for `n` visuals following a preset. */
+export function presetBoxes(n, preset = 'auto') {
+  if (n <= 0) return [];
+  if (n === 1) return [{ x: 0, y: 0, w: 100, h: 100, fit: 'contain', z: 0 }];
+  if (preset === 'cols') return gridBoxes(n, n);
+  if (preset === 'rows') return gridBoxes(n, 1);
+  if (preset === 'hero') {
+    const rest = n - 1, g = 1.5, h = (100 - g * (rest - 1)) / rest;
+    return [{ x: 0, y: 0, w: 62, h: 100, fit: 'cover', z: 0 },
+      ...Array.from({ length: rest }, (_, i) => ({ x: 63.5, y: round1(i * (h + g)), w: 36.5, h: round1(h), fit: 'cover', z: i + 1 }))];
+  }
+  // auto: 2 stacked (the picture area is nearly square), 3 = hero, 4+ = square-ish grid
+  if (n === 2) return gridBoxes(2, 1);
+  if (n === 3) return presetBoxes(3, 'hero');
+  return gridBoxes(n, Math.ceil(Math.sqrt(n)));
+}
+
+/**
+ * The final box of every visual: its saved layout, or an automatic one.
+ * A visual added after the others were arranged by hand is dropped in as a medium picture on top.
+ */
+export function visualBoxes(visuals = []) {
+  const media = visuals.filter(v => v.url);
+  const saved = media.map(v => cleanLayout(v.layout));
+  if (saved.every(s => !s)) {
+    const auto = presetBoxes(media.length, 'auto');
+    return media.map((v, i) => ({ v, box: auto[i] }));
+  }
+  let top = Math.max(0, ...saved.filter(Boolean).map(s => s.z)) + 1;
+  return media.map((v, i) => ({ v, box: saved[i] || { x: 25, y: 25, w: 50, h: 50, fit: 'cover', z: top++ } }));
+}
+
+function itemHTML({ v, box }, i) {
+  const style = `left:${box.x}%;top:${box.y}%;width:${box.w}%;height:${box.h}%;z-index:${Math.round(box.z) + 1}`;
+  const fit = `object-fit:${box.fit}`;
+  const body = isVideo(v)
+    ? `<video class="cps-main" style="${fit}" src="${escapeHTML(v.url)}" controls playsinline preload="metadata"></video>`
+    : isImage(v)
+      ? `<img class="cps-main" style="${fit}" src="${escapeHTML(v.url)}" alt="${escapeHTML(v.name || '')}" loading="lazy" draggable="false">`
+      : `<a class="cps-file" href="${escapeHTML(v.url)}" target="_blank" rel="noopener noreferrer">📎 ${escapeHTML(v.name || 'File')}</a>`;
+  return `<div class="cps-item" data-id="${escapeHTML(v.id || String(i))}" style="${style}">${body}</div>`;
+}
+
+function visualHTML(visuals = []) {
+  const items = visualBoxes(visuals);
+  if (!items.length) {
+    return `<div class="cps-visual cps-visual-empty"><span>🖼️</span><small>Visual coming soon</small></div>`;
+  }
+  return `<div class="cps-visual"><div class="cps-canvas">${items.map(itemHTML).join('')}</div></div>`;
+}
+
+/** Kept for the pages that call it; visuals are all shown at once now, so there is nothing to wire. */
+export function bindSlides() {}
 
 const field = (label, value) => value ? `
   <section class="cps-field"><h4>${escapeHTML(label)}</h4><p>${escapeHTML(value)}</p></section>` : '';

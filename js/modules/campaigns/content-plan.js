@@ -18,7 +18,8 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog, htmlDialog, closeDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatRelativeTime, getInitials } from '../../utils/helpers.js';
 import {
-  POST_TYPES, POST_STATUSES, PLAN_STATUSES, slideHTML, coverHTML, bindSlides, safeUrl, formatPlanDate
+  POST_TYPES, POST_STATUSES, PLAN_STATUSES, slideHTML, coverHTML, bindSlides, safeUrl, formatPlanDate,
+  LAYOUT_PRESETS, presetBoxes, visualBoxes
 } from '../../utils/plan-slide.js';
 import { exportPlanToPptx } from './pptx-export.js';
 
@@ -177,6 +178,8 @@ export class ContentPlanEditor {
     this.saveTimer = null;
     this.fbScope = 'page';
     this.canEdit = false;
+    this.selVis = null;             // the picture selected on the slide
+    this.dragging = false;
   }
 
   get supabase() { return getSupabase(); }
@@ -195,6 +198,7 @@ export class ContentPlanEditor {
     this.shell();
     this.drawAll();
     Realtime.watch(['content_plans', 'content_posts', 'content_post_assets', 'content_feedback'], async () => {
+      if (this.dragging) return; // never redraw under a picture the user is holding
       await this.load(false);
       this.drawRail(); this.drawPreview(); this.drawAssets(); this.drawFeedback(); this.drawHeader();
     });
@@ -236,7 +240,7 @@ export class ContentPlanEditor {
 
   visualsOf(postId) {
     return this.assets.filter(a => (a.post_id || null) === (postId || null))
-      .map(a => ({ id: a.id, url: this.urls.get(a.storage_path), name: a.file_name, type: a.file_type, path: a.storage_path }))
+      .map(a => ({ id: a.id, url: this.urls.get(a.storage_path), name: a.file_name, type: a.file_type, path: a.storage_path, layout: a.layout }))
       .filter(v => v.url);
   }
 
@@ -356,6 +360,7 @@ export class ContentPlanEditor {
   select(id) {
     this.flush();
     this.selected = id;
+    this.selVis = null;
     this.drawRail(); this.drawPreview(); this.drawForm(); this.drawAssets(); this.drawFeedback();
     if (window.lucide) window.lucide.createIcons();
     if (window.innerWidth < 980) document.getElementById('cpePreview')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -373,6 +378,192 @@ export class ContentPlanEditor {
     const draft = { ...post, ...this.pending };
     const idx = this.posts.findIndex(p => p.id === post.id);
     box.innerHTML = slideHTML({ plan, post: draft, visuals: this.visualsOf(post.id), page: idx + 2, pages: this.posts.length + 1 });
+    if (this.canEdit) this.armCanvas(box, post.id);
+  }
+
+  // ---------------------------------------------------------------- picture canvas (drag, resize, drop)
+  /** Current boxes of the selected post's pictures, keyed by asset id. */
+  boxesOf(postId) {
+    return new Map(visualBoxes(this.visualsOf(postId)).map(({ v, box }) => [v.id, { ...box }]));
+  }
+
+  /** Saves boxes for the given asset ids (id -> box). */
+  async saveBoxes(map) {
+    const jobs = [];
+    for (const [id, box] of map) {
+      const a = this.assets.find(x => x.id === id); if (!a) continue;
+      a.layout = box;
+      jobs.push(this.supabase.from('content_post_assets').update({ layout: box }).eq('id', id));
+    }
+    const res = await Promise.all(jobs);
+    const bad = res.find(r => r.error);
+    if (bad) Toast.error(/layout/.test(bad.error.message) ? 'Run migration 011_visual_layout.sql in Supabase to save picture positions.' : bad.error.message, 'Could not save the layout');
+  }
+
+  armCanvas(stage, postId) {
+    const vis = stage.querySelector('.cps-visual');
+    if (!vis) return;
+    const dir = this.plan.direction === 'rtl';
+    vis.dataset.drop = dir ? 'أفلت الصور هنا' : 'Drop pictures here';
+
+    // drop files straight onto the slide
+    vis.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); vis.classList.add('cpe-over'); } });
+    vis.addEventListener('dragleave', (e) => { if (!vis.contains(e.relatedTarget)) vis.classList.remove('cpe-over'); });
+    vis.addEventListener('drop', (e) => {
+      if (!e.dataTransfer?.files?.length) return;
+      e.preventDefault(); vis.classList.remove('cpe-over');
+      this.upload([...e.dataTransfer.files], 'post');
+    });
+
+    const canvas = vis.querySelector('.cps-canvas');
+    if (!canvas) return;
+    stage.classList.add('cpe-canvas-on');
+    const items = [...canvas.querySelectorAll('.cps-item')];
+    const mark = () => items.forEach(el => {
+      const on = el.dataset.id === this.selVis;
+      el.classList.toggle('sel', on);
+      el.querySelectorAll('.cpe-h').forEach(h => h.remove());
+      if (on) ['nw', 'ne', 'sw', 'se'].forEach(h => el.insertAdjacentHTML('beforeend', `<i class="cpe-h" data-h="${h}"></i>`));
+    });
+    mark();
+
+    canvas.addEventListener('pointerdown', (e) => {
+      const el = e.target.closest('.cps-item'); if (!el || e.button > 0) return;
+      e.preventDefault();
+      const id = el.dataset.id, handle = e.target.closest('.cpe-h')?.dataset.h || null;
+      if (this.selVis !== id) { this.selVis = id; mark(); }
+
+      const rect = canvas.getBoundingClientRect();
+      const all = this.boxesOf(postId);          // every picture gets a saved box the moment you touch one
+      const start = { ...all.get(id) };
+      const others = [...all].filter(([k]) => k !== id).map(([, b]) => b);
+      const lines = { x: [0, 50, 100], y: [0, 50, 100] };
+      others.forEach(b => { lines.x.push(b.x, b.x + b.w, b.x + b.w / 2); lines.y.push(b.y, b.y + b.h, b.y + b.h / 2); });
+      const snap = (v, axis) => { const hit = lines[axis].find(l => Math.abs(l - v) < 1.2); return hit ?? v; };
+      const guideX = document.createElement('i'); guideX.className = 'cpe-guide v';
+      const guideY = document.createElement('i'); guideY.className = 'cpe-guide h';
+      const x0 = e.clientX, y0 = e.clientY;
+      this.dragging = true; el.classList.add('dragging');
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* old browsers */ }
+
+      const apply = (b) => { el.style.left = b.x + '%'; el.style.top = b.y + '%'; el.style.width = b.w + '%'; el.style.height = b.h + '%'; };
+      const move = (ev) => {
+        const dx = ((ev.clientX - x0) / rect.width) * 100, dy = ((ev.clientY - y0) / rect.height) * 100;
+        const b = { ...start };
+        let gx = null, gy = null;
+        if (!handle) {
+          let nx = start.x + dx, ny = start.y + dy;
+          // snap any of left / middle / right (and top / middle / bottom) to the slide edges or the other pictures
+          for (const off of [0, b.w / 2, b.w]) { const s = snap(nx + off, 'x'); if (s !== nx + off) { nx = s - off; gx = s; break; } }
+          for (const off of [0, b.h / 2, b.h]) { const s = snap(ny + off, 'y'); if (s !== ny + off) { ny = s - off; gy = s; break; } }
+          b.x = Math.min(100 - b.w, Math.max(0, nx)); b.y = Math.min(100 - b.h, Math.max(0, ny));
+        } else {
+          let l = start.x, t = start.y, r = start.x + start.w, btm = start.y + start.h;
+          if (handle.includes('w')) l = snap(Math.min(r - 6, Math.max(0, start.x + dx)), 'x');
+          if (handle.includes('e')) r = snap(Math.max(l + 6, Math.min(100, r + dx)), 'x');
+          if (handle.includes('n')) t = snap(Math.min(btm - 6, Math.max(0, start.y + dy)), 'y');
+          if (handle.includes('s')) btm = snap(Math.max(t + 6, Math.min(100, btm + dy)), 'y');
+          if (ev.shiftKey) { // keep the picture's proportions (in real pixels, not %)
+            const ratio = (start.w * rect.width) / (start.h * rect.height);
+            const wPx = (r - l) * rect.width; const hPx = wPx / ratio;
+            const nh = (hPx / rect.height) * 100;
+            if (handle.includes('n')) t = btm - nh; else btm = t + nh;
+            if (t < 0 || btm > 100) { t = start.y; btm = start.y + start.h; l = start.x; r = start.x + start.w; }
+          }
+          b.x = l; b.y = t; b.w = r - l; b.h = btm - t;
+        }
+        Object.keys(b).forEach(k => { if (typeof b[k] === 'number') b[k] = Math.round(b[k] * 10) / 10; });
+        apply(b); el._box = b;
+        guideX.remove(); guideY.remove();
+        if (gx != null) { guideX.style.left = gx + '%'; canvas.appendChild(guideX); }
+        if (gy != null) { guideY.style.top = gy + '%'; canvas.appendChild(guideY); }
+      };
+      const up = async () => {
+        canvas.removeEventListener('pointermove', move);
+        canvas.removeEventListener('pointerup', up);
+        canvas.removeEventListener('pointercancel', up);
+        guideX.remove(); guideY.remove(); el.classList.remove('dragging');
+        const moved = el._box && JSON.stringify(el._box) !== JSON.stringify(start);
+        if (moved) all.set(id, el._box);
+        const needSave = moved;
+        el._box = null;
+        this.drawAssets();
+        if (needSave) await this.saveBoxes(all);
+        this.dragging = false;
+      };
+      canvas.addEventListener('pointermove', move);
+      canvas.addEventListener('pointerup', up);
+      canvas.addEventListener('pointercancel', up);
+    });
+
+    // click on empty slide area clears the selection
+    vis.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('.cps-item')) return;
+      if (this.selVis) { this.selVis = null; mark(); this.drawAssets(); }
+    });
+  }
+
+  /** Arrangement buttons and the controls for the selected picture. */
+  layoutBarHTML(list) {
+    const sel = list.find(v => v.id === this.selVis);
+    const box = sel ? this.boxesOf(this.selected).get(sel.id) : null;
+    return `
+      <div class="cpe-layout-bar">
+        <div class="cpe-seg" role="group" aria-label="Arrange pictures">
+          ${Object.entries(LAYOUT_PRESETS).map(([k, p]) => `<button type="button" data-preset="${k}" title="${p.label}">${p.icon} ${p.label}</button>`).join('')}
+        </div>
+        ${sel && box ? `
+          <div class="cpe-seg" role="group" aria-label="Picture fit">
+            <button type="button" data-fit="cover" class="${box.fit === 'cover' ? 'on' : ''}" title="Fill the box (crops the edges)">Fill</button>
+            <button type="button" data-fit="contain" class="${box.fit === 'contain' ? 'on' : ''}" title="Show the whole picture">Fit</button>
+          </div>
+          <div class="cpe-seg"><button type="button" data-z="1" title="Bring to front">⬆ Front</button><button type="button" data-z="-1" title="Send to back">⬇ Back</button></div>
+          <label class="cpe-sizer">Size <input type="range" id="cpeSize" min="10" max="100" step="1" value="${Math.round(box.w)}"> <span id="cpeSizeVal">${Math.round(box.w)}%</span></label>`
+        : '<span class="text-2xs text-dim">Click a picture on the slide to move it, resize it from its corners, or change its fit. Hold Shift while resizing to keep its shape.</span>'}
+      </div>`;
+  }
+
+  bindLayoutBar(card, list) {
+    const postId = this.selected;
+    const redraw = () => { this.drawPreview(); this.drawAssets(); };
+    card.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', async () => {
+      const boxes = presetBoxes(list.length, b.dataset.preset);
+      const map = new Map(list.map((v, i) => [v.id, boxes[i]]));
+      if (b.dataset.preset === 'auto') { // automatic again: forget the hand-made positions
+        list.forEach(v => { const a = this.assets.find(x => x.id === v.id); if (a) a.layout = null; });
+        await Promise.all(list.map(v => this.supabase.from('content_post_assets').update({ layout: null }).eq('id', v.id)));
+      } else await this.saveBoxes(map);
+      redraw();
+    }));
+    const change = async (fn) => {
+      const all = this.boxesOf(postId), b = all.get(this.selVis); if (!b) return;
+      fn(b, all); await this.saveBoxes(all); redraw();
+    };
+    card.querySelectorAll('[data-fit]').forEach(b => b.addEventListener('click', () => change((box) => { box.fit = b.dataset.fit; })));
+    card.querySelectorAll('[data-z]').forEach(b => b.addEventListener('click', () => change((box, all) => {
+      const zs = [...all.values()].map(x => x.z);
+      box.z = Number(b.dataset.z) > 0 ? Math.max(...zs) + 1 : Math.min(...zs) - 1;
+      const min = Math.min(...[...all.values()].map(x => x.z)); // z must stay >= 0
+      if (min < 0) all.forEach(x => { x.z -= min; });
+    })));
+    const size = card.querySelector('#cpeSize');
+    size?.addEventListener('input', () => { // live: scale around the picture's centre, keep its shape
+      const all = this.boxesOf(postId), b = all.get(this.selVis); if (!b) return;
+      const w = Number(size.value), h = Math.min(100, b.h * (w / b.w));
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      b.w = w; b.h = Math.round(h * 10) / 10;
+      b.x = Math.round(Math.min(100 - b.w, Math.max(0, cx - b.w / 2)) * 10) / 10;
+      b.y = Math.round(Math.min(100 - b.h, Math.max(0, cy - b.h / 2)) * 10) / 10;
+      const el = document.querySelector(`#cpePreview .cps-item[data-id="${this.selVis}"]`);
+      if (el) { el.style.left = b.x + '%'; el.style.top = b.y + '%'; el.style.width = b.w + '%'; el.style.height = b.h + '%'; }
+      document.getElementById('cpeSizeVal').textContent = w + '%';
+      size._box = b;
+    });
+    size?.addEventListener('change', async () => {
+      if (!size._box) return;
+      const all = this.boxesOf(postId); all.set(this.selVis, size._box);
+      await this.saveBoxes(all); redraw();
+    });
   }
 
   // ---------------------------------------------------------------- form
@@ -645,8 +836,9 @@ export class ContentPlanEditor {
     card.innerHTML = `
       <div class="card-header"><div class="card-title">${isCover ? 'Cover picture' : 'Visuals'}</div><span class="badge badge-slate">${list.length}</span></div>
       <div class="card-body" style="display:flex; flex-direction:column; gap:var(--space-3);">
+        ${!isCover && this.canEdit && list.length ? this.layoutBarHTML(list) : ''}
         ${list.length ? `<div class="cpe-assets">${list.map(v => `
-          <div class="cpe-asset">
+          <div class="cpe-asset${v.id === this.selVis && !isCover ? ' sel' : ''}" data-pick="${escapeHTML(v.id)}">
             ${/^image\//.test(v.type) ? `<img src="${escapeHTML(v.url)}" alt="${escapeHTML(v.name)}" loading="lazy">`
               : /^video\//.test(v.type) ? `<video src="${escapeHTML(v.url)}" muted preload="metadata"></video>`
               : `<div class="file"><span>📎</span>${escapeHTML(v.name)}</div>`}
@@ -654,14 +846,21 @@ export class ContentPlanEditor {
           </div>`).join('')}</div>` : ''}
         ${this.canEdit ? `
         <div class="cpe-drop" id="cpeDrop" tabindex="0">
-          <i data-lucide="upload-cloud"></i> Drop ${isCover ? 'a picture' : 'images or videos'} here, or click to choose
-          <div class="text-2xs text-dim">Up to 50 MB each. The first visual is the large one on the slide.</div>
+          <i data-lucide="upload-cloud"></i> Drop ${isCover ? 'a picture' : 'images or videos'} here — or straight onto the slide — or click to choose
+          <div class="text-2xs text-dim">Up to 50 MB each.${isCover ? '' : ' New pictures are arranged in a grid until you move one.'}</div>
         </div>
         <input type="file" id="cpeFile" ${isCover ? '' : 'multiple'} accept="image/*,video/mp4,video/quicktime,video/webm" style="display:none;">` : (list.length ? '' : '<p class="text-xs text-muted">No visuals yet.</p>')}
       </div>`;
     if (window.lucide) window.lucide.createIcons();
 
-    card.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => this.removeAsset(b.dataset.del)));
+    card.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); this.removeAsset(b.dataset.del); }));
+    if (!isCover && this.canEdit) {
+      card.querySelectorAll('[data-pick]').forEach(el => el.addEventListener('click', () => {
+        this.selVis = this.selVis === el.dataset.pick ? null : el.dataset.pick;
+        this.drawPreview(); this.drawAssets();
+      }));
+      this.bindLayoutBar(card, list);
+    }
     const drop = card.querySelector('#cpeDrop'), input = card.querySelector('#cpeFile');
     if (!drop) return;
     drop.addEventListener('click', () => input.click());
@@ -693,10 +892,16 @@ export class ContentPlanEditor {
       const path = `${this.me}/plans/${this.plan.id}/${crypto.randomUUID()}-${safe}`;
       const { error: upErr } = await this.supabase.storage.from(bucket).upload(path, file, { contentType: file.type, upsert: false });
       if (upErr) { Toast.error(`${file.name}: ${upErr.message}`, 'Upload failed'); continue; }
-      const { data, error } = await this.supabase.from('content_post_assets').insert({
+      const row = {
         plan_id: this.plan.id, post_id: postId, storage_path: path, file_name: file.name,
         file_type: file.type || extOf(file.name), file_size: file.size, position: base + done, uploaded_by: this.me
-      }).select('*').single();
+      };
+      // once pictures were arranged by hand, a new one lands in the middle on top instead of reshuffling the slide
+      if (postId && this.assets.some(a => a.post_id === postId && a.layout)) {
+        const z = Math.max(0, ...this.assets.filter(a => a.post_id === postId && a.layout).map(a => a.layout.z || 0)) + 1;
+        row.layout = { x: 25, y: 25, w: 50, h: 50, fit: 'cover', z };
+      }
+      const { data, error } = await this.supabase.from('content_post_assets').insert(row).select('*').single();
       if (error) { await this.supabase.storage.from(bucket).remove([path]); Toast.error(`${file.name}: ${error.message}`, 'Upload failed'); continue; }
       this.assets.push(data); done++;
     }
