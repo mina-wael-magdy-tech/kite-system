@@ -122,11 +122,12 @@ export class HrModule {
       this.updateAttendanceUI();
 
       // 2. Fetch Leave Types
-      const { data: leaveTypes } = await supabase.from('leave_types').select('*').eq('is_active', true);
+      const { data: leaveTypes, error: typesErr } = await supabase.from('leave_types').select('*').eq('is_active', true).order('name');
+      if (typesErr) console.warn('Leave types error:', typesErr);
       this.leaveTypes = leaveTypes || [];
 
       // 3. Fetch Leave Requests (Filtered by RLS)
-      const { data: requests } = await supabase
+      let { data: requests, error: reqErr } = await supabase
         .from('leave_requests')
         .select(`
           *,
@@ -134,6 +135,18 @@ export class HrModule {
           leave_types(name)
         `)
         .order('created_at', { ascending: false });
+
+      if (reqErr) {
+        // the names are a nicety: if the joined query fails, fall back to the plain list and fill the names in here
+        console.warn('Leave requests (joined) error:', reqErr);
+        const plain = await supabase.from('leave_requests').select('*').order('created_at', { ascending: false });
+        if (plain.error) { this.renderLeaveRequests(plain.error.message); return; }
+        const typeName = new Map(this.leaveTypes.map(t => [t.id, t.name]));
+        requests = (plain.data || []).map(r => ({
+          ...r, leave_types: { name: typeName.get(r.leave_type_id) },
+          profiles: r.user_id === this.app.currentUser.id ? { full_name: this.app.currentUser.full_name } : null
+        }));
+      }
 
       this.leaveRequests = requests || [];
       this.renderLeaveRequests();
@@ -217,7 +230,7 @@ export class HrModule {
     }
   }
 
-  renderLeaveRequests() {
+  renderLeaveRequests(loadError = null) {
     const tbody = document.getElementById('leaveRequestsTableBody');
     const badge = document.getElementById('leaveCountBadge');
     if (!tbody) return;
@@ -225,6 +238,12 @@ export class HrModule {
     if (badge) badge.textContent = `${this.leaveRequests.length} Requests`;
 
     const canReview = Permissions.isAdmin() || Permissions.hasRole('hr_manager');
+
+    if (loadError) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--kite-red-500, #e01b28); padding: var(--space-6);">
+        Could not load leave requests: ${escapeHTML(loadError)}<br><span class="text-2xs text-dim">If this mentions a missing table or permission, run the SQL migrations in Supabase.</span></td></tr>`;
+      return;
+    }
 
     if (this.leaveRequests.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No leave requests submitted.</td></tr>`;
@@ -275,10 +294,45 @@ export class HrModule {
     }
   }
 
+  /** First-time setup: the standard leave types (same list as seed.sql). Only an admin / HR can add them. */
+  async createStandardLeaveTypes() {
+    const { error } = await getSupabase().from('leave_types').insert([
+      { name: 'Annual Leave', description: 'Paid time off for holidays and vacation', default_days: 21 },
+      { name: 'Sick Leave', description: 'Medical or health recuperation leave', default_days: 10 },
+      { name: 'Personal / Emergency', description: 'Short-notice emergency family or personal matters', default_days: 5 },
+      { name: 'Remote Work Request', description: 'Configured remote execution days', default_days: 12 }
+    ]);
+    if (error) { Toast.error(error.message, 'Could not create leave types'); return false; }
+    await this.loadHrData();
+    return true;
+  }
+
   openLeaveModal() {
     const modalBackdrop = document.getElementById('globalModalBackdrop');
     const modalDialog = document.getElementById('globalModalDialog');
     if (!modalBackdrop || !modalDialog) return;
+
+    // No leave types yet: the form could never be submitted, so say why instead of showing an empty list
+    if (!this.leaveTypes.length) {
+      const canSetUp = Permissions.isAdmin() || Permissions.hasRole('hr_manager');
+      modalDialog.style.maxWidth = '440px';
+      modalDialog.innerHTML = `
+        <div class="modal-header"><h2 class="modal-title font-display">Time off is not set up yet</h2>
+          <button type="button" class="modal-close-btn" id="btnCancelLeave">&times;</button></div>
+        <div class="modal-body"><p class="text-sm text-muted">There are no leave types (annual, sick…) in the system, so a request cannot be made.
+          ${canSetUp ? 'You can add the standard ones now.' : 'Please ask an administrator or HR to add them.'}</p></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnCancelLeaveAction">Close</button>
+          ${canSetUp ? '<button type="button" class="btn btn-primary btn-sm" id="btnSeedLeaveTypes">Add standard leave types</button>' : ''}
+        </div>`;
+      modalBackdrop.classList.add('active');
+      document.getElementById('btnCancelLeave')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
+      document.getElementById('btnCancelLeaveAction')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
+      document.getElementById('btnSeedLeaveTypes')?.addEventListener('click', async () => {
+        if (await this.createStandardLeaveTypes()) this.openLeaveModal();
+      });
+      return;
+    }
 
     modalDialog.style.maxWidth = '480px';
     modalDialog.innerHTML = `
@@ -335,6 +389,9 @@ export class HrModule {
 
       const s = new Date(startDate);
       const en = new Date(endDate);
+      if (!(en >= s)) { Toast.error('The end date cannot be before the start date.', 'Check the dates'); return; }
+      const submitBtn = e.submitter || document.querySelector('#requestLeaveForm [type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
       const totalDays = Math.max(1, Math.ceil((en - s) / (1000 * 60 * 60 * 24)) + 1);
 
       const supabase = getSupabase();
@@ -357,6 +414,7 @@ export class HrModule {
       } catch (err) {
         console.error('Leave submit error:', err);
         Toast.error(err.message || 'Submission failed', 'Error');
+        if (submitBtn) submitBtn.disabled = false;
       }
     });
   }
