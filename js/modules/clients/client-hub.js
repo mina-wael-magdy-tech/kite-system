@@ -35,6 +35,8 @@ const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOS
 const day = (s) => (s ? new Date(String(s).slice(0, 10) + 'T00:00:00') : null);
 const todayISO = () => iso(new Date());
 const clientName = (c) => c?.company_name || c?.name || 'Client';
+// Every client gets one of the three brand colours automatically (stable, taken from its id)
+const brandTone = (c) => { let h = 0; for (const ch of String(c?.id || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return 'ch-t' + (h % 3); };
 const badge = (label, tone = 'slate') => `<span class="badge badge-${tone}">${escapeHTML(label)}</span>`;
 const sizeText = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const taskStatus = (t) => STATUS[t.status] || [t.status, 'slate'];
@@ -72,7 +74,7 @@ export class ClientHubModule {
       <div class="page-container animate-fade-in">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:var(--space-4);">
           <div>
-            <h1 class="font-display font-bold text-xl text-white">Clients</h1>
+            <h1 class="font-display font-bold text-xl">Clients</h1>
             <p class="text-xs text-muted" style="margin-top:2px;">Open a client to see their tasks, timeline, calendar, deliverables, departments and files in one place.</p>
           </div>
           <a href="#crm" class="btn btn-secondary btn-sm"><i data-lucide="building"></i> Manage clients &amp; deals</a>
@@ -156,14 +158,14 @@ export class ClientHubModule {
       const pct = total ? Math.round((s.done / total) * 100) : 0;
       const regular = c.client_type === 'retainer';
       const depts = (c.client_departments || []).map(x => deptName.get(x.department_id)).filter(Boolean);
-      return `<a href="#clients?client=${c.id}" class="card entity-card ch-card ${regular ? 'is-regular' : 'is-project'}">
+      return `<a href="#clients?client=${c.id}" class="card entity-card ch-card ${brandTone(c)}">
         <div class="ch-card-top">
           <div class="ch-avatar">${escapeHTML(clientName(c).slice(0, 1).toUpperCase())}</div>
           <div style="min-width:0;flex:1;">
             <div class="card-title ch-ellipsis">${escapeHTML(clientName(c))}</div>
             <div class="card-subtitle ch-ellipsis">${escapeHTML(c.industry || c.name || '')}</div>
           </div>
-          ${badge(regular ? 'Regular' : 'Project-based', regular ? 'emerald' : 'slate')}
+          <span class="ch-type">${regular ? 'Regular' : 'Project-based'}</span>
         </div>
         <div class="ch-money">${regular && c.monthly_budget != null
           ? `<strong>${formatCurrency(c.monthly_budget)}</strong><span>per month</span>` : '<span>Budget set per project</span>'}</div>
@@ -234,12 +236,12 @@ export class ClientHubModule {
     this.root.innerHTML = `
       <div class="page-container animate-fade-in">
         <a href="#clients" class="ch-back"><i data-lucide="arrow-left"></i> All clients</a>
-        <div class="ch-head glass-panel">
+        <div class="ch-head ${brandTone(c)}">
           <div class="ch-avatar ch-avatar-lg">${escapeHTML(clientName(c).slice(0, 1).toUpperCase())}</div>
           <div style="flex:1;min-width:200px;">
-            <h1 class="font-display font-bold text-xl text-white">${escapeHTML(clientName(c))}</h1>
+            <h1 class="font-display font-bold text-xl">${escapeHTML(clientName(c))}</h1>
             <div class="ch-meta">
-              ${badge(regular ? 'Regular client' : 'Project-based', regular ? 'emerald' : 'slate')}
+              <span class="ch-type">${regular ? 'Regular client' : 'Project-based'}</span>
               ${regular && c.monthly_budget != null ? `<span><b>${formatCurrency(c.monthly_budget)}</b> / month</span>` : ''}
               ${c.industry ? `<span>${escapeHTML(c.industry)}</span>` : ''}
               ${c.email ? `<span>${escapeHTML(c.email)}</span>` : ''}

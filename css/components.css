@@ -269,12 +269,13 @@
 
 .stat-card { background-color: var(--sc-bg, var(--color-primary)); border-color: transparent; --sc-fg: #fff; color: var(--sc-fg); }
 .stat-card.border-indigo { --sc-bg: var(--color-primary); }
-.stat-card.border-sky    { --sc-bg: var(--color-sky); }
+.stat-card.border-sky    { --sc-bg: var(--kite-blue-400); --sc-fg: #0b2a38; }
 .stat-card.border-amber  { --sc-bg: var(--color-amber); --sc-fg: #3d2a00; }
-.stat-card.border-emerald{ --sc-bg: #158f63; }
-.stat-card.border-purple { --sc-bg: var(--color-purple); }
+.stat-card.border-emerald{ --sc-bg: var(--kite-blue-700); --sc-fg: #04202c; }
+.stat-card.border-purple { --sc-bg: var(--kite-red-500); }
 .stat-card .stat-card-label, .stat-card .stat-card-value, .stat-card .stat-card-footer, .stat-card svg { color: var(--sc-fg); }
 .stat-card .stat-card-label, .stat-card .stat-card-footer { opacity: .85; }
+.stat-card .badge { background: var(--sc-fg); color: var(--sc-bg); border-color: transparent; }
 
 .stat-card-header {
   display: flex;

@@ -7,10 +7,21 @@
   text-decoration: none; color: var(--text-main); overflow: hidden;
   box-shadow: var(--shadow-sm); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
-.ch-card { background: var(--ch-bg, var(--bg-card)); }
-.ch-card.is-regular { --ch-bg: #e1f5ec; }
-.ch-card.is-project { --ch-bg: var(--tint-blue); }
-.ch-card:hover { box-shadow: var(--shadow-lg); border-color: var(--border-active); }
+/* brand colours: red / amber / blue, one per client, filling the whole card */
+.ch-t0 { --cc: var(--kite-red-500); --cc-on: #fff; }
+.ch-t1 { --cc: var(--kite-amber-400); --cc-on: #2b1d00; }
+.ch-t2 { --cc: var(--kite-blue-400); --cc-on: #0b2a38; }
+.ch-card, .ch-head { background: var(--cc); color: var(--cc-on); border-color: transparent; }
+.ch-card .card-title, .ch-card .card-subtitle, .ch-head h1, .ch-card .ch-money strong, .ch-card .ch-money, .ch-head .ch-meta, .ch-head .ch-meta b, .ch-card .ch-row, .ch-card .ch-row b, .ch-card .ch-foot, .ch-card .ch-open, .ch-card .ch-late { color: var(--cc-on); }
+.ch-card .card-subtitle, .ch-card .ch-row, .ch-card .ch-foot { opacity: .85; }
+.ch-type { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 6px; background: var(--cc-on); color: var(--cc); white-space: nowrap; }
+.ch-card .ch-chip { background: color-mix(in srgb, var(--cc-on) 16%, transparent); color: var(--cc-on); border-color: transparent; border-radius: 6px; }
+.ch-card .ch-foot { border-top-color: color-mix(in srgb, var(--cc-on) 28%, transparent); }
+.ch-card .progress-track { background: color-mix(in srgb, var(--cc-on) 22%, transparent); }
+.ch-card .progress-fill { background: var(--cc-on); }
+.ch-card .text-dim { color: var(--cc-on); opacity: .8; }
+.ch-card .ch-avatar, .ch-head .ch-avatar { background: var(--cc-on); color: var(--cc); }
+.ch-card:hover { filter: brightness(.95); }
 .ch-card-top { display: flex; align-items: center; gap: var(--space-3); }
 .ch-avatar {
   width: 44px; height: 44px; flex: none; border-radius: 8px; display: grid; place-items: center; font-weight: 800; font-size: 18px; color: #fff;
