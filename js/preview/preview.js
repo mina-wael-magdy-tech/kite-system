@@ -126,9 +126,9 @@ function workHTML(list, pageNo, total) {
   return `
     <main class="pv-work">
       <div class="pv-stage">
-        <button type="button" class="pv-nav" id="pvPrev" aria-label="${escapeHTML(tr('prev'))}" ${state.index === 0 ? 'disabled' : ''}>${rtl ? '›' : '‹'}</button>
+        <button type="button" class="pv-nav" id="pvPrev" aria-label="${escapeHTML(tr('prev'))}" ${state.index === 0 ? 'disabled' : ''}>‹</button>
         <div class="pv-slide cps-stage" style="--pv-from:${state.lastDir === -1 ? '-28px' : '28px'}">${slide}</div>
-        <button type="button" class="pv-nav" id="pvNext" aria-label="${escapeHTML(tr('next'))}" ${state.index >= total - 1 ? 'disabled' : ''}>${rtl ? '‹' : '›'}</button>
+        <button type="button" class="pv-nav" id="pvNext" aria-label="${escapeHTML(tr('next'))}" ${state.index >= total - 1 ? 'disabled' : ''}>›</button>
       </div>
       ${cur.type === 'final' ? '' : panelHTML(cur, pageNo)}
     </main>
