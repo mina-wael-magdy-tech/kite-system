@@ -46,7 +46,11 @@ serveJson(async (req) => {
   const email = v.email(b.email);
   const fullName = v.text(b.fullName, "fullName", 2, 120);
   const roleId = v.uuid(b.roleId, "roleId");
-  const departmentId = v.optUuid(b.departmentId, "departmentId");
+  // One or many departments; the first is the primary one
+  const deptIds: string[] = Array.isArray(b.departmentIds)
+    ? [...new Set(b.departmentIds.map((x) => v.uuid(x, "departmentIds")))]
+    : (v.optUuid(b.departmentId, "departmentId") ? [v.optUuid(b.departmentId, "departmentId") as string] : []);
+  const departmentId = deptIds[0] ?? null;
   const jobTitle = v.optText(b.jobTitle, "jobTitle", 100) ?? "Studio Member";
 
   // --- authorize the requested role
@@ -59,9 +63,9 @@ serveJson(async (req) => {
     throw new HttpError(403, "Only a super administrator can grant super_admin");
   }
 
-  if (departmentId) {
-    const { data: dept } = await admin.from("departments").select("id").eq("id", departmentId).maybeSingle();
-    if (!dept) throw new HttpError(400, "Unknown department");
+  if (deptIds.length) {
+    const { data: found } = await admin.from("departments").select("id").in("id", deptIds);
+    if ((found?.length ?? 0) !== deptIds.length) throw new HttpError(400, "Unknown department");
   }
 
   const { data: existing } = await admin.from("profiles").select("id, employment_status").eq("email", email).maybeSingle();
@@ -105,8 +109,10 @@ serveJson(async (req) => {
     const { error: roleErr } = await admin.from("user_roles").insert({ user_id: userId, role_id: roleId, assigned_by: caller.id });
     if (roleErr) throw roleErr;
 
-    if (departmentId) {
-      const { error } = await admin.from("user_departments").insert({ user_id: userId, department_id: departmentId, is_primary: true });
+    if (deptIds.length) {
+      const { error } = await admin.from("user_departments").insert(
+        deptIds.map((id, i) => ({ user_id: userId, department_id: id, is_primary: i === 0 })),
+      );
       if (error) throw error;
     }
     const { error: invErr } = await admin.from("invitations").insert({

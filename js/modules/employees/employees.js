@@ -110,6 +110,7 @@ export class EmployeesModule {
         .select(`
           ${CONFIG.PROFILE_COLUMNS},
           departments!profiles_department_id_fkey(id, name, code),
+          user_departments!user_departments_user_id_fkey(department_id, is_primary),
           user_roles!user_roles_user_id_fkey(roles(id, name, display_name))
         `)
         .order('created_at', { ascending: true });
@@ -123,6 +124,14 @@ export class EmployeesModule {
     }
   }
 
+  /** All department ids of an employee, primary first (falls back to the legacy single department). */
+  deptIdsOf(emp) {
+    const rows = [...(emp.user_departments || [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+    const ids = rows.map(r => r.department_id);
+    if (emp.department_id && !ids.includes(emp.department_id)) ids.unshift(emp.department_id);
+    return ids;
+  }
+
   filterAndRender(query = '', deptFilter = 'ALL') {
     const container = document.getElementById('employeesGrid');
     if (!container) return;
@@ -130,7 +139,7 @@ export class EmployeesModule {
     let filtered = this.employees;
 
     if (deptFilter !== 'ALL') {
-      filtered = filtered.filter(e => e.department_id === deptFilter);
+      filtered = filtered.filter(e => this.deptIdsOf(e).includes(deptFilter));
     }
 
     if (query) {
@@ -156,7 +165,7 @@ export class EmployeesModule {
     container.innerHTML = filtered.map(emp => {
       const initials = getInitials(emp.full_name || emp.email);
       const accent = getAccentHex(emp.full_name || emp.email);
-      const deptName = emp.departments?.name || 'No department';
+      const deptNames = this.deptIdsOf(emp).map(id => this.departments.find(d => d.id === id)?.name).filter(Boolean);
       const roleDisplayName = emp.user_roles?.[0]?.roles?.display_name || 'No role';
 
       return `
@@ -174,7 +183,7 @@ export class EmployeesModule {
             <p class="text-xs text-muted" style="margin-top: 2px;">${escapeHTML(emp.job_title || roleDisplayName)}</p>
             
             <div style="margin-top: var(--space-2); display: flex; flex-wrap: wrap; gap: 4px;">
-              <span class="badge badge-indigo">${escapeHTML(deptName)}</span>
+              ${(deptNames.length ? deptNames : ['No department']).map(n => `<span class="badge badge-indigo">${escapeHTML(n)}</span>`).join('')}
               <span class="badge badge-slate font-mono">${emp.employee_id || 'EMP'}</span>
             </div>
           </div>
@@ -222,7 +231,7 @@ export class EmployeesModule {
     const roleId = emp.user_roles?.[0]?.roles?.id;
     if (!roleId) { Toast.error('This employee has no role assigned', 'Cannot resend'); return; }
     try {
-      await Api.inviteEmployee({ fullName: emp.full_name, email: emp.email, departmentId: emp.department_id || undefined, roleId, jobTitle: emp.job_title || undefined });
+      await Api.inviteEmployee({ fullName: emp.full_name, email: emp.email, departmentIds: this.deptIdsOf(emp), roleId, jobTitle: emp.job_title || undefined });
       Toast.success(`New invitation sent to ${emp.email}`, 'Invitation Resent');
       await this.loadEmployees();
     } catch (err) {
@@ -241,8 +250,9 @@ export class EmployeesModule {
       fields: [
         { name: 'fullName', label: 'Full name', required: true, value: emp.full_name || '', maxlength: 120 },
         { name: 'jobTitle', label: 'Job title', half: true, value: emp.job_title || '', maxlength: 100 },
-        { name: 'departmentId', label: 'Department', type: 'select', half: true, value: emp.department_id || '', options: [
-          { value: '', label: 'No department' }, ...this.departments.map(d => ({ value: d.id, label: d.name }))] },
+        { name: 'departmentIds', label: 'Departments', type: 'checkboxes', value: this.deptIdsOf(emp),
+          options: this.departments.map(d => ({ value: d.id, label: d.name })),
+          hint: 'Choose one or more. The first one you pick when inviting stays the primary department.' },
         ...(isSelf ? [] : [
           { name: 'roleId', label: 'Role', type: 'select', half: true, value: currentRoleId, options: this.roles.map(r => ({ value: r.id, label: r.display_name })) },
           { name: 'employmentStatus', label: 'Status', type: 'select', half: true, value: emp.employment_status === 'onboarding' ? 'active' : emp.employment_status, options: [
@@ -251,7 +261,10 @@ export class EmployeesModule {
         ])
       ],
       onSubmit: async (v) => {
-        const payload = { fullName: v.fullName, jobTitle: v.jobTitle, departmentId: v.departmentId };
+        // keep the current primary first so editing doesn't silently change it
+        const currentPrimary = this.deptIdsOf(emp)[0];
+        const departmentIds = [...v.departmentIds].sort((a, b) => (b === currentPrimary) - (a === currentPrimary));
+        const payload = { fullName: v.fullName, jobTitle: v.jobTitle, departmentIds };
         if (!isSelf) { payload.roleId = v.roleId; payload.employmentStatus = v.employmentStatus; }
         await Api.updateEmployee(id, payload);
         Toast.success('Employee updated', 'Saved');
@@ -286,10 +299,10 @@ export class EmployeesModule {
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
             <div class="form-group">
-              <label class="form-label" for="inviteDeptSelect">Department *</label>
-              <select id="inviteDeptSelect" required class="form-control">
-                ${this.departments.map(d => `<option value="${d.id}">${escapeHTML(d.name)}</option>`).join('')}
-              </select>
+              <label class="form-label">Departments * <span class="text-2xs text-dim">(choose one or more)</span></label>
+              <div id="inviteDeptChecks" style="display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); max-height: 140px; overflow-y: auto;">
+                ${this.departments.map(d => `<label style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); cursor: pointer;"><input type="checkbox" name="inviteDept" value="${d.id}" /> ${escapeHTML(d.name)}</label>`).join('')}
+              </div>
             </div>
 
             <div class="form-group">
@@ -323,7 +336,8 @@ export class EmployeesModule {
 
       const fullName = document.getElementById('inviteNameInput').value.trim();
       const email = document.getElementById('inviteEmailInput').value.trim();
-      const departmentId = document.getElementById('inviteDeptSelect').value;
+      const departmentIds = [...document.querySelectorAll('#inviteDeptChecks input:checked')].map(c => c.value);
+      if (!departmentIds.length) { Toast.error('Choose at least one department', 'Missing department'); return; }
       const roleId = document.getElementById('inviteRoleSelect').value;
       const jobTitle = document.getElementById('inviteTitleInput').value.trim() || 'Creative Specialist';
 
@@ -333,7 +347,7 @@ export class EmployeesModule {
       const supabase = getSupabase();
       try {
         // Invoke Edge Function for secure server-side employee invitation
-        await Api.inviteEmployee({ fullName, email, departmentId, roleId, jobTitle });
+        await Api.inviteEmployee({ fullName, email, departmentIds, roleId, jobTitle });
 
         Toast.success(`Invitation sent to ${email}`, 'Invitation Dispatched');
         modalBackdrop.classList.remove('active');

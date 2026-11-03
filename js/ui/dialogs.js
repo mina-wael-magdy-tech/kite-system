@@ -54,6 +54,10 @@ function fieldHTML(f) {
   let control;
   if (f.type === 'textarea') {
     control = `<textarea id="${id}" name="${f.name}" rows="${f.rows || 3}" class="form-control" ${req} ${f.maxlength ? `maxlength="${f.maxlength}"` : ''}>${escapeHTML(val)}</textarea>`;
+  } else if (f.type === 'checkboxes') {
+    const selected = new Set((Array.isArray(f.value) ? f.value : []).map(String));
+    control = `<div class="checkbox-group" style="display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);">${(f.options || []).map(o =>
+      `<label style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); cursor: pointer;"><input type="checkbox" name="${f.name}" value="${escapeHTML(o.value)}" ${selected.has(String(o.value)) ? 'checked' : ''} /> ${escapeHTML(o.label)}</label>`).join('')}</div>`;
   } else if (f.type === 'select') {
     control = `<select id="${id}" name="${f.name}" class="form-control" ${req}>${(f.options || []).map(o =>
       `<option value="${escapeHTML(o.value)}" ${String(o.value) === String(val) ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}</select>`;
@@ -113,6 +117,10 @@ export function formDialog({ title, subtitle = '', fields, submitLabel = 'Save c
     if (!form.reportValidity()) return;
     const values = {};
     for (const f of fields) {
+      if (f.type === 'checkboxes') {
+        values[f.name] = [...form.querySelectorAll(`input[type="checkbox"][name="${f.name}"]:checked`)].map(c => c.value);
+        continue;
+      }
       const el = form.elements[f.name];
       let v = el.value.trim();
       if (f.type === 'number') v = v === '' ? null : Number(v);

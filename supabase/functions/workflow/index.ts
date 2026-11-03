@@ -405,6 +405,17 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     patch.department_id = deptId;
   }
 
+  // Multiple departments: the first one is the primary (profiles.department_id)
+  let deptIds: string[] | null = null;
+  if (Array.isArray(b.departmentIds)) {
+    deptIds = [...new Set(b.departmentIds.map((x) => v.uuid(x, "departmentIds")))];
+    if (deptIds.length) {
+      const { data: found } = await admin.from("departments").select("id").in("id", deptIds);
+      if ((found?.length ?? 0) !== deptIds.length) throw new HttpError(400, "Unknown department");
+    }
+    patch.department_id = deptIds[0] ?? null;
+  }
+
   let newStatus: typeof EMPLOYMENT_STATUSES[number] | null = null;
   if ("employmentStatus" in b) {
     newStatus = v.oneOf(b.employmentStatus, EMPLOYMENT_STATUSES, "employmentStatus");
@@ -432,7 +443,15 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
   if (Object.keys(patch).length) {
     const { error } = await admin.from("profiles").update(patch).eq("id", userId);
     if (error) throw error;
-    if ("department_id" in patch) {
+    if (deptIds) {
+      await admin.from("user_departments").delete().eq("user_id", userId);
+      if (deptIds.length) {
+        const { error: udErr } = await admin.from("user_departments").insert(
+          deptIds.map((id, i) => ({ user_id: userId, department_id: id, is_primary: i === 0 })),
+        );
+        if (udErr) throw udErr;
+      }
+    } else if ("department_id" in patch) {
       await admin.from("user_departments").delete().eq("user_id", userId).eq("is_primary", true);
       if (patch.department_id) {
         await admin.from("user_departments").upsert(
