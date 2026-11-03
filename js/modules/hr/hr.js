@@ -56,6 +56,27 @@ export class HrModule {
           </div>
         </div>
 
+        <!-- Attendance Log -->
+        <div class="card">
+          <div class="card-header" style="flex-wrap: wrap; gap: var(--space-2);">
+            <div class="card-title">Attendance Log</div>
+            <div style="display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center;">
+              <input type="month" id="attMonth" class="form-control" style="height: 34px; width: auto;" aria-label="Month" />
+              ${this.canSeeAll() ? '<select id="attPerson" class="form-control" style="height: 34px; width: auto;" aria-label="Employee"><option value="">Everyone</option></select>' : ''}
+              <button type="button" class="btn btn-secondary btn-sm" id="btnAttExport"><i data-lucide="download"></i> Export CSV</button>
+            </div>
+          </div>
+          <div id="attSummary" style="display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4) 0;"></div>
+          <div class="card-body" style="padding: 0;">
+            <div class="table-responsive" style="border: none; border-radius: 0;">
+              <table class="data-table">
+                <thead><tr><th>Date</th><th>Specialist</th><th>Check in</th><th>Check out</th><th>Hours</th><th>Status</th></tr></thead>
+                <tbody id="attTableBody"><tr><td colspan="6" style="text-align:center; color: var(--text-dim); padding: var(--space-6);">Loading attendance…</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <!-- Leave Requests Table -->
         <div class="card">
           <div class="card-header">
@@ -86,6 +107,7 @@ export class HrModule {
     `;
 
     this.attachEventListeners();
+    this.setupAttendanceLog();
     await this.loadHrData();
     Realtime.watch(['leave_requests', 'attendance_records'], () => this.loadHrData()); // live updates for everyone
   }
@@ -110,7 +132,7 @@ export class HrModule {
 
     try {
       // 1. Check today's attendance record
-      const today = new Date().toISOString().split('T')[0];
+      const today = this.localDate();
       const { data: attendance } = await supabase
         .from('attendance_records')
         .select('*')
@@ -150,6 +172,7 @@ export class HrModule {
 
       this.leaveRequests = requests || [];
       this.renderLeaveRequests();
+      await this.loadAttendanceLog();
     } catch (err) {
       console.warn('HR data fetch error:', err);
       this.renderLeaveRequests();
@@ -182,11 +205,112 @@ export class HrModule {
     }
   }
 
+
+  // ---------------------------------------------------------------- attendance log
+  /** Today's date in the user's own time zone (YYYY-MM-DD). toISOString() would give the UTC day, which is wrong after midnight in Cairo. */
+  localDate(d = new Date()) {
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  }
+
+  canSeeAll() { return Permissions.isAdmin() || Permissions.hasRole('hr_manager'); }
+
+  setupAttendanceLog() {
+    this.attMonth = this.localDate().slice(0, 7);
+    this.attPerson = '';
+    this.attRows = [];
+    const month = document.getElementById('attMonth');
+    if (month) { month.value = this.attMonth; month.addEventListener('change', () => { this.attMonth = month.value || this.attMonth; this.loadAttendanceLog(); }); }
+    document.getElementById('attPerson')?.addEventListener('change', (e) => { this.attPerson = e.target.value; this.renderAttendanceLog(); });
+    document.getElementById('btnAttExport')?.addEventListener('click', () => this.exportAttendance());
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  async loadAttendanceLog() {
+    const sb = getSupabase(); if (!sb || !document.getElementById('attTableBody')) return;
+    const [y, m] = this.attMonth.split('-').map(Number);
+    const from = `${this.attMonth}-01`, to = this.localDate(new Date(y, m, 0)); // last day of that month
+    let q = sb.from('attendance_records').select('id, user_id, date, check_in, check_out, total_hours, status')
+      .gte('date', from).lte('date', to).order('date', { ascending: false }).order('check_in', { ascending: false }).limit(2000);
+    if (!this.canSeeAll()) q = q.eq('user_id', this.app.currentUser.id); // everyone else sees only their own days
+    const { data, error } = await q;
+    if (error) {
+      document.getElementById('attTableBody').innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--kite-red-500, #e01b28); padding: var(--space-6);">Could not load attendance: ${escapeHTML(error.message)}</td></tr>`;
+      return;
+    }
+    this.attRows = data || [];
+    const ids = [...new Set(this.attRows.map(r => r.user_id))];
+    this.attNames = new Map();
+    if (ids.length) {
+      const { data: people } = await sb.from('profiles').select('id, full_name').in('id', ids);
+      (people || []).forEach(p => this.attNames.set(p.id, p.full_name));
+    }
+    const sel = document.getElementById('attPerson');
+    if (sel) {
+      sel.innerHTML = '<option value="">Everyone</option>' + [...this.attNames].sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+        .map(([id, name]) => `<option value="${id}">${escapeHTML(name || 'Unknown')}</option>`).join('');
+      sel.value = this.attNames.has(this.attPerson) ? this.attPerson : '';
+      this.attPerson = sel.value;
+    }
+    this.renderAttendanceLog();
+  }
+
+  visibleAttendance() { return this.attPerson ? this.attRows.filter(r => r.user_id === this.attPerson) : this.attRows; }
+
+  renderAttendanceLog() {
+    const body = document.getElementById('attTableBody'), sum = document.getElementById('attSummary');
+    if (!body) return;
+    const rows = this.visibleAttendance();
+    const time = (t) => (t ? new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '—');
+    const name = (id) => (id === this.app.currentUser.id ? 'You' : this.attNames?.get(id) || 'Specialist');
+
+    // totals per person for the month
+    const per = new Map();
+    rows.forEach(r => { const e = per.get(r.user_id) || { days: 0, hours: 0 }; e.days++; e.hours += Number(r.total_hours) || 0; per.set(r.user_id, e); });
+    const chip = (t) => `<span class="badge badge-slate" style="font-size: 11px;">${t}</span>`;
+    if (!per.size) sum.innerHTML = '';
+    else if (per.size === 1) {
+      const [id, e] = [...per][0];
+      sum.innerHTML = chip(`${escapeHTML(name(id))}: <b>${e.days}</b> day${e.days === 1 ? '' : 's'} · <b>${e.hours.toFixed(1)}</b> hrs`);
+    } else {
+      sum.innerHTML = chip(`${per.size} people · <b>${rows.length}</b> check-ins`) + [...per].sort((a, b) => b[1].hours - a[1].hours).slice(0, 8)
+        .map(([id, e]) => chip(`${escapeHTML(name(id))}: ${e.days} d · ${e.hours.toFixed(1)} h`)).join('');
+    }
+
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-dim); padding: var(--space-6);">No attendance recorded for this month. Press “Check In Now” above to record today.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(r => `
+      <tr>
+        <td class="font-mono text-2xs">${escapeHTML(r.date)}</td>
+        <td class="font-semibold text-white">${escapeHTML(name(r.user_id))}</td>
+        <td class="font-mono text-2xs">${time(r.check_in)}</td>
+        <td class="font-mono text-2xs">${r.check_out ? time(r.check_out) : '<span class="badge badge-amber">Still in</span>'}</td>
+        <td class="font-mono text-2xs">${r.check_out ? (Number(r.total_hours) || 0).toFixed(2) : '—'}</td>
+        <td><span class="badge ${r.status === 'present' ? 'badge-emerald' : 'badge-amber'}">${escapeHTML(String(r.status).replace('_', ' '))}</span></td>
+      </tr>`).join('');
+  }
+
+  exportAttendance() {
+    const rows = this.visibleAttendance();
+    if (!rows.length) { Toast.info('Nothing to export for this month.', 'Attendance'); return; }
+    // a cell that starts with = + - @ would run as a formula in Excel: prefix it with an apostrophe
+    const cell = (v) => { let t = String(v ?? ''); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; };
+    const hhmm = (t) => (t ? new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '');
+    const lines = [['Date', 'Specialist', 'Check in', 'Check out', 'Hours', 'Status'],
+      ...rows.map(r => [r.date, this.attNames?.get(r.user_id) || '', hhmm(r.check_in), hhmm(r.check_out), r.check_out ? Number(r.total_hours) || 0 : '', r.status])]
+      .map(l => l.map(cell).join(','));
+    const url = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: `attendance-${this.attMonth}.csv` });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
   async handleCheckIn() {
     const supabase = getSupabase();
     if (!supabase) return;
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = this.localDate();
     try {
       const { error } = await supabase.from('attendance_records').insert({
         user_id: this.app.currentUser.id,
