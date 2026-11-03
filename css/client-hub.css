@@ -9,8 +9,8 @@
 }
 /* brand colours: red / amber / blue, one per client, filling the whole card */
 .ch-t0 { --cc: var(--kite-red-500); --cc-on: #fff; }
-.ch-t1 { --cc: color-mix(in srgb, var(--kite-amber-700) 82%, #000); --cc-on: #fff; }
-.ch-t2 { --cc: color-mix(in srgb, var(--kite-blue-700) 78%, #000); --cc-on: #fff; }
+.ch-t1 { --cc: var(--kite-amber-700); --cc-on: #fff; }
+.ch-t2 { --cc: var(--kite-blue-700); --cc-on: #fff; }
 .ch-card, .ch-head { background: var(--cc); color: var(--cc-on); border-color: transparent; }
 .ch-card .card-title, .ch-card .card-subtitle, .ch-head h1, .ch-card .ch-money strong, .ch-card .ch-money, .ch-head .ch-meta, .ch-head .ch-meta b, .ch-card .ch-row, .ch-card .ch-row b, .ch-card .ch-foot, .ch-card .ch-open, .ch-card .ch-late { color: var(--cc-on); }
 .ch-card .card-subtitle, .ch-card .ch-row, .ch-card .ch-foot { opacity: .85; }

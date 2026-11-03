@@ -269,9 +269,9 @@
 
 .stat-card { background-color: var(--sc-bg, var(--color-primary)); border-color: transparent; --sc-fg: #fff; color: var(--sc-fg); }
 .stat-card.border-indigo { --sc-bg: var(--color-primary); }
-.stat-card.border-sky    { --sc-bg: color-mix(in srgb, var(--kite-blue-700) 78%, #000); }
-.stat-card.border-amber  { --sc-bg: color-mix(in srgb, var(--kite-amber-700) 82%, #000); }
-.stat-card.border-emerald{ --sc-bg: color-mix(in srgb, var(--kite-blue-700) 78%, #000); }
+.stat-card.border-sky    { --sc-bg: var(--kite-blue-700); }
+.stat-card.border-amber  { --sc-bg: var(--kite-amber-700); }
+.stat-card.border-emerald{ --sc-bg: var(--kite-blue-700); }
 .stat-card.border-purple { --sc-bg: var(--kite-red-500); }
 .stat-card .stat-card-label, .stat-card .stat-card-value, .stat-card .stat-card-footer, .stat-card svg { color: var(--sc-fg); }
 .stat-card .stat-card-label, .stat-card .stat-card-footer { opacity: .85; }
