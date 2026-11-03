@@ -84,9 +84,9 @@ export function formatRelativeTime(dateStr) {
 }
 
 /**
- * Format currency values (e.g. $12,500.00)
+ * Format currency values (e.g. EGP 12,500)
  */
-export function formatCurrency(amount, currency = 'USD') {
+export function formatCurrency(amount, currency = 'EGP') {
   const num = Number(amount) || 0;
   return new Intl.NumberFormat('en-US', {
     style: 'currency',

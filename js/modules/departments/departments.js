@@ -194,7 +194,7 @@ export class DepartmentsModule {
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="deptBudgetInput">Department Budget (USD)</label>
+            <label class="form-label" for="deptBudgetInput">Department Budget (EGP)</label>
             <input id="deptBudgetInput" type="number" value="40000" class="form-control" />
           </div>
 

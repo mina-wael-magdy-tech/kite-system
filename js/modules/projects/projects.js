@@ -225,7 +225,7 @@ export class ProjectsModule {
               <input id="projCodeInput" type="text" required placeholder="e.g. AUR-2026" class="form-control" />
             </div>
             <div class="form-group">
-              <label class="form-label" for="projBudgetInput">Budget (USD)</label>
+              <label class="form-label" for="projBudgetInput">Budget (EGP)</label>
               <input id="projBudgetInput" type="number" value="25000" class="form-control" />
             </div>
           </div>

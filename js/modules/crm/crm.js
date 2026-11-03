@@ -15,6 +15,9 @@ export class CrmModule {
   constructor(app) {
     this.app = app;
     this.clients = [];
+    this.departments = [];
+    this.fType = 'all';
+    this.fDept = 'all';
     this.leads = [];
   }
 
@@ -43,7 +46,7 @@ export class CrmModule {
         <div>
           <div style="margin-bottom: var(--space-3); display: flex; align-items: center; justify-content: space-between;">
             <h2 class="font-display font-bold text-sm text-white">Deal Funnel & Pitch Pipeline</h2>
-            <span class="badge badge-emerald font-bold" id="pipelineTotalVal">Pipeline: $0</span>
+            <span class="badge badge-emerald font-bold" id="pipelineTotalVal">Pipeline: EGP 0</span>
           </div>
 
           <div id="pipelineContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); overflow-x: auto; padding-bottom: var(--space-2);">
@@ -57,12 +60,25 @@ export class CrmModule {
             <div class="card-title">Client Portfolio</div>
             <span class="badge badge-indigo" id="clientCountBadge">0 Clients</span>
           </div>
+          <div style="display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-subtle);">
+            <select id="clientTypeFilter" class="form-control" style="width: auto; height: 34px;" aria-label="Filter by client type">
+              <option value="all">All client types</option>
+              <option value="retainer">Regular (monthly budget)</option>
+              <option value="project">Project-based</option>
+            </select>
+            <select id="clientDeptFilter" class="form-control" style="width: auto; height: 34px;" aria-label="Filter by department">
+              <option value="all">All departments</option>
+            </select>
+            <span class="text-2xs text-muted" id="clientRetainerTotal" style="align-self: center;"></span>
+          </div>
           <div class="card-body" style="padding: 0;">
             <div class="table-responsive" style="border: none; border-radius: 0;">
               <table class="data-table">
                 <thead>
                   <tr>
                     <th>Company / Brand</th>
+                    <th>Type &amp; Monthly Budget</th>
+                    <th>Departments</th>
                     <th>Industry</th>
                     <th>Contact Person</th>
                     <th>Email & Phone</th>
@@ -72,7 +88,7 @@ export class CrmModule {
                   </tr>
                 </thead>
                 <tbody id="clientsTableBody">
-                  <tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">Loading clients...</td></tr>
+                  <tr><td colspan="9" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">Loading clients...</td></tr>
                 </tbody>
               </table>
             </div>
@@ -84,8 +100,11 @@ export class CrmModule {
     document.getElementById('btnCreateClient')?.addEventListener('click', () => this.openClientModal());
     document.getElementById('btnCreateLead')?.addEventListener('click', () => this.openLeadModal());
 
+    document.getElementById('clientTypeFilter')?.addEventListener('change', (e) => { this.fType = e.target.value; this.renderClientsTable(); });
+    document.getElementById('clientDeptFilter')?.addEventListener('change', (e) => { this.fDept = e.target.value; this.renderClientsTable(); });
+
     await this.loadCrmData();
-    Realtime.watch(['leads', 'clients'], () => this.loadCrmData()); // live updates for everyone
+    Realtime.watch(['leads', 'clients', 'client_departments'], () => this.loadCrmData()); // live updates for everyone
   }
 
   async loadCrmData() {
@@ -94,12 +113,19 @@ export class CrmModule {
 
     try {
       // 1. Fetch Clients
-      const { data: clients } = await supabase
-        .from('clients')
-        .select('*, projects(id, name)')
-        .order('company_name', { ascending: true });
+      const [{ data: clients }, { data: depts }] = await Promise.all([
+        supabase.from('clients').select('*, projects(id, name), client_departments(department_id)').order('company_name', { ascending: true }),
+        supabase.from('departments').select('id, name').order('name', { ascending: true })
+      ]);
 
       this.clients = clients || [];
+      this.departments = depts || [];
+      const sel = document.getElementById('clientDeptFilter');
+      if (sel) {
+        sel.innerHTML = '<option value="all">All departments</option>' +
+          this.departments.map(d => `<option value="${escapeHTML(d.id)}">${escapeHTML(d.name)}</option>`).join('');
+        sel.value = this.fDept;
+      }
 
       // 2. Fetch Leads / Opportunities
       const { data: leads } = await supabase
@@ -263,11 +289,19 @@ export class CrmModule {
     const badge = document.getElementById('clientCountBadge');
     if (!tbody) return;
 
-    const displayClients = this.clients;
+    const deptIds = (c) => (c.client_departments || []).map(x => x.department_id);
+    const displayClients = this.clients.filter(c =>
+      (this.fType === 'all' || c.client_type === this.fType) &&
+      (this.fDept === 'all' || deptIds(c).includes(this.fDept)));
 
     if (badge) badge.textContent = `${displayClients.length} Accounts`;
+    const retainerTotal = displayClients.filter(c => c.client_type === 'retainer' && c.status === 'active')
+      .reduce((sum, c) => sum + Number(c.monthly_budget || 0), 0);
+    const totalEl = document.getElementById('clientRetainerTotal');
+    if (totalEl) totalEl.textContent = retainerTotal ? `Regular clients bring ${formatCurrency(retainerTotal)} / month` : '';
+
     if (displayClients.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No client accounts yet.</td></tr>';
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">${this.clients.length ? 'No clients match these filters.' : 'No client accounts yet.'}</td></tr>`;
       return;
     }
 
@@ -275,6 +309,17 @@ export class CrmModule {
       <tr>
         <td>
           <div class="font-bold text-white">${escapeHTML(c.company_name)}</div>
+        </td>
+        <td>
+          ${c.client_type === 'retainer'
+            ? `<span class="badge badge-emerald">Regular</span><div class="font-mono text-2xs font-bold" style="margin-top: 4px;">${c.monthly_budget ? `${formatCurrency(c.monthly_budget)} / month` : 'Budget not set'}</div>`
+            : `<span class="badge badge-slate">Project-based</span><div class="text-2xs text-dim" style="margin-top: 4px;">Budget per project</div>`}
+        </td>
+        <td>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+            ${deptIds(c).map(id => this.departments.find(d => d.id === id)).filter(Boolean)
+              .map(d => `<span class="badge badge-sky">${escapeHTML(d.name)}</span>`).join('') || '<span class="text-2xs text-dim">Not classified</span>'}
+          </div>
         </td>
         <td><span class="badge badge-indigo">${escapeHTML(c.industry || 'General')}</span></td>
         <td class="text-xs text-muted">${escapeHTML(c.name || 'Direct')}</td>
@@ -305,18 +350,43 @@ export class CrmModule {
         { name: 'email', label: 'Email', type: 'email', half: true, value: c.email || '' },
         { name: 'phone', label: 'Phone', type: 'tel', half: true, value: c.phone || '' },
         { name: 'status', label: 'Status', type: 'select', half: true, value: c.status, options: [
-          { value: 'active', label: 'Active' }, { value: 'prospect', label: 'Prospect' }, { value: 'lead', label: 'Lead' }, { value: 'inactive', label: 'Inactive' }] }
+          { value: 'active', label: 'Active' }, { value: 'prospect', label: 'Prospect' }, { value: 'lead', label: 'Lead' }, { value: 'inactive', label: 'Inactive' }] },
+        { name: 'client_type', label: 'Client type', type: 'select', half: true, value: c.client_type || 'project', options: [
+          { value: 'retainer', label: 'Regular — fixed monthly budget' }, { value: 'project', label: 'Project-based — not regular' }] },
+        { name: 'monthly_budget', label: 'Monthly budget (EGP)', type: 'number', half: true, min: 0, value: c.monthly_budget ?? '', hint: 'Only for regular clients.' },
+        { name: 'departments', label: 'Departments serving this client', type: 'checkboxes', value: (c.client_departments || []).map(x => x.department_id),
+          options: this.departments.map(d => ({ value: d.id, label: d.name })) }
       ],
       onSubmit: async (v) => {
+        const budget = this.checkBudget(v.client_type, v.monthly_budget);
         const { data, error } = await getSupabase().from('clients')
-          .update({ company_name: v.company_name, name: v.name || v.company_name, industry: v.industry, email: v.email, phone: v.phone, status: v.status })
+          .update({ company_name: v.company_name, name: v.name || v.company_name, industry: v.industry, email: v.email, phone: v.phone, status: v.status,
+                    client_type: v.client_type, monthly_budget: budget })
           .eq('id', id).select('id');
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error('You do not have permission to edit clients.');
+        await this.saveClientDepartments(id, v.departments);
         Toast.success('Client updated', 'Saved');
         await this.loadCrmData();
       }
     });
+  }
+
+  /** Regular clients need a monthly budget; project-based ones have none. */
+  checkBudget(type, value) {
+    if (type !== 'retainer') return null;
+    const n = Number(value);
+    if (!value || !Number.isFinite(n) || n <= 0) throw new Error('Enter the monthly budget (EGP) for a regular client.');
+    return n;
+  }
+
+  async saveClientDepartments(clientId, ids = []) {
+    const supabase = getSupabase();
+    const del = await supabase.from('client_departments').delete().eq('client_id', clientId);
+    if (del.error) throw new Error(del.error.message);
+    if (!ids.length) return;
+    const ins = await supabase.from('client_departments').insert(ids.map(department_id => ({ client_id: clientId, department_id })));
+    if (ins.error) throw new Error(ins.error.message);
   }
 
   async deleteClient(id) {
@@ -370,6 +440,27 @@ export class CrmModule {
               <input id="clientPhone" type="text" placeholder="+20 100 000 0000" class="form-control" />
             </div>
           </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+            <div class="form-group">
+              <label class="form-label" for="clientType">Client type</label>
+              <select id="clientType" class="form-control">
+                <option value="project">Project-based (not regular)</option>
+                <option value="retainer">Regular (fixed monthly budget)</option>
+              </select>
+            </div>
+            <div class="form-group" id="clientBudgetGroup" style="display: none;">
+              <label class="form-label" for="clientBudget">Monthly budget (EGP) *</label>
+              <input id="clientBudget" type="number" min="0" step="any" placeholder="e.g. 25000" class="form-control" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Departments serving this client</label>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);">
+              ${this.departments.map(d => `<label style="display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-xs); cursor: pointer;"><input type="checkbox" name="clientDepts" value="${escapeHTML(d.id)}" /> ${escapeHTML(d.name)}</label>`).join('') || '<span class="text-2xs text-dim">No departments yet</span>'}
+            </div>
+          </div>
         </div>
 
         <div class="modal-footer">
@@ -384,6 +475,10 @@ export class CrmModule {
     document.getElementById('btnCancelClient')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
     document.getElementById('btnCancelClientAction')?.addEventListener('click', () => modalBackdrop.classList.remove('active'));
 
+    document.getElementById('clientType')?.addEventListener('change', (e) => {
+      document.getElementById('clientBudgetGroup').style.display = e.target.value === 'retainer' ? '' : 'none';
+    });
+
     document.getElementById('createClientForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
 
@@ -395,17 +490,23 @@ export class CrmModule {
 
       const supabase = getSupabase();
       try {
-        const { error } = await supabase.from('clients').insert({
+        const clientType = document.getElementById('clientType').value;
+        const budget = this.checkBudget(clientType, document.getElementById('clientBudget').value);
+        const deptIds = [...document.querySelectorAll('input[name="clientDepts"]:checked')].map(c => c.value);
+        const { data: created, error } = await supabase.from('clients').insert({
           company_name: companyName,
           name: contactName || companyName,
           industry,
           email,
           phone,
           status: 'active',
+          client_type: clientType,
+          monthly_budget: budget,
           created_by: this.app.currentUser.id
-        });
+        }).select('id').single();
 
         if (error) throw error;
+        await this.saveClientDepartments(created.id, deptIds);
         Toast.success(`Client account "${companyName}" added!`, 'Client Portfolio');
         modalBackdrop.classList.remove('active');
         await this.loadCrmData();

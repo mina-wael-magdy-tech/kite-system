@@ -249,7 +249,7 @@ export class FinanceModule {
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
             <div class="form-group">
-              <label class="form-label" for="expAmount">Amount (USD) *</label>
+              <label class="form-label" for="expAmount">Amount (EGP) *</label>
               <input id="expAmount" type="number" required step="0.01" value="450.00" class="form-control" />
             </div>
 
