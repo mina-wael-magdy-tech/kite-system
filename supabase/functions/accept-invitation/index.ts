@@ -3,7 +3,7 @@
 // Users cannot do this themselves: employment_status is not client-writable.
 
 import { HttpError, json, serveJson } from "../_shared/http.ts";
-import { adminClient, audit, getCaller } from "../_shared/auth.ts";
+import { adminClient, ADMIN_ROLES, audit, getCaller, notify, userIdsWithRoles } from "../_shared/auth.ts";
 
 serveJson(async (req) => {
   const admin = adminClient();
@@ -36,6 +36,11 @@ serveJson(async (req) => {
   await admin.from("invitations")
     .update({ status: "accepted", accepted_at: new Date().toISOString() })
     .eq("id", invitation.id);
+  const { data: me } = await admin.from("profiles").select("full_name").eq("id", caller.id).maybeSingle();
+  for (const userId of await userIdsWithRoles(admin, [...ADMIN_ROLES, "hr_manager"])) {
+    if (userId === caller.id) continue;
+    await notify(admin, { userId, type: "employee_joined", title: "New team member joined", content: `${me?.full_name ?? caller.email} accepted the invitation`, link: "#employees" });
+  }
   await audit(admin, { userId: caller.id, action: "INVITATION_ACCEPTED", entityType: "profiles", entityId: caller.id }, req);
   return json(req, { success: true });
 });

@@ -12,6 +12,8 @@ import { Api } from '../../services/api.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, debounce } from '../../utils/helpers.js';
 import { formatTaskStatusBadge, formatPriorityBadge } from '../../utils/formatters.js';
+import { linkify } from '../../utils/linkify.js';
+import { CONFIG } from '../../config.js';
 
 export class TasksModule {
   constructor(app) {
@@ -105,7 +107,13 @@ export class TasksModule {
 
     this.attachEventListeners();
     await this.loadData();
-    Realtime.watch(['tasks', 'task_comments', 'task_attachments'], () => this.loadData()); // live updates for everyone
+    Realtime.watch(['tasks', 'task_comments', 'task_attachments', 'task_links'], async () => {
+      await this.loadData();
+      // an open task view shows new notes / files / links as they arrive
+      if (this.openTaskId && document.getElementById('taskCommentsList')) {
+        await Promise.all([this.loadTaskComments(this.openTaskId), this.loadTaskAssets(this.openTaskId)]);
+      }
+    }); // live updates for everyone
   }
 
   attachEventListeners() {
@@ -571,8 +579,24 @@ export class TasksModule {
         <div>
           <h4 class="text-2xs font-bold uppercase tracking-wider text-dim mb-1">Creative Brief & Specifications</h4>
           <div class="glass-panel" style="padding: var(--space-3-5); font-size: var(--text-xs); color: var(--text-main); line-height: 1.5;">
-            ${escapeHTML(task.description || 'No detailed specifications provided.')}
+            ${task.description ? linkify(task.description) : 'No detailed specifications provided.'}
           </div>
+        </div>
+
+        <!-- Files & Links -->
+        <div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); flex-wrap: wrap;">
+            <h4 class="text-2xs font-bold uppercase tracking-wider text-dim">Files & Links</h4>
+            <div style="display: flex; gap: var(--space-2);">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnTaskAddLink"><i data-lucide="link"></i> Add link</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnTaskUpload"><i data-lucide="paperclip"></i> Upload files</button>
+              <input type="file" id="taskFileInput" multiple style="display: none;" />
+            </div>
+          </div>
+          <div id="taskAssetsList" style="display: flex; flex-direction: column; gap: var(--space-2);">
+            <div class="text-2xs text-dim italic">Loading files...</div>
+          </div>
+          <p class="text-2xs text-dim" style="margin-top: 6px;">PDF, ZIP, images, video, Office files and more · up to ${Math.round(CONFIG.MAX_TASK_FILE_SIZE_BYTES / 1048576)} MB each. Zip a folder to share it.</p>
         </div>
 
         <!-- Stage Advance Control -->
@@ -636,8 +660,18 @@ export class TasksModule {
       });
     });
 
-    // Load comments
-    await this.loadTaskComments(taskId);
+    // Load notes + files/links, and wire the upload / link buttons
+    this.openTaskId = taskId;
+    document.getElementById('btnCloseModal')?.addEventListener('click', () => { this.openTaskId = null; });
+    document.getElementById('btnModalCloseAction')?.addEventListener('click', () => { this.openTaskId = null; });
+    await Promise.all([this.loadTaskComments(taskId), this.loadTaskAssets(taskId)]);
+    document.getElementById('btnTaskUpload')?.addEventListener('click', () => document.getElementById('taskFileInput')?.click());
+    document.getElementById('taskFileInput')?.addEventListener('change', async (e) => {
+      const files = [...e.target.files];
+      e.target.value = '';
+      await this.uploadTaskFiles(taskId, files);
+    });
+    document.getElementById('btnTaskAddLink')?.addEventListener('click', () => this.openAddLinkDialog(taskId, task));
 
     // Post comment handler
     document.getElementById('commentForm')?.addEventListener('submit', async (e) => {
@@ -648,14 +682,13 @@ export class TasksModule {
       const text = input.value.trim();
       input.value = '';
 
-      const supabase = getSupabase();
-      await supabase.from('task_comments').insert({
-        task_id: taskId,
-        user_id: this.app.currentUser.id,
-        content: text
-      });
-
-      Toast.success('Feedback note posted', 'Collaboration');
+      try {
+        await Api.commentTask(taskId, text);
+        Toast.success('Feedback note posted', 'Collaboration');
+      } catch (err) {
+        input.value = text;
+        Toast.error(err.message || 'Could not post the comment', 'Comment failed');
+      }
       await this.loadTaskComments(taskId);
     });
   }
@@ -678,26 +711,178 @@ export class TasksModule {
     const container = document.getElementById('taskCommentsList');
     if (!supabase || !container) return;
 
-    const { data: comments } = await supabase
+    const { data: comments, error } = await supabase
       .from('task_comments')
-      .select('*, profiles!task_comments_user_id_fkey(full_name)')
+      .select('id, user_id, content, created_at')
       .eq('task_id', taskId)
       .order('created_at', { ascending: true });
 
+    if (error) {
+      container.innerHTML = `<div class="text-2xs text-rose">Could not load notes: ${escapeHTML(error.message)}</div>`;
+      return;
+    }
     if (!comments || comments.length === 0) {
       container.innerHTML = `<div class="text-2xs text-dim italic">No notes posted yet on this task.</div>`;
       return;
     }
 
+    // names looked up separately so one missing profile can never hide the notes
+    const ids = [...new Set(comments.map(c => c.user_id))];
+    const { data: people } = await supabase.from('profiles').select('id, full_name').in('id', ids);
+    const nameOf = (id) => people?.find(p => p.id === id)?.full_name || 'Team member';
+
     container.innerHTML = comments.map(c => `
-      <div class="glass-panel" style="padding: var(--space-2-5); font-size: var(--text-2xs); background: var(--studio-950);">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-          <strong class="text-white">${escapeHTML(c.profiles?.full_name || 'Specialist')}</strong>
-          <span class="text-dim font-mono">${formatDate(c.created_at, true)}</span>
+      <div class="glass-panel" style="padding: var(--space-2-5); font-size: var(--text-xs); background: var(--studio-950);">
+        <div style="display: flex; justify-content: space-between; gap: var(--space-2); margin-bottom: 2px;">
+          <strong class="text-white">${escapeHTML(nameOf(c.user_id))}</strong>
+          <span class="text-dim font-mono text-2xs">${formatDate(c.created_at, true)}</span>
         </div>
-        <p class="text-muted">${escapeHTML(c.content)}</p>
+        <p class="text-muted" style="line-height: 1.5; overflow-wrap: anywhere;">${linkify(c.content)}</p>
       </div>
     `).join('');
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // ---- files & links on a task ------------------------------------------------
+
+  async loadTaskAssets(taskId) {
+    const supabase = getSupabase();
+    const container = document.getElementById('taskAssetsList');
+    if (!supabase || !container) return;
+
+    const [filesRes, linksRes] = await Promise.all([
+      supabase.from('task_attachments').select('id, file_name, file_size, storage_path, uploaded_by, created_at').eq('task_id', taskId).order('created_at', { ascending: false }),
+      supabase.from('task_links').select('id, title, url, added_by, created_at').eq('task_id', taskId).order('created_at', { ascending: false })
+    ]);
+    const files = filesRes.data || [];
+    // task_links appears with migration 008; before it exists just show the files
+    const links = linksRes.error ? [] : (linksRes.data || []);
+
+    if (!files.length && !links.length) {
+      container.innerHTML = `<div class="text-2xs text-dim italic">No files or links yet. Upload a PDF/ZIP or add a link.</div>`;
+      return;
+    }
+
+    const me = this.app.currentUser.id;
+    const isAdmin = Permissions.isAdmin();
+    const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+    const ext = (n) => (n.includes('.') ? n.split('.').pop().toUpperCase() : 'FILE');
+
+    const row = (icon, main, sub, actions) => `
+      <div class="glass-panel" style="padding: var(--space-2-5); display: flex; align-items: center; gap: var(--space-3); background: var(--studio-950);">
+        <i data-lucide="${icon}" style="width: 18px; height: 18px; flex-shrink: 0; color: var(--kite-red-600);"></i>
+        <div style="min-width: 0; flex: 1;">
+          <div class="text-xs font-bold text-white truncate">${main}</div>
+          <div class="text-2xs text-dim">${sub}</div>
+        </div>
+        <div style="display: flex; gap: 4px; flex-shrink: 0;">${actions}</div>
+      </div>`;
+
+    container.innerHTML =
+      links.map(l => row('link',
+        `<a href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer" style="color: inherit;">${escapeHTML(l.title)}</a>`,
+        escapeHTML(l.url.replace(/^https?:\/\//, '').slice(0, 60)),
+        `<a class="card-act" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer" title="Open link" style="opacity:1; display:inline-flex;"><i data-lucide="external-link"></i></a>` +
+        ((l.added_by === me || isAdmin) ? `<button type="button" class="card-act card-act-delete task-link-del" data-id="${l.id}" title="Remove link" style="opacity:1;"><i data-lucide="trash-2"></i></button>` : '')
+      )).join('') +
+      files.map(f => row('file',
+        escapeHTML(f.file_name),
+        `${ext(f.file_name)} · ${size(f.file_size)} · ${formatDate(f.created_at)}`,
+        `<button type="button" class="card-act task-file-dl" data-path="${escapeHTML(f.storage_path)}" data-name="${escapeHTML(f.file_name)}" title="Download" style="opacity:1;"><i data-lucide="download"></i></button>` +
+        ((f.uploaded_by === me || isAdmin) ? `<button type="button" class="card-act card-act-delete task-file-del" data-id="${f.id}" data-path="${escapeHTML(f.storage_path)}" title="Delete file" style="opacity:1;"><i data-lucide="trash-2"></i></button>` : '')
+      )).join('');
+
+    container.querySelectorAll('.task-file-dl').forEach(b => b.addEventListener('click', () => this.downloadTaskFile(b.dataset.path, b.dataset.name)));
+    container.querySelectorAll('.task-file-del').forEach(b => b.addEventListener('click', () => this.deleteTaskFile(taskId, b.dataset.id, b.dataset.path)));
+    container.querySelectorAll('.task-link-del').forEach(b => b.addEventListener('click', () => this.deleteTaskLink(taskId, b.dataset.id)));
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  async downloadTaskFile(path, name) {
+    const { data, error } = await getSupabase().storage.from(CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS).createSignedUrl(path, 120, { download: name });
+    if (error || !data?.signedUrl) { Toast.error('You do not have access to this file, or it no longer exists.', 'Download failed'); return; }
+    const a = document.createElement('a');
+    a.href = data.signedUrl;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async uploadTaskFiles(taskId, files) {
+    if (!files.length) return;
+    const supabase = getSupabase();
+    const bucket = CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS;
+    const btn = document.getElementById('btnTaskUpload');
+    if (btn) btn.disabled = true;
+    let ok = 0;
+    for (const file of files) {
+      const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+      if (!CONFIG.ALLOWED_FILE_EXTENSIONS.includes(ext)) { Toast.error(`“${file.name}”: .${ext || '?'} files are not allowed`, 'Upload rejected'); continue; }
+      if (!file.size || file.size > CONFIG.MAX_TASK_FILE_SIZE_BYTES) { Toast.error(`“${file.name}” must be under ${Math.round(CONFIG.MAX_TASK_FILE_SIZE_BYTES / 1048576)} MB`, 'Upload rejected'); continue; }
+      const path = `${taskId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.\-]+/g, '_').slice(-120)}`;
+      try {
+        const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
+        if (upErr) throw upErr;
+        const { error: rowErr } = await supabase.from('task_attachments').insert({
+          task_id: taskId, file_name: file.name, file_size: file.size,
+          file_type: file.type || ext.toUpperCase(), storage_path: path, uploaded_by: this.app.currentUser.id
+        });
+        if (rowErr) { await supabase.storage.from(bucket).remove([path]); throw rowErr; }
+        Api.taskFileAdded(taskId, file.name).catch(() => {});
+        ok++;
+      } catch (err) {
+        console.error('Task upload error:', err);
+        Toast.error(`${file.name}: ${err.message || 'upload failed'}`, 'Upload failed');
+      }
+    }
+    if (btn) btn.disabled = false;
+    if (ok) Toast.success(`${ok} file${ok === 1 ? '' : 's'} attached`, 'Uploaded');
+    await this.loadTaskAssets(taskId);
+  }
+
+  async deleteTaskFile(taskId, id, path) {
+    const ok = await confirmDialog({ title: 'Delete this file?', message: 'It will be removed from the task for everyone.', confirmLabel: 'Delete file', danger: true });
+    if (!ok) return;
+    const supabase = getSupabase();
+    const { data, error } = await supabase.from('task_attachments').delete().eq('id', id).select('id');
+    if (error || !data?.length) { Toast.error(error?.message || 'You are not allowed to delete this file.', 'Delete failed'); return; }
+    await supabase.storage.from(CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS).remove([path]);
+    await this.loadTaskAssets(taskId);
+  }
+
+  openAddLinkDialog(taskId, task) {
+    formDialog({
+      title: 'Add a link',
+      subtitle: `${task.task_number} · Google Drive, Figma, Dropbox, a brief…`,
+      submitLabel: 'Add link',
+      fields: [
+        { name: 'title', label: 'Title', required: true, maxlength: 120, placeholder: 'e.g. Brand guidelines (Drive)' },
+        { name: 'url', label: 'Link', type: 'url', required: true, maxlength: 1000, placeholder: 'https://…' }
+      ],
+      onSubmit: async (v) => {
+        if (!/^https?:\/\//i.test(v.url)) throw new Error('The link must start with http:// or https://');
+        const { error } = await getSupabase().from('task_links').insert({ task_id: taskId, title: v.title, url: v.url, added_by: this.app.currentUser.id });
+        if (error) throw new Error(error.message.includes('task_links') ? 'Run migration 008_task_links.sql in Supabase first.' : error.message);
+        Api.taskFileAdded(taskId, `link: ${v.title}`).catch(() => {});
+        Toast.success('Link added', 'Saved');
+      }
+    });
+    // the dialog replaced the task view; reopen it afterwards so the link is visible
+    const backdrop = document.getElementById('globalModalBackdrop');
+    const observer = new MutationObserver(() => {
+      if (!backdrop.classList.contains('active')) {
+        observer.disconnect();
+        this.openTaskDetailModal(taskId);
+      }
+    });
+    observer.observe(backdrop, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  async deleteTaskLink(taskId, id) {
+    const { data, error } = await getSupabase().from('task_links').delete().eq('id', id).select('id');
+    if (error || !data?.length) { Toast.error(error?.message || 'You are not allowed to remove this link.', 'Remove failed'); return; }
+    await this.loadTaskAssets(taskId);
   }
 
   // ====================================================================

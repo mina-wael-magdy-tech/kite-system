@@ -7,13 +7,14 @@
 //   channel.archive  admin   { id, archived }
 //   channel.delete   admin   { id }
 //   dm.create        staff   { userId }                      (returns the existing DM if any)
+//   message.send    staff   { conversationId, content, messageType?, metadata? }  (notifies the other members)
 //   message.edit     author  { id, content }
 //   message.delete   author or admin { id }
 //
 // Privilege rules are enforced here, not in the browser.
 
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { adminClient, audit, Caller, getCaller, requireStaff } from "../_shared/auth.ts";
+import { adminClient, audit, Caller, getCaller, notify, requireStaff, userClient } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 
@@ -30,6 +31,7 @@ serveJson(async (req) => {
     case "channel.archive": return json(req, await channelArchive(req, admin, caller, b));
     case "channel.delete": return json(req, await channelDelete(req, admin, caller, b));
     case "dm.create": return json(req, await dmCreate(admin, caller, b));
+    case "message.send": return json(req, await messageSend(admin, caller, b));
     case "message.edit": return json(req, await messageEdit(admin, caller, b));
     case "message.delete": return json(req, await messageDelete(req, admin, caller, b));
     default: throw new HttpError(400, "Unknown action");
@@ -193,4 +195,54 @@ async function messageDelete(req: Request, admin: SupabaseClient, caller: Caller
     await audit(admin, { userId: caller.id, action: "MESSAGE_DELETED_BY_ADMIN", entityType: "messages", entityId: id }, req);
   }
   return { success: true };
+}
+
+const MESSAGE_SELECT = "*, sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)";
+
+async function messageSend(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const conversationId = v.uuid(b.conversationId, "conversationId");
+  const content = v.text(b.content, "content", 1, 4000);
+  const messageType = b.messageType === "task_handoff" ? "task_handoff" : "text";
+  const metadata = messageType === "task_handoff" && b.metadata && typeof b.metadata === "object" ? b.metadata : {};
+
+  // Insert AS the caller so the row-level policy decides whether they may post here.
+  const { data: msg, error } = await userClient(caller.token).from("messages").insert({
+    conversation_id: conversationId, sender_id: caller.id, content, message_type: messageType, metadata,
+  }).select(MESSAGE_SELECT).single();
+  if (error || !msg) throw new HttpError(403, "You cannot post in this conversation");
+
+  // ---- notify the other members (in-app + push)
+  const { data: convo } = await admin.from("conversations").select("id, type, name").eq("id", conversationId).single();
+  const { data: members } = await admin.from("conversation_members").select("user_id").eq("conversation_id", conversationId);
+  const sender = msg.sender?.full_name ?? "Someone";
+  const preview = messageType === "task_handoff" ? `📌 ${content}` : (content.length > 110 ? content.slice(0, 107) + "…" : content);
+  const isDirect = convo?.type === "direct";
+
+  const recipients = (members ?? []).map((m: { user_id: string }) => m.user_id).filter((id: string) => id !== caller.id);
+  if (recipients.length) {
+    const { data: active } = await admin.from("profiles").select("id").in("id", recipients).eq("employment_status", "active");
+    const activeIds = (active ?? []).map((p: { id: string }) => p.id);
+
+    // channels: one unread alert per conversation is enough (avoids a flood while people are chatting)
+    const alreadyAlerted = new Set<string>();
+    if (!isDirect && activeIds.length) {
+      const { data: unread } = await admin.from("notifications").select("user_id")
+        .in("user_id", activeIds).eq("type", "chat_message").eq("is_read", false)
+        .eq("metadata->>conversation_id", conversationId)
+        .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString());
+      (unread ?? []).forEach((r: { user_id: string }) => alreadyAlerted.add(r.user_id));
+    }
+
+    for (const userId of activeIds) {
+      if (alreadyAlerted.has(userId)) continue;
+      await notify(admin, {
+        userId, type: "chat_message",
+        title: isDirect ? sender : `${sender} in # ${convo?.name ?? "channel"}`,
+        content: preview,
+        link: `#chat?c=${conversationId}`,
+        metadata: { conversation_id: conversationId },
+      });
+    }
+  }
+  return { success: true, message: msg };
 }

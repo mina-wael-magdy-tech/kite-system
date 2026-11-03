@@ -70,6 +70,12 @@ export const Api = {
   editMessage: (id, content) => Api.chat('message.edit', { id, content }),
   deleteMessage: (id) => Api.chat('message.delete', { id }),
 
+  sendMessage: (conversationId, content, extra = {}) => Api.chat('message.send', { conversationId, content, ...extra }),
+  commentTask: (taskId, content) => Api.workflow('task.comment', { taskId, content }),
+  taskFileAdded: (taskId, fileName) => Api.workflow('task.file_added', { taskId, fileName }),
+  leaveSubmitted: (leaveId) => Api.workflow('leave.submitted', { leaveId }),
+  expenseSubmitted: (expenseId) => Api.workflow('expense.submitted', { expenseId }),
+
   inviteEmployee: (p) => invoke('invite-employee', p),
   deleteEmployee: (userId) => invoke('invite-employee', { action: 'delete', userId }),
   acceptInvitation: () => invoke('accept-invitation', {})

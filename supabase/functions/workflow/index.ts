@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { adminClient, audit, Caller, getCaller, notify, requireStaff, userClient } from "../_shared/auth.ts";
+import { adminClient, ADMIN_ROLES, audit, Caller, getCaller, notify, requireStaff, userClient, userIdsWithRoles } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 import { isAllowedPushEndpoint, pushConfigured, sendPush } from "../_shared/push.ts";
 
@@ -72,6 +72,10 @@ serveJson(async (req) => {
     case "push.test": return json(req, await pushTest(admin, caller));
     case "expense.decide": return json(req, await expenseDecide(req, admin, caller, body));
     case "leave.decide": return json(req, await leaveDecide(req, admin, caller, body));
+    case "task.comment": return json(req, await taskComment(admin, caller, body));
+    case "task.file_added": return json(req, await taskFileAdded(admin, caller, body));
+    case "leave.submitted": return json(req, await leaveSubmitted(admin, caller, body));
+    case "expense.submitted": return json(req, await expenseSubmitted(admin, caller, body));
     default: throw new HttpError(400, "Unknown action");
   }
 });
@@ -348,6 +352,21 @@ async function taskUpdate(req: Request, admin: SupabaseClient, caller: Caller, b
   if (error) throw error;
 
   await logTask(admin, taskId, caller.id, "EDITED", before, patch);
+  {
+    const changed: string[] = [];
+    if ("title" in patch) changed.push("title");
+    if ("priority" in patch) changed.push(`priority → ${patch.priority}`);
+    if ("due_date" in patch) changed.push(`deadline → ${patch.due_date}`);
+    if ("description" in patch) changed.push("brief");
+    if ("project_id" in patch) changed.push("project");
+    const who = await personName(admin, caller.id);
+    for (const userId of await taskAudience(admin, task, caller.id)) {
+      await notify(admin, {
+        userId, type: "task_updated", title: `Task updated: ${task.task_number}`,
+        content: `${who} changed ${changed.join(", ")} — ${task.title}`, link: "#tasks", metadata: { task_id: taskId },
+      });
+    }
+  }
   await audit(admin, { userId: caller.id, action: "TASK_EDITED", entityType: "tasks", entityId: taskId, oldData: before, newData: patch }, req);
   return { success: true };
 }
@@ -362,6 +381,15 @@ async function taskDelete(req: Request, admin: SupabaseClient, caller: Caller, b
     (await isProjectManager(admin, caller.id, task.project_id));
   if (!allowed) throw new HttpError(403, "Only an admin, a manager or the task creator can delete this task");
 
+  {
+    const who = await personName(admin, caller.id);
+    for (const userId of await taskAudience(admin, task, caller.id)) {
+      await notify(admin, {
+        userId, type: "task_deleted", title: `Task removed: ${task.task_number}`,
+        content: `${who} deleted “${task.title}”`, link: "#tasks",
+      });
+    }
+  }
   // Remove stored files first so nothing is orphaned in the bucket.
   const { data: files } = await admin.from("task_attachments").select("storage_path").eq("task_id", taskId);
   const paths = (files ?? []).map((f: { storage_path: string }) => f.storage_path);
@@ -481,6 +509,9 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     if (error) console.error("ban update failed:", error.message);
   }
 
+  if (newRole && !isSelf) {
+    await notify(admin, { userId, type: "role_changed", title: "Your role was updated", content: `You are now: ${newRole.name.replace(/_/g, " ")}`, link: "#dashboard" });
+  }
   await audit(admin, {
     userId: caller.id, action: "EMPLOYEE_UPDATED", entityType: "profiles", entityId: userId,
     oldData: {
@@ -489,6 +520,96 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     },
     newData: { ...patch, role: newRole?.name },
   }, req);
+  return { success: true };
+}
+
+// ---------------------------------------------------------------- notification helpers
+
+async function personName(admin: SupabaseClient, userId: string): Promise<string> {
+  const { data } = await admin.from("profiles").select("full_name").eq("id", userId).maybeSingle();
+  return data?.full_name ?? "Someone";
+}
+
+/** Everyone involved in a task (assignee, creator, extra assignees) except the person acting. */
+async function taskAudience(admin: SupabaseClient, t: TaskRow, actorId: string): Promise<string[]> {
+  const { data: extra } = await admin.from("task_assignees").select("user_id").eq("task_id", t.id);
+  const ids = new Set<string>([t.assigned_to, t.created_by, ...(extra ?? []).map((r: { user_id: string }) => r.user_id)].filter((x): x is string => !!x));
+  ids.delete(actorId);
+  return [...ids];
+}
+
+// ---------------------------------------------------------------- task.comment
+
+async function taskComment(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const taskId = v.uuid(b.taskId, "taskId");
+  const content = v.text(b.content, "content", 1, 4000);
+  const task = await loadVisibleTask(caller, taskId); // RLS: only people who can see the task may comment
+  const { data: comment, error } = await admin.from("task_comments")
+    .insert({ task_id: taskId, user_id: caller.id, content }).select("id").single();
+  if (error) throw error;
+
+  const who = await personName(admin, caller.id);
+  const preview = content.length > 110 ? content.slice(0, 107) + "…" : content;
+  for (const userId of await taskAudience(admin, task, caller.id)) {
+    await notify(admin, {
+      userId, type: "task_comment", title: `${who} commented on ${task.task_number}`,
+      content: preview, link: "#tasks", metadata: { task_id: taskId },
+    });
+  }
+  return { success: true, id: comment.id };
+}
+
+// ---------------------------------------------------------------- task.file_added
+
+async function taskFileAdded(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const taskId = v.uuid(b.taskId, "taskId");
+  const fileName = v.text(b.fileName, "fileName", 1, 200);
+  const task = await loadVisibleTask(caller, taskId);
+  const who = await personName(admin, caller.id);
+  for (const userId of await taskAudience(admin, task, caller.id)) {
+    await notify(admin, {
+      userId, type: "task_file", title: `New file on ${task.task_number}`,
+      content: `${who} uploaded ${fileName}`, link: "#documents", metadata: { task_id: taskId },
+    });
+  }
+  return { success: true };
+}
+
+// ---------------------------------------------------------------- leave.submitted / expense.submitted
+// The row is created by the browser (RLS); these tell the approvers. They only fire for a fresh row
+// that belongs to the caller, so they cannot be used to spam people.
+
+async function leaveSubmitted(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const leaveId = v.uuid(b.leaveId, "leaveId");
+  const { data: lr } = await admin.from("leave_requests").select("id, user_id, status, start_date, end_date, total_days, created_at").eq("id", leaveId).maybeSingle();
+  if (!lr || lr.user_id !== caller.id || lr.status !== "pending") throw new HttpError(404, "Leave request not found");
+  if (Date.now() - new Date(lr.created_at).getTime() > 10 * 60_000) return { success: true, skipped: true };
+  const who = await personName(admin, caller.id);
+  const approvers = new Set(await userIdsWithRoles(admin, [...ADMIN_ROLES, "hr_manager"]));
+  approvers.delete(caller.id);
+  for (const userId of approvers) {
+    await notify(admin, {
+      userId, type: "leave_request", title: "Leave request to review",
+      content: `${who}: ${lr.total_days} day(s), ${lr.start_date} → ${lr.end_date}`, link: "#hr",
+    });
+  }
+  return { success: true };
+}
+
+async function expenseSubmitted(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const expenseId = v.uuid(b.expenseId, "expenseId");
+  const { data: ex } = await admin.from("expenses").select("id, title, amount, currency, submitted_by, status, created_at").eq("id", expenseId).maybeSingle();
+  if (!ex || ex.submitted_by !== caller.id || ex.status !== "submitted") throw new HttpError(404, "Expense not found");
+  if (Date.now() - new Date(ex.created_at).getTime() > 10 * 60_000) return { success: true, skipped: true };
+  const who = await personName(admin, caller.id);
+  const approvers = new Set(await userIdsWithRoles(admin, [...ADMIN_ROLES, "finance_manager", "accountant"]));
+  approvers.delete(caller.id);
+  for (const userId of approvers) {
+    await notify(admin, {
+      userId, type: "expense_request", title: "Expense claim to approve",
+      content: `${who}: ${ex.title} (${ex.currency} ${ex.amount})`, link: "#finance",
+    });
+  }
   return { success: true };
 }
 

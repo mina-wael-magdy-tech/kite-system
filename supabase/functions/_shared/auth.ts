@@ -111,7 +111,7 @@ export async function audit(
 
 export async function notify(
   admin: SupabaseClient,
-  n: { userId: string; type: string; title: string; content: string; link?: string },
+  n: { userId: string; type: string; title: string; content: string; link?: string; metadata?: Record<string, unknown> },
 ): Promise<void> {
   const { error } = await admin.from("notifications").insert({
     user_id: n.userId,
@@ -119,6 +119,7 @@ export async function notify(
     title: n.title,
     content: n.content,
     link: n.link ?? null,
+    metadata: n.metadata ?? {},
   });
   if (error) {
     console.error("notification insert failed:", error.message);
@@ -126,4 +127,16 @@ export async function notify(
   }
   // Same message on the user's phone / desktop (no-op when push is not configured)
   await sendPush(admin, n.userId, { title: n.title, body: n.content, url: n.link, tag: n.type });
+}
+
+/** Active people holding any of the given roles (unknown role names simply match nobody). */
+export async function userIdsWithRoles(admin: SupabaseClient, roleNames: readonly string[]): Promise<string[]> {
+  const { data } = await admin
+    .from("user_roles")
+    .select("user_id, roles!inner(name)")
+    .in("roles.name", [...roleNames]);
+  const ids = [...new Set((data ?? []).map((r: { user_id: string }) => r.user_id))];
+  if (!ids.length) return [];
+  const { data: active } = await admin.from("profiles").select("id").in("id", ids).eq("employment_status", "active");
+  return (active ?? []).map((p: { id: string }) => p.id);
 }

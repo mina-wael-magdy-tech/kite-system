@@ -8,6 +8,7 @@
 import { getSupabase } from '../../supabase-client.js';
 import { Toast } from '../../services/toast-service.js';
 import { Realtime } from '../../services/realtime-service.js';
+import { Api } from '../../services/api.js';
 import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog, htmlDialog, closeDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
@@ -548,6 +549,7 @@ export class DocumentsModule {
         file_type: file.type || extOf(file.name).toUpperCase(), storage_path: path, uploaded_by: me
       });
       if (rowErr) { await supabase.storage.from(bucket).remove([path]); throw rowErr; }
+      Api.taskFileAdded(taskId, file.name).catch(() => {});
       return;
     }
 

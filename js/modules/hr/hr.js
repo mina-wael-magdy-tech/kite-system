@@ -339,7 +339,7 @@ export class HrModule {
 
       const supabase = getSupabase();
       try {
-        const { error } = await supabase.from('leave_requests').insert({
+        const { data: created, error } = await supabase.from('leave_requests').insert({
           user_id: this.app.currentUser.id,
           leave_type_id: leaveTypeId,
           start_date: startDate,
@@ -347,9 +347,10 @@ export class HrModule {
           total_days: totalDays,
           reason,
           status: 'pending'
-        });
+        }).select('id').single();
 
         if (error) throw error;
+        Api.leaveSubmitted(created.id).catch(() => {}); // notify the approvers; never blocks the user
         Toast.success('Time off request submitted to studio manager', 'Submitted');
         modalBackdrop.classList.remove('active');
         await this.loadHrData();

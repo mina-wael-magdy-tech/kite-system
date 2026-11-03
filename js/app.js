@@ -6,13 +6,13 @@
 import { protectPage } from './auth/auth-guard.js';
 import { Auth } from './auth/auth-service.js';
 import { Permissions } from './permissions/permission-service.js';
-import { Notifications } from './services/notification-service.js';
+import { Notifications, describeNotification } from './services/notification-service.js';
 import { AppRouter } from './router.js';
 import { PWA } from './pwa.js';
 import { Push } from './services/push-service.js';
 import { Toast } from './services/toast-service.js';
 import { infoDialog } from './ui/dialogs.js';
-import { getInitials, getAccentHex, escapeHTML } from './utils/helpers.js';
+import { getInitials, getAccentHex, escapeHTML, formatRelativeTime } from './utils/helpers.js';
 
 // Import All 14 Core Modules
 import { DashboardModule } from './modules/dashboard/dashboard.js';
@@ -58,6 +58,10 @@ class PulseStudioApp {
     // 4. Initialize Notifications & Realtime
     await Notifications.loadUserNotifications(this.currentProfile.id);
     Notifications.subscribeRealtime(this.currentProfile.id);
+    // a new alert while the panel is open appears in it straight away
+    Notifications.onChange = () => {
+      if (document.getElementById('notificationPanelBackdrop')?.classList.contains('active')) this.renderNotificationSlidePanel();
+    };
 
     // 5. Register All Application Modules in Router
     this.registerModules();
@@ -357,32 +361,58 @@ class PulseStudioApp {
     const feed = document.getElementById('notificationPanelFeed');
     if (!feed) return;
 
-    const notifs = Notifications.notifications;
-    if (notifs.length === 0) {
-      feed.innerHTML = `
+    const filter = this.notifFilter || 'all';
+    const all = Notifications.notifications;
+    const list = filter === 'unread' ? all.filter(n => !n.is_read) : all;
+
+    const tab = (id, label, count) => `
+      <button type="button" class="notif-tab ${filter === id ? 'active' : ''}" data-filter="${id}">${label}${count ? ` <span class="notif-tab-count">${count}</span>` : ''}</button>`;
+    const tabs = `<div class="notif-tabs">${tab('all', 'All', 0)}${tab('unread', 'Unread', Notifications.getUnreadCount())}</div>`;
+
+    if (list.length === 0) {
+      feed.innerHTML = tabs + `
         <div class="empty-state" style="border:none; padding: 40px 10px;">
           <div class="empty-state-icon">🔔</div>
-          <div class="empty-state-title">No notifications yet</div>
-          <div class="empty-state-desc">You're completely up to date with tasks and approvals.</div>
-        </div>
-      `;
-      return;
-    }
+          <div class="empty-state-title">${filter === 'unread' ? 'Nothing unread' : 'No notifications yet'}</div>
+          <div class="empty-state-desc">You're completely up to date with chats, tasks and approvals.</div>
+        </div>`;
+    } else {
+      const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+      const groups = [
+        ['Today', list.filter(n => new Date(n.created_at) >= startOfToday)],
+        ['Earlier', list.filter(n => new Date(n.created_at) < startOfToday)]
+      ].filter(([, items]) => items.length);
 
-    feed.innerHTML = notifs.map(n => `
-      <div class="card notif-item" data-notif-id="${escapeHTML(n.id)}" data-link="${escapeHTML(n.link || '')}" style="padding: var(--space-3); background-color: ${n.is_read ? 'var(--studio-950)' : 'var(--studio-850)'}; border-color: ${n.is_read ? 'var(--border-subtle)' : 'var(--color-primary-border)'}; cursor: pointer;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px;">
-          <span class="text-xs font-bold text-white">${escapeHTML(n.title)}</span>
-          ${!n.is_read ? '<span class="badge badge-indigo" style="font-size: 9px; padding: 1px 5px;">New</span>' : ''}
-        </div>
-        <p class="text-2xs text-muted" style="line-height: 1.4;">${escapeHTML(n.content)}</p>
-      </div>
-    `).join('');
+      feed.innerHTML = tabs + groups.map(([title, items]) => `
+        <div class="notif-group-title">${title}</div>
+        ${items.map(n => {
+          const meta = describeNotification(n);
+          return `
+          <div class="notif-item ${n.is_read ? '' : 'unread'}" data-notif-id="${escapeHTML(n.id)}" data-link="${escapeHTML(n.link || '')}" role="button" tabindex="0">
+            <span class="notif-icon" style="background: ${meta.tone};"><i data-lucide="${meta.icon}"></i></span>
+            <div class="notif-body">
+              <div class="notif-title">${escapeHTML(n.title)}</div>
+              <div class="notif-text">${escapeHTML(n.content)}</div>
+              <div class="notif-meta">${escapeHTML(meta.label)} · ${formatRelativeTime(n.created_at)}</div>
+            </div>
+            ${n.is_read ? '' : '<span class="notif-unread-dot" aria-label="Unread"></span>'}
+          </div>`;
+        }).join('')}
+      `).join('');
+    }
+    if (window.lucide) window.lucide.createIcons();
 
     // Delegated click handling (no inline handlers: required by the strict CSP)
     if (!feed.dataset.bound) {
       feed.dataset.bound = '1';
       feed.addEventListener('click', (e) => {
+        const t = e.target.closest('.notif-tab');
+        if (t) { this.notifFilter = t.dataset.filter; this.renderNotificationSlidePanel(); return; }
+        const item = e.target.closest('.notif-item');
+        if (item) this.handleNotificationClick(item.dataset.notifId, item.dataset.link);
+      });
+      feed.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
         const item = e.target.closest('.notif-item');
         if (item) this.handleNotificationClick(item.dataset.notifId, item.dataset.link);
       });
@@ -392,8 +422,11 @@ class PulseStudioApp {
   handleNotificationClick(notifId, link) {
     Notifications.markAsRead(notifId);
     document.getElementById('notificationPanelBackdrop')?.classList.remove('active');
-    // Only in-app hash routes are followed
-    window.location.hash = /^#[a-z-]+$/.test(link || '') ? link : '#tasks';
+    // Only in-app routes are followed, e.g. #tasks or #chat?c=<conversation id>
+    const target = /^#[a-z-]+(\?[\w=&.-]+)?$/.test(link || '') ? link : '#tasks';
+    if (window.location.hash === target) window.dispatchEvent(new HashChangeEvent('hashchange'));
+    else window.location.hash = target;
+    this.renderNotificationSlidePanel();
   }
 }
 

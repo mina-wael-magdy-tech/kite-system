@@ -296,16 +296,17 @@ export class FinanceModule {
 
       const supabase = getSupabase();
       try {
-        const { error } = await supabase.from('expenses').insert({
+        const { data: created, error } = await supabase.from('expenses').insert({
           title,
           amount,
           category,
           department_id: deptId,
           submitted_by: this.app.currentUser.id,
           status: 'submitted'
-        });
+        }).select('id').single();
 
         if (error) throw error;
+        Api.expenseSubmitted(created.id).catch(() => {}); // notify the approvers; never blocks the user
         Toast.success('Expense claim submitted for manager approval', 'Submitted');
         modalBackdrop.classList.remove('active');
         await this.loadFinanceData();

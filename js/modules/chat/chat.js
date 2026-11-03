@@ -11,6 +11,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatRelativeTime } from '../../utils/helpers.js';
 import { ASSIGNEE_SELECT, assigneeOptionsHTML, selectedDeptId } from '../../utils/assignees.js';
+import { Notifications } from '../../services/notification-service.js';
 
 const MESSAGE_SELECT = '*, sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)';
 
@@ -26,8 +27,9 @@ export class ChatModule {
     this.listTimer = null;
   }
 
-  async render(container) {
+  async render(container, query = '') {
     this.teardownRealtime();
+    this.activeChannelId = new URLSearchParams(query || '').get('c') || this.activeChannelId;
     container.innerHTML = `
       <div class="page-container animate-fade-in" style="height: calc(100vh - 120px); display: flex; flex-direction: column;">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3);">
@@ -201,6 +203,8 @@ export class ChatModule {
         .order('created_at', { ascending: true })
         .limit(200);
       if (channelId !== this.activeChannelId) return; // user switched away meanwhile
+      Notifications.activeConversationId = channelId;
+      Notifications.markConversationRead(channelId);
       this.messages = msgs || [];
       this.renderMessagesFeed();
     } catch (err) {
@@ -243,6 +247,7 @@ export class ChatModule {
   }
 
   teardownRealtime() {
+    Notifications.activeConversationId = null;
     clearInterval(this.pollTimer);
     this.pollTimer = null;
     const supabase = getSupabase();
@@ -576,23 +581,27 @@ export class ChatModule {
     if (!text || !this.activeChannelId) return;
 
     input.value = '';
+    const channelId = this.activeChannelId;
+    // optimistic bubble: appears instantly, replaced by the saved message when the server answers
+    const tmp = {
+      id: `tmp-${Date.now()}`, conversation_id: channelId, sender_id: this.app.currentUser.id, content: text,
+      message_type: 'text', created_at: new Date().toISOString(),
+      sender: { id: this.app.currentUser.id, full_name: this.app.currentProfile?.full_name || 'You' }
+    };
+    this.messages.push(tmp);
+    this.renderMessagesFeed();
+
     try {
-      const { data, error } = await getSupabase().from('messages').insert({
-        conversation_id: this.activeChannelId,
-        sender_id: this.app.currentUser.id,
-        content: text,
-        message_type: 'text'
-      }).select(MESSAGE_SELECT).single();
-      if (error) throw error;
-      // show immediately; the realtime echo is ignored because the id is already present
-      if (!this.messages.some(m => m.id === data.id)) {
-        this.messages.push(data);
-        this.renderMessagesFeed();
-      }
+      const { message } = await Api.sendMessage(channelId, text);
+      this.messages = this.messages.filter(m => m.id !== tmp.id);
+      if (channelId === this.activeChannelId && !this.messages.some(m => m.id === message.id)) this.messages.push(message);
+      this.renderMessagesFeed(true);
     } catch (err) {
       console.error('Send error:', err);
+      this.messages = this.messages.filter(m => m.id !== tmp.id);
+      this.renderMessagesFeed(true);
       input.value = text;
-      Toast.error('Failed to post message', 'Chat Error');
+      Toast.error(err.message || 'Failed to post message', 'Chat Error');
     }
   }
 
@@ -626,18 +635,13 @@ export class ChatModule {
         description: `Dispatched directly in studio chat by ${this.app.currentProfile.full_name}.`
       });
 
-      const { data } = await getSupabase().from('messages').insert({
-        conversation_id: this.activeChannelId,
-        sender_id: this.app.currentUser.id,
-        content: `⚡ Dispatched new deliverable to ${assigneeName}: "${title}"`,
-        message_type: 'task_handoff',
-        metadata: {
-          task_id: newTask.id,
-          task_number: newTask.task_number,
-          task_title: title,
-          assignee_name: assigneeName
-        }
-      }).select(MESSAGE_SELECT).single();
+      const { message: data } = await Api.sendMessage(
+        this.activeChannelId,
+        `⚡ Dispatched new deliverable to ${assigneeName}: "${title}"`,
+        { messageType: 'task_handoff', metadata: {
+          task_id: newTask.id, task_number: newTask.task_number, task_title: title, assignee_name: assigneeName
+        } }
+      );
 
       Toast.success('Deliverable card posted to channel!', 'Handoff Dispatched');
       if (data && !this.messages.some(m => m.id === data.id)) {
