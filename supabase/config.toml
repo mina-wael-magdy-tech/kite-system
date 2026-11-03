@@ -45,6 +45,8 @@ token_refresh = 150
 verify_jwt = true
 [functions.invite-employee]
 verify_jwt = true
+[functions.chat]
+verify_jwt = true
 [functions.accept-invitation]
 verify_jwt = true
 # setup-admin is a one-time bootstrap guarded by SETUP_TOKEN. Delete it after first use.

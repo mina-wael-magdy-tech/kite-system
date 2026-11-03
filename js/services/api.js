@@ -36,6 +36,16 @@ export const Api = {
   decideExpense: (expenseId, decision, notes) => Api.workflow('expense.decide', { expenseId, decision, notes }),
   decideLeave: (leaveId, decision, notes) => Api.workflow('leave.decide', { leaveId, decision, notes }),
 
+  chat: (action, params = {}) => invoke('chat', { action, ...params }),
+  createChannel: (p) => Api.chat('channel.create', p),
+  updateChannel: (p) => Api.chat('channel.update', p),
+  setChannelMembers: (id, memberIds) => Api.chat('channel.members', { id, memberIds }),
+  archiveChannel: (id, archived) => Api.chat('channel.archive', { id, archived }),
+  deleteChannel: (id) => Api.chat('channel.delete', { id }),
+  startDirectMessage: (userId) => Api.chat('dm.create', { userId }),
+  editMessage: (id, content) => Api.chat('message.edit', { id, content }),
+  deleteMessage: (id) => Api.chat('message.delete', { id }),
+
   inviteEmployee: (p) => invoke('invite-employee', p),
   deleteEmployee: (userId) => invoke('invite-employee', { action: 'delete', userId }),
   acceptInvitation: () => invoke('accept-invitation', {})
