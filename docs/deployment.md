@@ -41,7 +41,7 @@ add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+add_header Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=()" always;
 location = /env.js { add_header Cache-Control "no-store"; }
 location ~* \.(html|js)$ { add_header Cache-Control "no-cache"; }
 ```
