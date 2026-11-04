@@ -43,17 +43,6 @@ async function runChecks() {
   } catch { add('Background worker running', false, 'Could not read the service worker.'); }
   add('This device is subscribed', Boolean(sub), sub ? `Registered with ${new URL(sub.endpoint).hostname}` : 'No subscription. Press "Repair".');
 
-  try {
-    const hit = await (await caches.open('pushlog')).match('/__pushlog');
-    if (hit) {
-      const { at, status } = await hit.json();
-      const when = new Date(at).toLocaleTimeString();
-      const bad = status.startsWith('failed') || status === 'received';
-      add('Last push that reached this phone', bad ? false : true, `${when}: ${status}${status === 'received' ? ' (arrived but was not shown: the phone is blocking it)' : ''}`);
-    } else {
-      add('Last push that reached this phone', null, 'None yet. Close the app, press "Send a test", then re-open this panel. If still none, the message never reaches this phone.');
-    }
-  } catch { /* not available */ }
   add('Installed as an app', PWA.isStandalone() ? true : null, PWA.isStandalone() ? 'Yes' : 'Running in the browser. Installing improves reliability.');
   add('Browser', browser === 'Samsung Internet' ? false : null, browser === 'Samsung Internet'
     ? 'Samsung Internet is unreliable for push. Use Chrome instead.' : browser);
