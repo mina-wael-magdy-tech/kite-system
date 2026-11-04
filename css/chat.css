@@ -109,10 +109,37 @@ body.in-call { overflow: hidden; }
 .call-btn-hang { background: #e01b28; }
 .call-btn-accept { background: #1faa59; }
 
-.call-ring { position: fixed; inset: 0; z-index: 9500; background: rgba(10, 16, 24, .78); display: flex; align-items: center; justify-content: center; padding: 16px; }
-.call-ring-card { background: #162130; color: #fff; border-radius: 20px; padding: 28px 24px; width: 100%; max-width: 340px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
-.call-ring-avatar { width: 84px; height: 84px; border-radius: 50%; background: #e01b28; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; animation: slkpulse 1.4s infinite; }
-.call-ring-title { font-size: 20px; font-weight: 700; }
-.call-ring-sub { opacity: .75; font-size: 13px; margin-top: 4px; }
-.call-ring-actions { display: flex; justify-content: center; gap: 40px; margin-top: 26px; }
-.call-ring-actions .call-btn { width: 64px; height: 64px; }
+/* Incoming call: full-screen, like a regular phone call */
+.call-ring {
+  position: fixed; inset: 0; z-index: 9500; color: #fff; text-align: center;
+  background: radial-gradient(120% 80% at 50% 0%, #2a3d57 0%, #121b28 60%, #0b1119 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+  padding: max(56px, env(safe-area-inset-top)) 24px max(48px, env(safe-area-inset-bottom));
+  animation: callRingIn .25s ease-out;
+}
+@keyframes callRingIn { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: none; } }
+.call-ring-card { display: contents; }
+.call-ring-top { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.call-ring-kind { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; }
+.call-ring-title { font-size: 30px; font-weight: 700; line-height: 1.2; max-width: 90vw; overflow-wrap: anywhere; }
+.call-ring-sub { opacity: .7; font-size: 14px; margin-top: 2px; }
+.call-ring-dots::after { content: ''; animation: callDots 1.4s steps(4, end) infinite; }
+@keyframes callDots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75%, 100% { content: '...'; } }
+.call-ring-stage { position: relative; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center; }
+.call-ring-stage::before, .call-ring-stage::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid rgba(224, 27, 40, .65);
+  animation: callRipple 2.4s ease-out infinite;
+}
+.call-ring-stage::after { animation-delay: 1.2s; }
+@keyframes callRipple { from { transform: scale(.75); opacity: .9; } to { transform: scale(2.1); opacity: 0; } }
+.call-ring-avatar {
+  position: relative; width: 124px; height: 124px; border-radius: 50%; background: #e01b28;
+  display: flex; align-items: center; justify-content: center; font-size: 44px; font-weight: 700;
+  box-shadow: 0 10px 40px rgba(224, 27, 40, .45);
+}
+.call-ring-actions { display: flex; justify-content: center; gap: 72px; width: 100%; }
+.call-ring-act { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 13px; opacity: .9; }
+.call-ring-actions .call-btn { width: 72px; height: 72px; }
+.call-ring-accept-wrap .call-btn { animation: callShake 1.2s ease-in-out infinite; }
+@keyframes callShake { 0%, 60%, 100% { transform: none; } 65% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } 85% { transform: rotate(-8deg); } 92% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .call-ring, .call-ring-stage::before, .call-ring-stage::after, .call-ring-accept-wrap .call-btn { animation: none; } }

@@ -286,14 +286,18 @@ class CallService {
     const el = document.createElement('div');
     el.className = 'call-ring';
     el.setAttribute('role', 'alertdialog');
+    const isAudio = info.kind === 'audio';
     el.innerHTML = `
       <div class="call-ring-card">
-        <div class="call-ring-avatar">${escapeHTML(getInitials(callerName))}</div>
-        <div class="call-ring-title">${escapeHTML(callerName)}</div>
-        <div class="call-ring-sub">${info.kind === 'audio' ? 'Incoming voice call' : 'Incoming video call'}${conversationName ? ' · ' + escapeHTML(conversationName) : ''}</div>
+        <div class="call-ring-top">
+          <div class="call-ring-kind">${isAudio ? 'Voice call' : 'Video call'}</div>
+          <div class="call-ring-title">${escapeHTML(callerName)}</div>
+          <div class="call-ring-sub">${conversationName ? escapeHTML(conversationName) + ' · ' : ''}<span class="call-ring-dots">is calling</span></div>
+        </div>
+        <div class="call-ring-stage"><div class="call-ring-avatar">${escapeHTML(getInitials(callerName))}</div></div>
         <div class="call-ring-actions">
-          <button type="button" class="call-btn call-btn-hang" data-act="decline" aria-label="Decline"><i data-lucide="phone-off"></i></button>
-          <button type="button" class="call-btn call-btn-accept" data-act="accept" aria-label="Accept"><i data-lucide="${info.kind === 'audio' ? 'phone' : 'video'}"></i></button>
+          <div class="call-ring-act"><button type="button" class="call-btn call-btn-hang" data-act="decline" aria-label="Decline"><i data-lucide="phone-off"></i></button>Decline</div>
+          <div class="call-ring-act call-ring-accept-wrap"><button type="button" class="call-btn call-btn-accept" data-act="accept" aria-label="Accept"><i data-lucide="${isAudio ? 'phone' : 'video'}"></i></button>Accept</div>
         </div>
       </div>`;
     document.body.appendChild(el);
@@ -303,12 +307,27 @@ class CallService {
       this.join(info.conversation_id, info.call_id, info.kind === 'audio' ? 'audio' : 'video', conversationName);
     });
     this.ring = { el, timeout: setTimeout(() => this.dismissRing(), RING_MS), tone: this.startRingtone() };
+    this.ring.restore = this.attention(callerName);
+  }
+
+  /** Phone-like extras while ringing: keep the screen on and flash the tab title / app badge. */
+  attention(callerName) {
+    const title = document.title;
+    let on = true;
+    const flash = setInterval(() => { document.title = on ? `📞 ${callerName} is calling…` : title; on = !on; }, 900);
+    let lock = null;
+    try { navigator.wakeLock?.request('screen').then(l => { lock = l; }).catch(() => {}); } catch { /* optional */ }
+    return () => {
+      clearInterval(flash); document.title = title;
+      try { lock?.release(); } catch { /* ignore */ }
+    };
   }
 
   dismissRing() {
     if (!this.ring) return;
     clearTimeout(this.ring.timeout);
     this.ring.tone?.();
+    this.ring.restore?.();
     this.ring.el.remove();
     this.ring = null;
   }
