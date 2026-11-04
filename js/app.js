@@ -14,6 +14,7 @@ import { Toast } from './services/toast-service.js';
 import { Calls } from './services/call-service.js';
 import { Money } from './services/money.js';
 import { infoDialog } from './ui/dialogs.js';
+import { openPushTroubleshoot } from './ui/push-troubleshoot.js';
 import { getInitials, getAccentHex, escapeHTML, formatRelativeTime } from './utils/helpers.js';
 
 // Import All 14 Core Modules
@@ -402,16 +403,17 @@ class PulseStudioApp {
         </div>
       </div>`;
 
+    const help = '<button type="button" class="btn btn-ghost btn-sm" data-push="troubleshoot">Not working?</button>';
     const html = {
       'unsupported': '',
       'not-configured': panel('bell-off', 'Push notifications are not set up', 'An administrator still needs to enable push on the server. In-app notifications keep working.'),
       'needs-install': panel('smartphone', 'Get alerts on your iPhone', 'Add Kite System to your Home Screen first, then turn notifications on.',
         '<button type="button" class="btn btn-primary btn-sm" data-push="install">How to install</button>'),
-      'denied': panel('bell-off', 'Notifications are blocked', 'Allow notifications for this site in your browser settings, then come back here.'),
+      'denied': panel('bell-off', 'Notifications are blocked', 'Allow notifications for this site in your browser settings, then come back here.', help),
       'off': panel('bell-ring', 'Get alerts on this device', 'Be told about new tasks, approvals and deadlines even when Kite is closed.',
-        '<button type="button" class="btn btn-primary btn-sm" data-push="enable">Turn on notifications</button>'),
+        '<button type="button" class="btn btn-primary btn-sm" data-push="enable">Turn on notifications</button>' + help),
       'on': panel('bell-ring', 'Notifications are on for this device', 'You will get alerts for assignments, approvals and deadlines.',
-        '<button type="button" class="btn btn-secondary btn-sm" data-push="test">Send a test</button><button type="button" class="btn btn-ghost btn-sm" data-push="disable">Turn off</button>')
+        '<button type="button" class="btn btn-secondary btn-sm" data-push="test">Send a test</button><button type="button" class="btn btn-ghost btn-sm" data-push="disable">Turn off</button>' + help)
     }[state] || '';
 
     card.innerHTML = html;
@@ -421,6 +423,7 @@ class PulseStudioApp {
       const act = btn.getAttribute('data-push');
       btn.disabled = true;
       try {
+        if (act === 'troubleshoot') await openPushTroubleshoot(() => this.renderPushCard());
         if (act === 'install') await this.handleInstall();
         if (act === 'enable') { await Push.enable(); Toast.success('You will now get notifications on this device', 'Notifications on'); }
         if (act === 'disable') { await Push.disable(); Toast.info('Notifications are off for this device', 'Notifications off'); }
