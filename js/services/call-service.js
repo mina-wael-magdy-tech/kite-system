@@ -27,7 +27,15 @@ class CallService {
     this.ring = null;         // incoming-call dialog
   }
 
-  init(app) { this.app = app; }
+  init(app) {
+    this.app = app;
+    if (this._unlockBound) return;
+    this._unlockBound = true;
+    // Browsers only allow sound after a user gesture: unlock the shared audio context on the first tap/click/key,
+    // so an incoming-call ring that arrives later can actually be heard.
+    const unlock = () => this.audio();
+    ['pointerdown', 'touchstart', 'keydown'].forEach(ev => window.addEventListener(ev, unlock, { passive: true }));
+  }
   get active() { return !!this.session; }
 
   // ------------------------------------------------------------ starting / joining
@@ -38,7 +46,7 @@ class CallService {
     if (!this.supported()) return;
     try {
       const { callId } = await Api.startCall(conversationId, kind);
-      await this.join(conversationId, callId, kind, title);
+      await this.join(conversationId, callId, kind, title, { ringback: true });
     } catch (err) {
       Toast.error(err.message || 'Could not start the call', 'Call');
     }
@@ -52,7 +60,7 @@ class CallService {
     return true;
   }
 
-  async join(conversationId, callId, kind = 'video', title = '') {
+  async join(conversationId, callId, kind = 'video', title = '', opts = {}) {
     if (this.session) return;
     if (!this.supported()) return;
     this.dismissRing();
@@ -97,6 +105,10 @@ class CallService {
     if (!this.session) return;
     this.send({ t: 'hello', name: this.app.currentProfile?.full_name || 'Someone' });
     this.setStatus('Waiting for others to join…');
+    if (opts.ringback) {
+      s.ringback = this.startTone('ringback');
+      s.ringbackTimeout = setTimeout(() => this.stopRingback(), RING_MS);
+    }
     s.timer = setInterval(() => this.tickTimer(), 1000);
   }
 
@@ -162,6 +174,7 @@ class CallService {
     pc.ontrack = (e) => {
       e.streams[0]?.getTracks().forEach(t => peer.stream.addTrack(t));
       this.addTile(userId, name, e.streams[0] || peer.stream, false);
+      this.stopRingback();
       this.setStatus('');
     };
     pc.onconnectionstatechange = () => {
@@ -252,6 +265,9 @@ class CallService {
     if (!s) return;
     this.session = null;
     clearInterval(s.timer);
+    clearTimeout(s.ringbackTimeout);
+    s.ringback?.();
+    if (s.peers.size) this.startTone('end', true);
     try { s.channel?.send({ type: 'broadcast', event: 'sig', payload: { t: 'bye', callId: s.callId, from: s.me } }); } catch { /* ignore */ }
     for (const p of s.peers.values()) { try { p.pc.close(); } catch { /* ignore */ } }
     s.stream.getTracks().forEach(t => t.stop());
@@ -297,22 +313,81 @@ class CallService {
     this.ring = null;
   }
 
-  startRingtone() {
+  // ------------------------------------------------------------ sounds (synthesised, no audio files needed)
+
+  /** One shared AudioContext; resumed whenever we need it (autoplay policies suspend it until a gesture). */
+  audio() {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new Ctx();
-      let on = true;
-      const beep = () => {
-        if (!on) return;
-        const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.frequency.value = 440; g.gain.value = 0.08;
-        o.connect(g); g.connect(ctx.destination);
-        o.start(); o.stop(ctx.currentTime + 0.35);
-      };
-      beep();
-      const iv = setInterval(beep, 1600);
-      return () => { on = false; clearInterval(iv); ctx.close().catch(() => {}); };
+      if (!Ctx) return null;
+      if (!this._ctx || this._ctx.state === 'closed') this._ctx = new Ctx();
+      if (this._ctx.state === 'suspended') this._ctx.resume().catch(() => {});
+      return this._ctx;
     } catch { return null; }
+  }
+
+  stopRingback() {
+    const s = this.session; if (!s) return;
+    clearTimeout(s.ringbackTimeout);
+    s.ringback?.(); s.ringback = null;
+  }
+
+  startRingtone() { return this.startTone('ring'); }
+
+  /**
+   * Plays a looping call tone. Returns a function that stops it.
+   *  'ring'     — incoming call: a classic two-burst phone ring, repeating, plus vibration.
+   *  'ringback' — you are calling: the long "ringing…" tone the caller hears.
+   *  'end'      — (once) short falling beeps when a call ends.
+   */
+  startTone(kind, once = false) {
+    const ctx = this.audio();
+    if (!ctx) return null;
+    const out = ctx.createGain(); out.gain.value = 1; out.connect(ctx.destination);
+    const nodes = [];
+    // a soft-edged tone (fades in/out so it never clicks)
+    const note = (freqs, at, dur, vol = 0.12) => {
+      const t0 = ctx.currentTime + at;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+      g.gain.setValueAtTime(vol, t0 + Math.max(0.03, dur - 0.04));
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      g.connect(out);
+      for (const f of freqs) {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+        o.connect(g); o.start(t0); o.stop(t0 + dur + 0.05); nodes.push(o);
+      }
+    };
+    let period, pattern;
+    if (kind === 'ring') {
+      period = 3000;
+      // two rings of a rapidly alternating pair of notes, then a pause
+      pattern = () => { for (const base of [0, 0.55]) for (let i = 0; i < 6; i++) note(i % 2 ? [523, 659] : [659, 784], base + i * 0.075, 0.075, 0.1); };
+    } else if (kind === 'ringback') {
+      period = 4000;
+      pattern = () => note([440, 480], 0, 1.6, 0.08);
+    } else {
+      pattern = () => { note([480], 0, 0.15, 0.08); note([380], 0.22, 0.15, 0.08); note([300], 0.44, 0.25, 0.08); };
+    }
+
+    let iv = null, stopped = false;
+    const run = () => {
+      if (stopped) return;
+      pattern();
+      if (kind === 'ring') { try { navigator.vibrate?.([400, 200, 400]); } catch { /* not supported */ } }
+    };
+    run();
+    if (!once) iv = setInterval(run, period);
+    const stop = () => {
+      if (stopped) return;
+      stopped = true; clearInterval(iv);
+      try { navigator.vibrate?.(0); } catch { /* ignore */ }
+      out.gain.setTargetAtTime(0, ctx.currentTime, 0.03);   // quick fade, then cut everything scheduled
+      setTimeout(() => { nodes.forEach(o => { try { o.stop(); } catch { /* already stopped */ } }); out.disconnect(); }, once ? 1500 : 150);
+    };
+    if (once) setTimeout(stop, 1200);
+    return stop;
   }
 
   // ------------------------------------------------------------ UI
