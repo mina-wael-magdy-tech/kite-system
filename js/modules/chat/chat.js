@@ -344,14 +344,36 @@ export class ChatModule {
     this.typers = new Map();
     this.renderTyping();
     const supabase = getSupabase();
-    if (!supabase || !convId || this.typingUnavailable) return;
+    if (!supabase || !convId) return;
+    if (this.typingBlockConv !== convId) { this.typingRetries = 0; this.typingBlockedUntil = 0; clearTimeout(this.typingRetryTimer); }   // other conversation: start fresh
+    if (Date.now() < (this.typingBlockedUntil || 0)) return;   // waiting out a retry delay (the 4 s refresh must not skip it)
     const ch = supabase.channel(`typing:${convId}`, { config: { private: true, broadcast: { self: false } } });
     ch.on('broadcast', { event: 'typing' }, ({ payload }) => this.onTyping(payload));
-    ch.subscribe((status) => {
-      // migration 018 not applied yet (or offline): the chat simply works without the indicator
-      if (status === 'CHANNEL_ERROR') { this.typingUnavailable = true; this.unbindTyping(); }
+    ch.subscribe((status, err) => {
+      if (this.typingCh !== ch) return;   // an old channel we already replaced or removed
+      if (status === 'SUBSCRIBED') {
+        this.typingRetries = 0;
+        console.info('[typing] joined', convId);
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn('[typing] channel', status, convId, err?.message || err || '');
+        this.retryTyping(convId);
+      }
     });
     this.typingCh = ch;
+  }
+
+  /** A failed join is retried with a growing delay (1s, 2s, 4s … up to 30s) instead of switching typing off for the session. */
+  retryTyping(convId) {
+    this.typingRetries = (this.typingRetries || 0) + 1;
+    const delay = Math.min(30000, 1000 * 2 ** (this.typingRetries - 1));
+    console.warn(`[typing] retry #${this.typingRetries} in ${delay / 1000}s`);
+    this.unbindTyping();
+    this.typingBlockConv = convId;
+    this.typingBlockedUntil = Date.now() + delay;
+    this.typingRetryTimer = setTimeout(() => {
+      this.typingRetryTimer = null;
+      if (this.activeChannelId === convId && document.getElementById('chatTyping')) this.bindTyping(convId);
+    }, delay);
   }
 
   unbindTyping() {
@@ -409,6 +431,8 @@ export class ChatModule {
 
   teardownRealtime() {
     this.unbindTyping();
+    clearTimeout(this.typingRetryTimer); this.typingRetryTimer = null;
+    this.typingRetries = 0; this.typingBlockedUntil = 0; this.typingBlockConv = null;
     Notifications.activeConversationId = null;
     clearInterval(this.pollTimer);
     this.pollTimer = null;
