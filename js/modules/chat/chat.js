@@ -137,6 +137,7 @@ export class ChatModule {
             </div>
 
             <div id="chatReplyBar" class="slk-replybar" style="display: none;"></div>
+            <div id="chatTyping" class="slk-typing" aria-live="polite" hidden></div>
 
             <form id="chatMessageForm" class="slk-composer" autocomplete="off">
               <input type="file" id="chatFile" hidden />
@@ -179,7 +180,7 @@ export class ChatModule {
     document.getElementById('chatMessageForm')?.addEventListener('submit', async (e) => { e.preventDefault(); await this.handleSendMessage(); });
 
     const input = document.getElementById('chatInput');
-    input?.addEventListener('input', () => this.syncComposer());
+    input?.addEventListener('input', () => { this.syncComposer(); this.sendTyping(!!input.value.trim()); });
     document.getElementById('chatSearch')?.addEventListener('input', (e) => { this.search = e.target.value.trim().toLowerCase(); this.renderChannelsList(); });
 
     document.getElementById('btnAttach')?.addEventListener('click', () => document.getElementById('chatFile')?.click());
@@ -277,6 +278,7 @@ export class ChatModule {
   }
 
   async loadMessages(channelId) {
+    this.bindTyping(channelId);
     const supabase = getSupabase();
     if (!supabase) return;
     try {
@@ -332,7 +334,81 @@ export class ChatModule {
     }, 4000);
   }
 
+  // ------------------------------------------------------------ typing indicator
+
+  /** Listens on a private `typing:<conversation>` channel for the open conversation only (see migration 018). */
+  bindTyping(convId) {
+    if (this.typingConv === convId && this.typingCh) return;
+    this.unbindTyping();
+    this.typingConv = convId || null;
+    this.typers = new Map();
+    this.renderTyping();
+    const supabase = getSupabase();
+    if (!supabase || !convId || this.typingUnavailable) return;
+    const ch = supabase.channel(`typing:${convId}`, { config: { private: true, broadcast: { self: false } } });
+    ch.on('broadcast', { event: 'typing' }, ({ payload }) => this.onTyping(payload));
+    ch.subscribe((status) => {
+      // migration 018 not applied yet (or offline): the chat simply works without the indicator
+      if (status === 'CHANNEL_ERROR') { this.typingUnavailable = true; this.unbindTyping(); }
+    });
+    this.typingCh = ch;
+  }
+
+  unbindTyping() {
+    clearTimeout(this.typingTimer); clearTimeout(this.stopTypingTimer);
+    this.typingTimer = this.stopTypingTimer = null;
+    const supabase = getSupabase();
+    if (this.typingCh && supabase) supabase.removeChannel(this.typingCh);
+    this.typingCh = null; this.typingConv = null; this.typers = new Map(); this.lastTypingSent = 0;
+  }
+
+  /** Tell the others I am typing (throttled), and that I stopped (after a pause, when empty, or on send). */
+  sendTyping(on) {
+    const ch = this.typingCh;
+    if (!ch || ch.state !== 'joined') return;
+    clearTimeout(this.stopTypingTimer);
+    const now = Date.now();
+    if (on) {
+      if (now - (this.lastTypingSent || 0) > 2500) {
+        this.lastTypingSent = now;
+        ch.send({ type: 'broadcast', event: 'typing', payload: { uid: this.app.currentUser.id, conv: this.typingConv, on: true } });
+      }
+      this.stopTypingTimer = setTimeout(() => this.sendTyping(false), 4000);   // paused for a few seconds = stopped
+    } else if (this.lastTypingSent) {
+      this.lastTypingSent = 0;
+      ch.send({ type: 'broadcast', event: 'typing', payload: { uid: this.app.currentUser.id, conv: this.typingConv, on: false } });
+    }
+  }
+
+  onTyping(p) {
+    if (!p || !p.uid || p.uid === this.app.currentUser.id || p.conv !== this.typingConv) return;
+    if (p.on) this.typers.set(p.uid, Date.now() + 6000);
+    else this.typers.delete(p.uid);
+    this.renderTyping();
+  }
+
+  clearTyper(uid) {
+    if (this.typers?.delete(uid)) this.renderTyping();
+  }
+
+  renderTyping() {
+    const el = document.getElementById('chatTyping'); if (!el) return;
+    clearTimeout(this.typingTimer);
+    const now = Date.now();
+    for (const [uid, until] of this.typers || []) if (until <= now) this.typers.delete(uid);
+    const names = [...(this.typers || []).keys()].map(id => this.personName(id).split(' ')[0]);
+    if (!names.length) { el.hidden = true; el.innerHTML = ''; return; }
+    const text = names.length === 1 ? `${names[0]} is typing`
+      : names.length === 2 ? `${names[0]} and ${names[1]} are typing`
+      : `${names[0]}, ${names[1]} and ${names.length - 2} more are typing`;
+    el.innerHTML = '<span class="slk-typing-dots"><i></i><i></i><i></i></span><span class="slk-typing-text"></span>';
+    el.querySelector('.slk-typing-text').textContent = text;
+    el.hidden = false;
+    this.typingTimer = setTimeout(() => this.renderTyping(), 1500);   // drop people who went quiet
+  }
+
   teardownRealtime() {
+    this.unbindTyping();
     Notifications.activeConversationId = null;
     clearInterval(this.pollTimer);
     this.pollTimer = null;
@@ -386,6 +462,7 @@ export class ChatModule {
       return;
     }
 
+    if (eventType === 'INSERT') this.clearTyper(row.sender_id);   // they sent it: no longer typing
     if (eventType === 'INSERT') {
       if (this.messages.some(m => m.id === row.id)) return;
       await this.appendMessage(row.id);
@@ -845,6 +922,7 @@ export class ChatModule {
 
     input.value = '';
     this.syncComposer();
+    this.sendTyping(false);
     const channelId = this.activeChannelId;
     const replyToId = this.replyTo?.id || null;
     this.replyTo = null; this.renderReplyBar();
