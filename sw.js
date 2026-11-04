@@ -93,6 +93,10 @@ self.addEventListener('fetch', (event) => {
 const RING_FOR_MS = 45_000;
 const RING_EVERY_MS = 3_500;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Own cache name (not "kite-*") so the activate step never deletes it
+const logPush = async (status) => {
+  try { await (await caches.open('pushlog')).put('/__pushlog', new Response(JSON.stringify({ at: Date.now(), status }))); } catch { /* diagnostics only */ }
+};
 
 self.addEventListener('push', (event) => {
   let data = {};
@@ -119,9 +123,17 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil((async () => {
+    // Remember what happened to the last push so the in-app troubleshooter can tell "never arrived" from "arrived but not shown"
+    await logPush('received');
     // The app is open and in front: it already shows its own toast / ringing screen, a system banner would double up.
-    if (!isCall && await appInFront()) return;
-    await self.registration.showNotification(title, options);
+    if (!isCall && await appInFront()) { await logPush('skipped: app was open in front'); return; }
+    try {
+      await self.registration.showNotification(title, options);
+    } catch (err) {
+      await logPush('failed to show: ' + (err?.message || err));
+      throw err;
+    }
+    await logPush('shown');
     try {
       if (typeof data.badgeCount === 'number' && self.navigator.setAppBadge) await self.navigator.setAppBadge(data.badgeCount);
     } catch { /* badges are optional */ }
