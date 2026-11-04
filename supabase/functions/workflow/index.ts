@@ -632,7 +632,29 @@ async function pushSubscribe(admin: SupabaseClient, caller: Caller, b: Record<st
     { onConflict: "endpoint" },
   );
   if (error) throw error;
+  await prunePushSubscriptions(admin, caller.id, userAgent);
   return { success: true, configured: pushConfigured() };
+}
+
+// Each reinstall / re-enable on the same device creates a new subscription and leaves the old one behind, which then
+// buzzes the phone again for every message. Devices of the same kind share a user agent and cannot be told apart, so
+// we never collapse to one (a second PC would lose its alerts): we keep the newest few per user agent and drop
+// anything not seen for 60 days. Best effort: a failure here must never break subscribing.
+const MAX_SUBS_PER_DEVICE_TYPE = 3;
+const STALE_AFTER_DAYS = 60;
+
+async function prunePushSubscriptions(admin: SupabaseClient, userId: string, userAgent: string | null) {
+  try {
+    const cutoff = new Date(Date.now() - STALE_AFTER_DAYS * 864e5).toISOString();
+    await admin.from("push_subscriptions").delete().eq("user_id", userId).lt("last_seen_at", cutoff);
+    if (!userAgent) return;
+    const { data } = await admin.from("push_subscriptions").select("id")
+      .eq("user_id", userId).eq("user_agent", userAgent).order("last_seen_at", { ascending: false });
+    const extra = (data ?? []).slice(MAX_SUBS_PER_DEVICE_TYPE).map((r: { id: string }) => r.id);
+    if (extra.length) await admin.from("push_subscriptions").delete().in("id", extra);
+  } catch (err) {
+    console.error("push prune failed:", (err as Error)?.message);
+  }
 }
 
 async function pushUnsubscribe(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
