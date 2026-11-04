@@ -168,11 +168,20 @@ input[type="color"].form-control { height: 40px; padding: 3px 4px; cursor: point
 .cpe-share-link input { flex: 1; min-width: 0; font-family: var(--font-mono, monospace); font-size: 12px; }
 .cpe-plan-card .card-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+.cpe-layout > *, .cpe-bar > *, .cpe-rail { min-width: 0; }
+.cpe-title-row h1 { min-width: 0; overflow-wrap: anywhere; }
+
 @media (max-width: 980px) {
-  .cpe-layout { grid-template-columns: 1fr; }
-  .cpe-rail { position: static; max-height: none; }
-  .cpe-rail-list { flex-direction: row; overflow-x: auto; padding-bottom: 6px; }
-  .cpe-item { min-width: 190px; width: auto; }
+  .cpe-layout { grid-template-columns: minmax(0, 1fr); }
+  .cpe-rail { position: static; max-height: none; width: 100%; }
+  .cpe-rail-list { flex-direction: row; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+  .cpe-item { min-width: 170px; max-width: 220px; width: auto; flex-shrink: 0; scroll-snap-align: start; }
+  .cpe-bar { align-items: stretch; }
+  .cpe-title-row { width: 100%; }
+  .cpe-title-row h1 { flex: 1 1 100%; order: 3; font-size: var(--text-lg, 1.25rem); }
+  .cpe-bar-actions { width: 100%; }
+  .cpe-bar-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .cps-stage { max-width: 100%; overflow: hidden; border-radius: 8px; }
   .cpe-form { grid-template-columns: 1fr; }
   .cpe-link-row { grid-template-columns: 1fr; }
 }
