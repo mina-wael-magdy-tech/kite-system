@@ -72,6 +72,8 @@ export const Api = {
   editMessage: (id, content) => Api.chat('message.edit', { id, content }),
   deleteMessage: (id) => Api.chat('message.delete', { id }),
 
+  toggleReaction: (messageId, emoji) => Api.chat('reaction.toggle', { messageId, emoji }),
+  startCall: (conversationId, kind = 'video') => Api.chat('call.start', { conversationId, kind }),
   sendMessage: (conversationId, content, extra = {}) => Api.chat('message.send', { conversationId, content, ...extra }),
   commentTask: (taskId, content) => Api.workflow('task.comment', { taskId, content }),
   taskFileAdded: (taskId, fileName) => Api.workflow('task.file_added', { taskId, fileName }),

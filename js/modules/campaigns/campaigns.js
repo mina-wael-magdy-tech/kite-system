@@ -11,10 +11,14 @@ import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
 import { ContentPlansSection, ContentPlanEditor } from './content-plan.js';
 
+const STATUS_LABEL = { planning: 'Planning', active: 'Active', on_hold: 'On hold', completed: 'Completed', cancelled: 'Cancelled' };
+const STATUS_TONE = { planning: 'badge-sky', active: 'badge-emerald', on_hold: 'badge-amber', completed: 'badge-slate', cancelled: 'badge-rose' };
+
 export class CampaignsModule {
   constructor(app) {
     this.app = app;
     this.campaigns = [];
+    this.filter = { status: 'open', q: '' };
   }
 
   async render(container, query) {
@@ -40,6 +44,21 @@ export class CampaignsModule {
           </button>
         </div>
 
+        <div id="campaignsSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--space-3);"></div>
+
+        <div style="display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center;">
+          <input id="campSearch" type="search" class="form-control" placeholder="Search campaigns or clients…" style="flex: 1; min-width: 180px; height: 36px;" aria-label="Search campaigns" />
+          <select id="campStatusFilter" class="form-control" style="width: auto; height: 36px;" aria-label="Filter by status">
+            <option value="open">Open (planning, active, on hold)</option>
+            <option value="all">All campaigns</option>
+            <option value="planning">Planning</option>
+            <option value="active">Active</option>
+            <option value="on_hold">On hold</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+
         <div id="campaignsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-4);">
           <!-- Dynamic Campaign Cards -->
           <div class="empty-state" style="border:none; padding: 40px 0; grid-column: 1 / -1;">
@@ -55,6 +74,9 @@ export class CampaignsModule {
     document.getElementById('btnCreateCampaign')?.addEventListener('click', () => {
       this.openCampaignModal();
     });
+
+    document.getElementById('campSearch')?.addEventListener('input', (e) => { this.filter.q = e.target.value.trim().toLowerCase(); this.renderCampaigns(); });
+    document.getElementById('campStatusFilter')?.addEventListener('change', (e) => { this.filter.status = e.target.value; this.renderCampaigns(); });
 
     await this.loadCampaigns();
     Realtime.watch(['campaigns'], () => this.loadCampaigns()); // live updates for everyone
@@ -88,13 +110,18 @@ export class CampaignsModule {
     const container = document.getElementById('campaignsContainer');
     if (!container) return;
 
-    const displayCampaigns = this.campaigns;
+    this.renderSummary();
+    const { status, q } = this.filter;
+    const displayCampaigns = this.campaigns.filter(c => {
+      if (status === 'open' ? !['planning', 'active', 'on_hold'].includes(c.status) : (status !== 'all' && c.status !== status)) return false;
+      return !q || `${c.name} ${c.client?.company_name || ''} ${c.client?.name || ''}`.toLowerCase().includes(q);
+    });
     if (displayCampaigns.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
           <div class="empty-state-icon"><i data-lucide="megaphone"></i></div>
-          <div class="empty-state-title">No campaigns yet</div>
-          <div class="empty-state-desc">Create a cross-department campaign to coordinate branding, media, web and digital work.</div>
+          <div class="empty-state-title">${this.campaigns.length ? 'No campaigns match' : 'No campaigns yet'}</div>
+          <div class="empty-state-desc">${this.campaigns.length ? 'Try another status or search term.' : 'Create a cross-department campaign to coordinate branding, media, web and digital work.'}</div>
         </div>
       `;
       return;
@@ -109,18 +136,20 @@ export class CampaignsModule {
               ${Permissions.isAdmin() ? `<button type="button" class="card-act card-act-delete" data-id="${c.id}" title="Delete campaign" aria-label="Delete campaign"><i data-lucide="trash-2"></i></button>` : ''}
             </span>
             <span class="badge badge-indigo font-bold">${escapeHTML(c.client?.company_name || c.client?.name || 'No client assigned')}</span>
+            <span class="badge ${STATUS_TONE[c.status] || 'badge-slate'}" style="margin-left: 4px;">${escapeHTML(STATUS_LABEL[c.status] || c.status)}</span>
             <div class="card-title" style="margin-top: 6px;">${escapeHTML(c.name)}</div>
           </div>
-          <span class="badge badge-emerald font-mono">${formatDate(c.end_date)}</span>
+          <span class="badge ${this.deadlineTone(c)} font-mono" title="Target launch">${formatDate(c.end_date)}</span>
         </div>
 
         <div class="card-body" style="display: flex; flex-direction: column; gap: var(--space-3);">
           <p class="text-xs text-muted line-clamp-2">${escapeHTML(c.description || '')}</p>
+          ${this.progressHTML(c)}
 
           <div>
             <span class="text-2xs font-bold text-dim uppercase tracking-wider block mb-1">Involved Studio Departments</span>
             <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-              ${[...new Set((c.tasks || []).map(t => t.departments?.name).filter(Boolean))].map(n => `<span class="badge badge-indigo">${escapeHTML(n)}</span>`).join('') || '<span class="text-2xs text-dim">No deliverables assigned yet</span>'}
+              ${this.deptBreakdown(c).map(d => `<span class="badge badge-indigo" title="${d.done} of ${d.total} deliverables done">${escapeHTML(d.name)} · ${d.done}/${d.total}</span>`).join('') || '<span class="text-2xs text-dim">No deliverables assigned yet</span>'}
             </div>
           </div>
         </div>
@@ -138,6 +167,49 @@ export class CampaignsModule {
     container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
     container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteCampaign(b.dataset.id)));
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  isDone(t) { return t.status === 'completed' || t.status === 'approved'; }
+
+  progressHTML(c) {
+    const tasks = c.tasks || [];
+    if (!tasks.length) return '';
+    const done = tasks.filter(t => this.isDone(t)).length;
+    const pct = Math.round((done / tasks.length) * 100);
+    return `<div class="task-card-progress">
+      <div style="display: flex; justify-content: space-between;" class="text-2xs text-muted"><span>Progress</span><span>${done}/${tasks.length} deliverables · ${pct}%</span></div>
+      <div class="progress-track" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><div class="progress-fill" style="width: ${pct}%;"></div></div>
+    </div>`;
+  }
+
+  deptBreakdown(c) {
+    const map = new Map();
+    for (const t of c.tasks || []) {
+      const name = t.departments?.name;
+      if (!name) continue;
+      const d = map.get(name) || { name, done: 0, total: 0 };
+      d.total++; if (this.isDone(t)) d.done++;
+      map.set(name, d);
+    }
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }
+
+  /** Days until launch drives the colour: overdue = red, within a week = amber. */
+  deadlineTone(c) {
+    if (!c.end_date || ['completed', 'cancelled'].includes(c.status)) return 'badge-emerald';
+    const days = Math.ceil((new Date(c.end_date) - new Date()) / 86400000);
+    return days < 0 ? 'badge-rose' : days <= 7 ? 'badge-amber' : 'badge-emerald';
+  }
+
+  renderSummary() {
+    const el = document.getElementById('campaignsSummary');
+    if (!el) return;
+    const open = this.campaigns.filter(c => ['planning', 'active', 'on_hold'].includes(c.status));
+    const late = open.filter(c => c.end_date && new Date(c.end_date) < new Date()).length;
+    const tasks = open.flatMap(c => c.tasks || []);
+    const done = tasks.filter(t => this.isDone(t)).length;
+    const tile = (label, value) => `<div class="card" style="padding: var(--space-3);"><div class="text-2xs text-dim uppercase">${label}</div><div class="font-display font-bold text-xl text-white">${value}</div></div>`;
+    el.innerHTML = tile('Open campaigns', open.length) + tile('Past launch date', late) + tile('Deliverables', tasks.length) + tile('Done', tasks.length ? Math.round(done / tasks.length * 100) + '%' : '—');
   }
 
   /** One plan: open it. None yet: start one for this campaign. Several: show them in the list below. */

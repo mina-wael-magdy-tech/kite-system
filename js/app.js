@@ -11,6 +11,7 @@ import { AppRouter } from './router.js';
 import { PWA } from './pwa.js';
 import { Push } from './services/push-service.js';
 import { Toast } from './services/toast-service.js';
+import { Calls } from './services/call-service.js';
 import { infoDialog } from './ui/dialogs.js';
 import { getInitials, getAccentHex, escapeHTML, formatRelativeTime } from './utils/helpers.js';
 
@@ -59,6 +60,7 @@ class PulseStudioApp {
 
     // 4. Initialize Notifications & Realtime
     await Notifications.loadUserNotifications(this.currentProfile.id);
+    Calls.init(this);
     Notifications.subscribeRealtime(this.currentProfile.id);
     // a new alert while the panel is open appears in it straight away
     Notifications.onChange = () => {

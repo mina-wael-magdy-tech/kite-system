@@ -7,7 +7,10 @@
 //   channel.archive  admin   { id, archived }
 //   channel.delete   admin   { id }
 //   dm.create        staff   { userId }                      (returns the existing DM if any)
-//   message.send    staff   { conversationId, content, messageType?, metadata? }  (notifies the other members)
+//   message.send    staff   { conversationId, content, messageType?, metadata?, replyToId? }  (notifies the other members)
+//                           messageType: text | task_handoff | voice | image | file  (voice/image/file carry metadata.path in chat-media)
+//   reaction.toggle  staff   { messageId, emoji }
+//   call.start       staff   { conversationId, kind: "video"|"audio" }   (posts a call card and rings the other members)
 //   message.edit     author  { id, content }
 //   message.delete   author or admin { id }
 //
@@ -34,6 +37,8 @@ serveJson(async (req) => {
     case "message.send": return json(req, await messageSend(admin, caller, b));
     case "message.edit": return json(req, await messageEdit(admin, caller, b));
     case "message.delete": return json(req, await messageDelete(req, admin, caller, b));
+    case "reaction.toggle": return json(req, await reactionToggle(caller, admin, b));
+    case "call.start": return json(req, await callStart(admin, caller, b));
     default: throw new HttpError(400, "Unknown action");
   }
 });
@@ -121,13 +126,17 @@ async function channelMembers(admin: SupabaseClient, caller: Caller, b: Record<s
     const { error } = await admin.from("conversation_members").delete().eq("conversation_id", id).in("user_id", toRemove);
     if (error) throw new HttpError(500, "Could not remove members");
   }
+  if (toAdd.length || toRemove.length) {
+    await audit(admin, { userId: caller.id, action: "CHANNEL_MEMBERS_CHANGED", entityType: "conversations", entityId: id, newData: { added: toAdd, removed: toRemove } });
+  }
   return { success: true, added: toAdd.length, removed: toRemove.length };
 }
 
 async function channelArchive(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
   requireAdmin(caller);
   const id = v.uuid(b.id, "id");
-  await loadChannel(admin, id);
+  const ch0 = await loadChannel(admin, id);
+  if (ch0.type === "direct") throw new HttpError(400, "Direct messages are private and cannot be archived by an admin");
   const archived = b.archived !== false;
   const { error } = await admin.from("conversations").update({ is_archived: archived }).eq("id", id);
   if (error) throw new HttpError(500, "Could not update the channel");
@@ -139,6 +148,7 @@ async function channelDelete(req: Request, admin: SupabaseClient, caller: Caller
   requireAdmin(caller);
   const id = v.uuid(b.id, "id");
   const ch = await loadChannel(admin, id);
+  if (ch.type === "direct") throw new HttpError(400, "Direct messages are private and cannot be deleted by an admin");
   const { error } = await admin.from("conversations").delete().eq("id", id); // cascades to members + messages
   if (error) throw new HttpError(500, "Could not delete the channel");
   await audit(admin, { userId: caller.id, action: "CHANNEL_DELETED", entityType: "conversations", entityId: id, oldData: { name: ch.name } }, req);
@@ -186,11 +196,17 @@ async function messageEdit(admin: SupabaseClient, caller: Caller, b: Record<stri
 
 async function messageDelete(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
   const id = v.uuid(b.id, "id");
-  const { data: m } = await admin.from("messages").select("id, sender_id, conversation_id").eq("id", id).maybeSingle();
+  const { data: m } = await admin.from("messages").select("id, sender_id, conversation_id, metadata").eq("id", id).maybeSingle();
   if (!m) throw new HttpError(404, "Message not found");
-  if (m.sender_id !== caller.id && !caller.isAdmin) throw new HttpError(403, "You can only delete your own messages");
+  if (m.sender_id !== caller.id) {
+    // moderation: admins may remove messages in channels, never in direct messages
+    const ch = await loadChannel(admin, m.conversation_id);
+    if (!caller.isAdmin || ch.type === "direct") throw new HttpError(403, "You can only delete your own messages");
+  }
   const { error } = await admin.from("messages").delete().eq("id", id);
   if (error) throw new HttpError(500, "Could not delete the message");
+  const path = (m.metadata as { path?: string } | null)?.path;
+  if (path && path.startsWith(`${m.conversation_id}/`)) await admin.storage.from("chat-media").remove([path]);
   if (m.sender_id !== caller.id) {
     await audit(admin, { userId: caller.id, action: "MESSAGE_DELETED_BY_ADMIN", entityType: "messages", entityId: id }, req);
   }
@@ -198,51 +214,137 @@ async function messageDelete(req: Request, admin: SupabaseClient, caller: Caller
 }
 
 const MESSAGE_SELECT = "*, sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)";
+const MEDIA_TYPES = ["voice", "image", "file"] as const;
+const MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+const MIME_RE = /^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i;
+
+/** Validates the metadata of a voice note / image / file message. Never trusts the browser's path. */
+function mediaMetadata(conversationId: string, raw: unknown) {
+  const m = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const path = v.text(m.path, "path", 10, 300);
+  if (!path.startsWith(`${conversationId}/`) || path.includes("..")) throw new HttpError(400, "Invalid file location");
+  const mime = v.text(m.mime, "mime", 3, 100).toLowerCase();
+  if (!MIME_RE.test(mime)) throw new HttpError(400, "Invalid file type");
+  const size = Number(m.size);
+  if (!Number.isFinite(size) || size < 0 || size > MEDIA_MAX_BYTES) throw new HttpError(400, "File is too large");
+  const out: Record<string, unknown> = { path, mime, size, name: v.optText(m.name, "name", 200) ?? "file" };
+  if (m.duration !== undefined) {
+    const d = Number(m.duration);
+    if (!Number.isFinite(d) || d < 0 || d > 60 * 30) throw new HttpError(400, "Invalid duration");
+    out.duration = Math.round(d * 10) / 10;
+  }
+  if (Array.isArray(m.peaks)) out.peaks = m.peaks.slice(0, 64).map((x) => Math.max(0, Math.min(100, Math.round(Number(x) || 0))));
+  return out;
+}
+
+async function recipientsOf(admin: SupabaseClient, conversationId: string, callerId: string) {
+  const { data: members } = await admin.from("conversation_members").select("user_id").eq("conversation_id", conversationId);
+  const ids = (members ?? []).map((m: { user_id: string }) => m.user_id).filter((id: string) => id !== callerId);
+  if (!ids.length) return [];
+  const { data: active } = await admin.from("profiles").select("id").in("id", ids).eq("employment_status", "active");
+  return (active ?? []).map((p: { id: string }) => p.id);
+}
 
 async function messageSend(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
   const conversationId = v.uuid(b.conversationId, "conversationId");
-  const content = v.text(b.content, "content", 1, 4000);
-  const messageType = b.messageType === "task_handoff" ? "task_handoff" : "text";
-  const metadata = messageType === "task_handoff" && b.metadata && typeof b.metadata === "object" ? b.metadata : {};
+  const messageType = (["task_handoff", ...MEDIA_TYPES] as string[]).includes(b.messageType as string) ? b.messageType as string : "text";
+  const isMedia = (MEDIA_TYPES as readonly string[]).includes(messageType);
+
+  let metadata: Record<string, unknown> = {};
+  let content: string;
+  if (isMedia) {
+    metadata = mediaMetadata(conversationId, b.metadata);
+    const fallback = messageType === "voice" ? "🎤 Voice message" : messageType === "image" ? "🖼️ Photo" : `📎 ${metadata.name}`;
+    content = typeof b.content === "string" && b.content.trim() ? v.text(b.content, "content", 1, 4000) : fallback;
+  } else {
+    content = v.text(b.content, "content", 1, 4000);
+    if (messageType === "task_handoff" && b.metadata && typeof b.metadata === "object") metadata = b.metadata as Record<string, unknown>;
+  }
+  const replyToId = v.optUuid(b.replyToId, "replyToId");
 
   // Insert AS the caller so the row-level policy decides whether they may post here.
   const { data: msg, error } = await userClient(caller.token).from("messages").insert({
-    conversation_id: conversationId, sender_id: caller.id, content, message_type: messageType, metadata,
+    conversation_id: conversationId, sender_id: caller.id, content, message_type: messageType, metadata, reply_to_id: replyToId,
   }).select(MESSAGE_SELECT).single();
   if (error || !msg) throw new HttpError(403, "You cannot post in this conversation");
 
-  // ---- notify the other members (in-app + push)
-  const { data: convo } = await admin.from("conversations").select("id, type, name").eq("id", conversationId).single();
-  const { data: members } = await admin.from("conversation_members").select("user_id").eq("conversation_id", conversationId);
-  const sender = msg.sender?.full_name ?? "Someone";
-  const preview = messageType === "task_handoff" ? `📌 ${content}` : (content.length > 110 ? content.slice(0, 107) + "…" : content);
-  const isDirect = convo?.type === "direct";
-
-  const recipients = (members ?? []).map((m: { user_id: string }) => m.user_id).filter((id: string) => id !== caller.id);
-  if (recipients.length) {
-    const { data: active } = await admin.from("profiles").select("id").in("id", recipients).eq("employment_status", "active");
-    const activeIds = (active ?? []).map((p: { id: string }) => p.id);
-
-    // channels: one unread alert per conversation is enough (avoids a flood while people are chatting)
-    const alreadyAlerted = new Set<string>();
-    if (!isDirect && activeIds.length) {
-      const { data: unread } = await admin.from("notifications").select("user_id")
-        .in("user_id", activeIds).eq("type", "chat_message").eq("is_read", false)
-        .eq("metadata->>conversation_id", conversationId)
-        .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString());
-      (unread ?? []).forEach((r: { user_id: string }) => alreadyAlerted.add(r.user_id));
-    }
-
-    for (const userId of activeIds) {
-      if (alreadyAlerted.has(userId)) continue;
-      await notify(admin, {
-        userId, type: "chat_message",
-        title: isDirect ? sender : `${sender} in # ${convo?.name ?? "channel"}`,
-        content: preview,
-        link: `#chat?c=${conversationId}`,
-        metadata: { conversation_id: conversationId },
-      });
-    }
-  }
+  await notifyMembers(admin, caller, conversationId, msg.sender?.full_name ?? "Someone", messageType, content);
   return { success: true, message: msg };
+}
+
+async function notifyMembers(admin: SupabaseClient, caller: Caller, conversationId: string, sender: string, messageType: string, content: string) {
+  const { data: convo } = await admin.from("conversations").select("id, type, name").eq("id", conversationId).single();
+  const isDirect = convo?.type === "direct";
+  const preview = messageType === "task_handoff" ? `📌 ${content}` : (content.length > 110 ? content.slice(0, 107) + "…" : content);
+
+  const activeIds = await recipientsOf(admin, conversationId, caller.id);
+  if (!activeIds.length) return;
+
+  // channels: one unread alert per conversation is enough (avoids a flood while people are chatting)
+  const alreadyAlerted = new Set<string>();
+  if (!isDirect) {
+    const { data: unread } = await admin.from("notifications").select("user_id")
+      .in("user_id", activeIds).eq("type", "chat_message").eq("is_read", false)
+      .eq("metadata->>conversation_id", conversationId)
+      .gte("created_at", new Date(Date.now() - 10 * 60_000).toISOString());
+    (unread ?? []).forEach((r: { user_id: string }) => alreadyAlerted.add(r.user_id));
+  }
+
+  await Promise.all(activeIds.filter((id) => !alreadyAlerted.has(id)).map((userId) => notify(admin, {
+    userId, type: "chat_message",
+    title: isDirect ? sender : `${sender} in # ${convo?.name ?? "channel"}`,
+    content: preview,
+    link: `#chat?c=${conversationId}`,
+    metadata: { conversation_id: conversationId },
+    push: { tag: `chat-${conversationId}`, urgent: true },
+  })));
+}
+
+async function reactionToggle(caller: Caller, admin: SupabaseClient, b: Record<string, unknown>) {
+  const messageId = v.uuid(b.messageId, "messageId");
+  const emoji = v.text(b.emoji, "emoji", 1, 16);
+  if (/[<>&"'\s]/.test(emoji)) throw new HttpError(400, "Invalid emoji");
+  // RLS decides whether the caller may see (and therefore react to) this message
+  const { data: m } = await userClient(caller.token).from("messages").select("id, conversation_id").eq("id", messageId).maybeSingle();
+  if (!m) throw new HttpError(404, "Message not found");
+  const { data: convo } = await admin.from("conversations").select("is_archived").eq("id", m.conversation_id).single();
+  if (convo?.is_archived) throw new HttpError(400, "This channel is archived");
+
+  const { data: existing } = await admin.from("message_reactions").select("id")
+    .eq("message_id", messageId).eq("user_id", caller.id).eq("emoji", emoji).maybeSingle();
+  if (existing) {
+    await admin.from("message_reactions").delete().eq("id", existing.id);
+    return { success: true, active: false };
+  }
+  const { error } = await admin.from("message_reactions").insert({
+    message_id: messageId, conversation_id: m.conversation_id, user_id: caller.id, emoji,
+  });
+  if (error) throw new HttpError(500, "Could not add the reaction");
+  return { success: true, active: true };
+}
+
+async function callStart(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const conversationId = v.uuid(b.conversationId, "conversationId");
+  const kind = v.oneOf(b.kind ?? "video", ["video", "audio"] as const, "kind");
+  const callId = crypto.randomUUID();
+  const label = kind === "video" ? "📹 Started a video call" : "📞 Started a voice call";
+
+  const { data: msg, error } = await userClient(caller.token).from("messages").insert({
+    conversation_id: conversationId, sender_id: caller.id, content: label, message_type: "call",
+    metadata: { call_id: callId, kind, started_at: new Date().toISOString() },
+  }).select(MESSAGE_SELECT).single();
+  if (error || !msg) throw new HttpError(403, "You cannot start a call in this conversation");
+
+  const { data: convo } = await admin.from("conversations").select("type, name").eq("id", conversationId).single();
+  const sender = msg.sender?.full_name ?? "Someone";
+  const recipients = await recipientsOf(admin, conversationId, caller.id);
+  await Promise.all(recipients.map((userId) => notify(admin, {
+    userId, type: "call_incoming",
+    title: convo?.type === "direct" ? `${sender} is calling you` : `${sender} started a call in # ${convo?.name ?? "channel"}`,
+    content: kind === "video" ? "Incoming video call — tap to join" : "Incoming voice call — tap to join",
+    link: `#chat?c=${conversationId}&call=${callId}&kind=${kind}`,
+    metadata: { conversation_id: conversationId, call_id: callId, kind, from: caller.id },
+    push: { tag: `call-${callId}`, urgent: true, requireInteraction: true },
+  })));
+  return { success: true, callId, message: msg };
 }

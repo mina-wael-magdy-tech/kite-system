@@ -11,6 +11,9 @@ export const CONFIG = {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   VAPID_PUBLIC_KEY: window.ENV_VAPID_PUBLIC_KEY || '',
+  // WebRTC relay servers for calls (JSON array, see docs/chat-and-calls.md). STUN only works on friendly networks;
+  // add a TURN server so calls also connect over mobile data / strict office firewalls.
+  ICE_SERVERS: (() => { try { const v = JSON.parse(window.ENV_ICE_SERVERS || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })(),
 
   // True once env.js was filled in with real values.
   IS_CONFIGURED:
@@ -43,7 +46,8 @@ export const CONFIG = {
   // Storage buckets that exist (see 004_storage.sql)
   STORAGE_BUCKETS: {
     TASK_ATTACHMENTS: 'task-attachments',
-    STUDIO_ASSETS: 'studio-assets'
+    STUDIO_ASSETS: 'studio-assets',
+    CHAT_MEDIA: 'chat-media'
   },
 
   // profiles columns the browser may read. Must match the column-level GRANT in

@@ -20,6 +20,7 @@
   "shortcuts": [
     { "name": "My tasks", "short_name": "Tasks", "url": "/index.html#tasks", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
     { "name": "Calendar", "short_name": "Calendar", "url": "/index.html#calendar", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Studio campaigns", "short_name": "Campaigns", "url": "/index.html#campaigns", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] },
     { "name": "Team chat", "short_name": "Chat", "url": "/index.html#chat", "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }] }
   ]
 }

@@ -97,12 +97,20 @@ self.addEventListener('push', (event) => {
     icon: '/assets/icon-192.png',
     badge: '/assets/badge-96.png',
     tag: data.tag || undefined,
-    renotify: Boolean(data.tag),
+    renotify: Boolean(data.tag),          // a new message in the same chat buzzes again instead of silently replacing
+    vibrate: data.requireInteraction ? [400, 150, 400, 150, 400] : [120, 60, 120],  // Android: without it many phones stay silent
+    requireInteraction: data.requireInteraction === true,   // incoming calls stay until answered
+    silent: false,
     timestamp: Date.now(),
     data: { url: data.url || '/index.html#dashboard' }
   };
 
   event.waitUntil((async () => {
+    // The app is open and in front: it already shows its own toast / ringing screen, a system banner would double up.
+    if (!data.requireInteraction) {
+      const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      if (open.some((c) => c.visibilityState === 'visible' && c.focused)) return;
+    }
     await self.registration.showNotification(title, options);
     try {
       if (typeof data.badgeCount === 'number' && self.navigator.setAppBadge) await self.navigator.setAppBadge(data.badgeCount);

@@ -111,7 +111,10 @@ export async function audit(
 
 export async function notify(
   admin: SupabaseClient,
-  n: { userId: string; type: string; title: string; content: string; link?: string; metadata?: Record<string, unknown> },
+  n: {
+    userId: string; type: string; title: string; content: string; link?: string; metadata?: Record<string, unknown>;
+    push?: { tag?: string; urgent?: boolean; requireInteraction?: boolean };
+  },
 ): Promise<void> {
   const { error } = await admin.from("notifications").insert({
     user_id: n.userId,
@@ -126,7 +129,10 @@ export async function notify(
     return;
   }
   // Same message on the user's phone / desktop (no-op when push is not configured)
-  await sendPush(admin, n.userId, { title: n.title, body: n.content, url: n.link, tag: n.type });
+  await sendPush(admin, n.userId, {
+    title: n.title, body: n.content, url: n.link,
+    tag: n.push?.tag ?? n.type, urgent: n.push?.urgent, requireInteraction: n.push?.requireInteraction,
+  });
 }
 
 /** Active people holding any of the given roles (unknown role names simply match nobody). */

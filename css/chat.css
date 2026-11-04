@@ -1,0 +1,118 @@
+/* ====================================================================
+   CHAT v2 — Slack-style feed, composer, voice notes, reactions, calls
+   ==================================================================== */
+.chat-page [hidden] { display: none !important; }
+
+/* ---- feed ---- */
+.slk-feed { gap: 0; padding: var(--space-3) 0; }
+.slk-day { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-3) var(--space-4); color: var(--text-dim); font-size: 11px; font-weight: 600; }
+.slk-day::before, .slk-day::after { content: ''; flex: 1; height: 1px; background: var(--border-subtle); }
+
+.slk-msg { position: relative; display: grid; grid-template-columns: 44px 1fr; gap: var(--space-2); padding: 4px var(--space-4); }
+.slk-msg:hover { background: color-mix(in srgb, var(--text-main) 4%, transparent); }
+.slk-msg.sending { opacity: .6; }
+.slk-msg.grouped { padding-top: 0; padding-bottom: 0; }
+.slk-gutter { display: flex; justify-content: center; padding-top: 2px; }
+.slk-hovertime { visibility: hidden; font-size: 10px; color: var(--text-dim); padding-top: 4px; }
+.slk-msg:hover .slk-hovertime { visibility: visible; }
+.slk-avatar { width: 36px; height: 36px; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.slk-avatar-sm { width: 22px; height: 22px; border-radius: 6px; font-size: 9px; }
+.slk-main { min-width: 0; }
+.slk-meta { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.slk-meta b { color: var(--text-main); }
+.slk-meta span { color: var(--text-dim); font-size: 11px; }
+.slk-text { font-size: 14px; line-height: 1.5; color: var(--text-main); overflow-wrap: anywhere; }
+.slk-quote { border-left: 3px solid var(--border-medium); padding: 2px 8px; margin: 2px 0 4px; font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slk-quote b { color: var(--text-main); }
+
+.slk-actions { position: absolute; right: var(--space-4); top: -14px; display: none; gap: 2px; padding: 2px; background: var(--studio-900); border: 1px solid var(--border-medium); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
+.slk-actions .card-act { opacity: 1; }
+.slk-msg:hover .slk-actions, .slk-msg:focus-within .slk-actions { display: flex; }
+@media (hover: none) { .slk-actions { display: flex; position: static; grid-column: 2; background: none; border: 0; box-shadow: none; padding: 0; opacity: .75; } }
+
+/* ---- reactions ---- */
+.slk-reacts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; position: relative; }
+.slk-react { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; font-size: 12px; border-radius: 999px; border: 1px solid var(--border-medium); background: var(--studio-850); color: var(--text-main); cursor: pointer; min-height: 24px; }
+.slk-react.mine { border-color: #e01b28; background: color-mix(in srgb, #e01b28 12%, transparent); }
+.slk-react-add { opacity: 0; padding: 1px 6px; }
+.slk-msg:hover .slk-react-add, .slk-react-add:focus { opacity: 1; }
+@media (hover: none) { .slk-react-add { opacity: .7; } }
+.slk-react-add svg { width: 14px; height: 14px; }
+.slk-emoji-pop { position: absolute; bottom: 30px; left: 0; z-index: 30; display: flex; gap: 2px; padding: 4px; background: var(--studio-900); border: 1px solid var(--border-medium); border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.2); }
+.slk-emoji-pop button { font-size: 20px; padding: 4px 6px; border-radius: 6px; line-height: 1; }
+.slk-emoji-pop button:hover { background: var(--studio-850); }
+
+/* ---- media ---- */
+.slk-img { display: block; max-width: min(320px, 100%); max-height: 260px; border-radius: 10px; border: 1px solid var(--border-subtle); cursor: zoom-in; background: var(--studio-850); min-height: 60px; }
+.slk-file { display: inline-flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--studio-850); color: var(--text-main); text-align: left; cursor: pointer; max-width: 100%; }
+.slk-file span { display: flex; flex-direction: column; min-width: 0; font-size: 13px; }
+.slk-file b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slk-file small { color: var(--text-dim); font-size: 11px; }
+
+.slk-voice { display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border: 1px solid var(--border-medium); border-radius: 999px; background: var(--studio-850); min-width: 220px; max-width: 100%; }
+.slk-voice-btn { width: 34px; height: 34px; border-radius: 50%; background: #e01b28; color: #fff; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.slk-voice-btn svg { width: 16px; height: 16px; }
+.slk-voice-wave { display: flex; align-items: center; gap: 2px; height: 28px; flex: 1; min-width: 0; }
+.slk-voice-wave i { flex: 1; min-width: 2px; max-width: 4px; background: var(--border-strong, #b6c0cd); border-radius: 2px; }
+.slk-voice-wave i.played { background: #e01b28; }
+.slk-voice-time { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.slk-callcard { display: inline-flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border-medium); border-radius: 10px; background: var(--studio-850); font-size: 13px; flex-wrap: wrap; }
+
+/* ---- composer ---- */
+.slk-replybar { align-items: center; justify-content: space-between; gap: 8px; padding: 6px var(--space-3); background: var(--studio-850); border-top: 1px solid var(--border-subtle); font-size: 12px; color: var(--text-muted); }
+.slk-composer { padding: var(--space-3); border-top: 1px solid var(--border-subtle); background: var(--studio-950); display: flex; gap: var(--space-2); align-items: center; }
+.slk-tool { opacity: 1 !important; width: 40px; height: 40px; flex: none; }
+.slk-recorder { padding: var(--space-3); border-top: 1px solid var(--border-subtle); background: var(--studio-950); align-items: center; gap: var(--space-3); }
+.slk-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #e01b28; animation: slkpulse 1s infinite; }
+@keyframes slkpulse { 50% { opacity: .25; } }
+.slk-rec-time { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--text-main); min-width: 36px; }
+.slk-rec-level { flex: 1; height: 28px; display: flex; align-items: center; gap: 2px; overflow: hidden; justify-content: flex-end; }
+.slk-rec-level i { width: 3px; flex: none; background: #e01b28; border-radius: 2px; }
+
+/* phones / installed app: keep the composer above the keyboard & home indicator, 16px inputs avoid iOS zoom */
+@media (max-width: 767px) {
+  .slk-msg { padding-left: var(--space-3); padding-right: var(--space-3); grid-template-columns: 38px 1fr; }
+  .slk-avatar { width: 32px; height: 32px; }
+  .slk-composer input.form-control { font-size: 16px; }
+  .slk-composer, .slk-recorder { padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px) * 0); }
+  .slk-voice { min-width: 0; width: 100%; }
+}
+
+/* ====================================================================
+   CALLS
+   ==================================================================== */
+body.in-call { overflow: hidden; }
+.call-screen { position: fixed; inset: 0; z-index: 9000; background: #0f1720; color: #fff; display: flex; flex-direction: column; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+.call-top { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; font-weight: 600; }
+.call-time { font-variant-numeric: tabular-nums; opacity: .8; font-size: 14px; }
+.call-status { text-align: center; opacity: .75; font-size: 13px; min-height: 18px; }
+.call-grid { flex: 1; min-height: 0; display: grid; gap: 8px; padding: 8px; grid-template-columns: 1fr; grid-auto-rows: 1fr; }
+.call-grid[data-count="2"] { grid-template-columns: 1fr 1fr; }
+.call-grid[data-count="3"], .call-grid[data-count="4"] { grid-template-columns: 1fr 1fr; }
+.call-grid[data-count="5"], .call-grid[data-count="6"] { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 767px) {
+  .call-grid[data-count="2"] { grid-template-columns: 1fr; }
+  .call-grid[data-count="3"], .call-grid[data-count="4"], .call-grid[data-count="5"], .call-grid[data-count="6"] { grid-template-columns: 1fr 1fr; }
+}
+.call-tile { position: relative; background: #1b2633; border-radius: 14px; overflow: hidden; min-height: 0; }
+.call-tile video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.call-tile.local video { transform: scaleX(-1); }
+.call-tile-avatar { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: 36px; font-weight: 700; background: #1b2633; }
+.call-tile.cam-off .call-tile-avatar { display: flex; }
+.call-tile-name { position: absolute; left: 10px; bottom: 8px; font-size: 12px; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 6px; }
+.call-controls { display: flex; justify-content: center; gap: 14px; padding: 14px 0 18px; }
+
+.call-btn { width: 52px; height: 52px; border-radius: 50%; background: #2b3a4c; color: #fff; display: inline-flex; align-items: center; justify-content: center; border: 0; cursor: pointer; }
+.call-btn svg { width: 22px; height: 22px; }
+.call-btn.off { background: #fff; color: #0f1720; }
+.call-btn-hang { background: #e01b28; }
+.call-btn-accept { background: #1faa59; }
+
+.call-ring { position: fixed; inset: 0; z-index: 9500; background: rgba(10, 16, 24, .78); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.call-ring-card { background: #162130; color: #fff; border-radius: 20px; padding: 28px 24px; width: 100%; max-width: 340px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.call-ring-avatar { width: 84px; height: 84px; border-radius: 50%; background: #e01b28; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; animation: slkpulse 1.4s infinite; }
+.call-ring-title { font-size: 20px; font-weight: 700; }
+.call-ring-sub { opacity: .75; font-size: 13px; margin-top: 4px; }
+.call-ring-actions { display: flex; justify-content: center; gap: 40px; margin-top: 26px; }
+.call-ring-actions .call-btn { width: 64px; height: 64px; }

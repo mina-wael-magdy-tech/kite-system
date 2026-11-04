@@ -12,6 +12,8 @@ export interface PushPayload {
   body: string;
   url?: string;   // in-app route, e.g. "#tasks"
   tag?: string;   // same tag replaces the previous notification instead of stacking
+  urgent?: boolean;          // wake a sleeping phone now (chat, calls): FCM "high" priority
+  requireInteraction?: boolean; // stays on screen until tapped (incoming calls)
 }
 
 // Subscription endpoints must belong to a real push service. The server POSTs to them, so an
@@ -66,6 +68,8 @@ export async function sendPush(admin: SupabaseClient, userId: string, payload: P
       body: payload.body,
       url: payload.url ? `/index.html${payload.url.startsWith("#") ? payload.url : "#" + payload.url}` : "/index.html#dashboard",
       tag: payload.tag,
+      urgent: payload.urgent === true,
+      requireInteraction: payload.requireInteraction === true,
       badgeCount: unread ?? 0,
     });
 
@@ -76,7 +80,12 @@ export async function sendPush(admin: SupabaseClient, userId: string, payload: P
         return;
       }
       try {
-        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 60 * 60 * 24, urgency: "normal" });
+        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, {
+          // Android parks "normal" pushes while the phone is idle (Doze); "high" is delivered immediately.
+          // Calls ring for a minute at most, everything else may wait a day for an offline phone.
+          TTL: payload.requireInteraction ? 60 : 60 * 60 * 24,
+          urgency: payload.urgent ? "high" : "normal",
+        });
         result.sent++;
       } catch (err) {
         // deno-lint-ignore no-explicit-any

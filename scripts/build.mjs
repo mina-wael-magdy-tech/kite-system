@@ -4,6 +4,7 @@
 // Required Vercel env vars (Project Settings -> Environment Variables):
 //   SUPABASE_URL        https://<project-ref>.supabase.co
 //   SUPABASE_ANON_KEY   the public anon / publishable key (NEVER the service_role key)
+//   ICE_SERVERS         (optional) JSON array of WebRTC STUN/TURN servers for calls
 //   VAPID_PUBLIC_KEY    (optional) public Web Push key; push notifications stay off without it
 import { cpSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -23,8 +24,11 @@ for (const d of ['css', 'js', 'vendor', 'assets', 'fonts']) cpSync(d, `dist/${d}
 const vapid = (process.env.VAPID_PUBLIC_KEY || '').trim();
 if (vapid && !/^[A-Za-z0-9_-]{80,100}$/.test(vapid)) fail('VAPID_PUBLIC_KEY is not a valid public key');
 
+let ice = (process.env.ICE_SERVERS || '').trim();
+if (ice) { try { if (!Array.isArray(JSON.parse(ice))) throw 0; } catch { fail('ICE_SERVERS must be a JSON array'); } }
+
 writeFileSync('dist/env.js',
-  `window.ENV_SUPABASE_URL = ${JSON.stringify(url)};\nwindow.ENV_SUPABASE_ANON_KEY = ${JSON.stringify(key)};\nwindow.ENV_VAPID_PUBLIC_KEY = ${JSON.stringify(vapid)};\n`);
+  `window.ENV_SUPABASE_URL = ${JSON.stringify(url)};\nwindow.ENV_SUPABASE_ANON_KEY = ${JSON.stringify(key)};\nwindow.ENV_VAPID_PUBLIC_KEY = ${JSON.stringify(vapid)};\nwindow.ENV_ICE_SERVERS = ${JSON.stringify(ice)};\n`);
 
 // ---- PWA: manifest, offline page, and the service worker stamped with this build
 for (const f of ['manifest.webmanifest', 'offline.html']) cpSync(f, `dist/${f}`);

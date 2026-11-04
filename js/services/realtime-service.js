@@ -8,6 +8,8 @@
 
 import { getSupabase } from '../supabase-client.js';
 
+let seq = 0; // supabase-js hands back an existing channel for a repeated name, so every name must be unique
+
 class RealtimeService {
   constructor() {
     this.channel = null;
@@ -34,7 +36,7 @@ class RealtimeService {
       }, debounceMs);
     };
 
-    let ch = supabase.channel(`kite-watch-${Date.now()}`);
+    let ch = supabase.channel(`kite-watch-${++seq}-${Date.now()}`);
     for (const table of tables) {
       ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, fire);
     }

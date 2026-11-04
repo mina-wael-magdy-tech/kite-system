@@ -162,6 +162,17 @@ r = await as('emp2', `INSERT INTO public.messages(conversation_id,sender_id,cont
 check('cannot post into someone else’s DM', denied(r), JSON.stringify(r));
 r = await as('emp2', `SELECT count(*)::int c FROM public.messages WHERE conversation_id='${dm}'`);
 check('cannot read someone else’s DM', r.rows[0].c === 0);
+// migration 016 (privacy part only: the test database has no realtime schema): admins lose the blanket read access
+{
+  const sql016 = fs.readFileSync(M + 'migrations/016_chat_v2_private_and_media.sql', 'utf8');
+  await db.exec(sql016.slice(sql016.indexOf('-- ----------------------------------------------------------------'), sql016.indexOf('-- ---------------------------------------------------------------- 3.')));
+}
+r = await as('admin', `SELECT count(*)::int c FROM public.messages WHERE conversation_id='${dm}'`);
+check('016: admin cannot read other people’s DM', r.rows[0].c === 0, JSON.stringify(r));
+r = await as('admin', `SELECT count(*)::int c FROM public.conversations WHERE id='${dm}'`);
+check('016: admin cannot even see other people’s DM exists', r.rows[0].c === 0, JSON.stringify(r));
+r = await as('emp', `SELECT count(*)::int c FROM public.messages WHERE conversation_id='${dm}'`);
+check('016: member still reads own DM', r.rows[0].c >= 0 && !r.error, JSON.stringify(r));
 r = await as('emp', `INSERT INTO public.messages(conversation_id,sender_id,content) VALUES ('${dm}','${U.emp}','hi')`);
 check('member can post in DM', !r.error, JSON.stringify(r));
 r = await as('emp', `INSERT INTO public.messages(conversation_id,sender_id,content,message_type) VALUES ('${dm}','${U.emp}','x','system')`);

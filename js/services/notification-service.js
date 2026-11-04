@@ -7,12 +7,14 @@
 
 import { getSupabase } from '../supabase-client.js';
 import { Toast } from './toast-service.js';
+import { Calls } from './call-service.js';
 
 const BASE_TITLE = document.title;
 
 /** icon = lucide icon; tone = css colour variable used for the icon bubble. */
 export const NOTIFICATION_TYPES = {
   chat_message:        { icon: 'message-circle', tone: 'var(--kite-blue-400)',  label: 'Chat' },
+  call_incoming:       { icon: 'video',          tone: 'var(--kite-red-500)',   label: 'Calls' },
   task_assigned:       { icon: 'clipboard-check', tone: 'var(--kite-red-500)',   label: 'Tasks' },
   task_status_updated: { icon: 'refresh-cw',      tone: 'var(--kite-amber-400)', label: 'Tasks' },
   task_updated:        { icon: 'pencil',          tone: 'var(--kite-amber-400)', label: 'Tasks' },
@@ -172,7 +174,7 @@ class NotificationService {
     }
 
     this.channel = supabase
-      .channel(`public:notifications:${userId}`)
+      .channel(`kite-notifications-${userId}-${Date.now()}`)
       .on(
         'postgres_changes',
         {
@@ -184,6 +186,16 @@ class NotificationService {
         payload => {
           const n = payload.new;
           if (this.notifications.some(x => x.id === n.id)) return;
+
+          // incoming call: ring (only if it is fresh; old ones arrive when the app opens late)
+          if (n.type === 'call_incoming' && Date.now() - new Date(n.created_at).getTime() < 40_000) {
+            this.notifications.unshift(n);
+            this.updateBadges();
+            Calls.showIncoming(n.metadata, (n.title || '').replace(/ (is calling you|started a call.*)$/, '') || 'Someone',
+              /started a call in # (.+)$/.exec(n.title || '')?.[1] || '');
+            this.onChange?.();
+            return;
+          }
 
           if (this.isViewing(n)) {
             n.is_read = true; // already on screen: read it silently
