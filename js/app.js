@@ -28,6 +28,7 @@ import { HrModule } from './modules/hr/hr.js';
 import { BroadcastModule, canBroadcast } from './modules/broadcast/broadcast.js';
 import { CrmModule } from './modules/crm/crm.js';
 import { FinanceModule } from './modules/finance/finance.js';
+import { QrModule } from './modules/qr/qr-generator.js';
 import { DocumentsModule } from './modules/documents/documents.js';
 import { ChatModule } from './modules/chat/chat.js';
 import { ReportsModule } from './modules/reports/reports.js';
@@ -230,6 +231,12 @@ class PulseStudioApp {
       title: 'Role Chat & Handoffs',
       breadcrumbs: ['Collaboration', 'Live Channels & DMs'],
       render: (container, query) => new ChatModule(this).render(container, query)
+    });
+
+    AppRouter.register('qr', {
+      title: 'QR Code Generator',
+      breadcrumbs: ['Collaboration', 'QR Code Generator'],
+      render: (container, query) => new QrModule(this).render(container, query)
     });
 
     AppRouter.register('reports', {

@@ -1,0 +1,32 @@
+/* KITE SYSTEM — QR Code Generator page */
+.qr-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, 1fr); gap: var(--space-4); align-items: start; }
+.qr-layout > * { min-width: 0; }
+.qr-form { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.qr-link-row { display: flex; gap: var(--space-2); }
+.qr-link-row .form-control { flex: 1; min-width: 0; }
+.qr-hint { min-height: 16px; margin-top: 4px; font-size: var(--text-2xs); color: var(--text-dim); overflow-wrap: anywhere; }
+.qr-hint.err { color: var(--kite-red-700, #b4121d); }
+.qr-opts { display: flex; flex-wrap: wrap; gap: var(--space-4); }
+.qr-opts .cpe-seg { flex-wrap: wrap; }
+.qr-opts .cpe-seg button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: var(--text-xs); font-weight: 600; }
+.qr-swatch { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(127, 127, 127, .4); display: inline-block; }
+.qr-side { display: flex; flex-direction: column; gap: var(--space-4); }
+.qr-preview { padding: var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
+.qr-stage { width: 100%; max-width: 320px; aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center; background: #fff; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; }
+.qr-stage canvas { width: 100%; height: auto; display: block; }
+.qr-stage canvas[hidden], .qr-empty[hidden] { display: none; }
+.qr-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 24px; text-align: center; font-size: var(--text-xs); color: #8a96a3; }
+.qr-empty svg { width: 44px; height: 44px; opacity: .55; }
+.qr-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); width: 100%; }
+.qr-recent { padding: var(--space-3) var(--space-4); }
+.qr-recent-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.qr-recent-item { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+.qr-recent-item:last-child { border-bottom: 0; }
+.qr-recent-use { flex: 1; min-width: 0; text-align: start; background: none; border: 0; padding: 4px 0; cursor: pointer; color: inherit; font: inherit; display: flex; flex-direction: column; gap: 2px; }
+.qr-recent-use:hover .qr-recent-url { text-decoration: underline; }
+.qr-recent-url { font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qr-recent-use small { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 860px) {
+  .qr-layout { grid-template-columns: minmax(0, 1fr); }
+  .qr-actions .btn { flex: 1 1 auto; justify-content: center; }
+}
