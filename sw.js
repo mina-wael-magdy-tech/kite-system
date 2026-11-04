@@ -87,10 +87,18 @@ self.addEventListener('fetch', (event) => {
 
 // ---------------------------------------------------------------- Web Push
 
+// An incoming call keeps re-alerting (buzz + sound) every few seconds, like a phone ringing, until the person
+// answers, dismisses it, opens the app, or RING_FOR_MS passes. A web app cannot loop a ringtone while closed,
+// so this is the closest the platform allows: renotify makes the phone alert again each time.
+const RING_FOR_MS = 45_000;
+const RING_EVERY_MS = 3_500;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data ? event.data.text() : '' }; }
 
+  const isCall = data.requireInteraction === true;
   const title = data.title || 'Kite System';
   const options = {
     body: data.body || '',
@@ -98,28 +106,44 @@ self.addEventListener('push', (event) => {
     badge: '/assets/badge-96.png',
     tag: data.tag || undefined,
     renotify: Boolean(data.tag),          // a new message in the same chat buzzes again instead of silently replacing
-    vibrate: data.requireInteraction ? [400, 150, 400, 150, 400] : [120, 60, 120],  // Android: without it many phones stay silent
-    requireInteraction: data.requireInteraction === true,   // incoming calls stay until answered
+    vibrate: isCall ? [600, 250, 600, 250, 600] : [120, 60, 120],  // Android: without it many phones stay silent
+    requireInteraction: isCall,           // incoming calls stay until answered
     silent: false,
     timestamp: Date.now(),
+    actions: isCall ? [{ action: 'answer', title: 'Answer' }, { action: 'decline', title: 'Decline' }] : [],
     data: { url: data.url || '/index.html#dashboard' }
+  };
+  const appInFront = async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    return open.some((c) => c.visibilityState === 'visible' && c.focused);
   };
 
   event.waitUntil((async () => {
     // The app is open and in front: it already shows its own toast / ringing screen, a system banner would double up.
-    if (!data.requireInteraction) {
-      const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      if (open.some((c) => c.visibilityState === 'visible' && c.focused)) return;
-    }
+    if (!isCall && await appInFront()) return;
     await self.registration.showNotification(title, options);
     try {
       if (typeof data.badgeCount === 'number' && self.navigator.setAppBadge) await self.navigator.setAppBadge(data.badgeCount);
     } catch { /* badges are optional */ }
+
+    if (!isCall || !data.tag) return;
+    // keep "ringing" while the call notification is still on screen
+    const until = Date.now() + RING_FOR_MS;
+    while (Date.now() + RING_EVERY_MS < until) {
+      await sleep(RING_EVERY_MS);
+      if (await appInFront()) break;                                   // the app took over with its own ringer
+      const still = await self.registration.getNotifications({ tag: data.tag });
+      if (!still.length) break;                                        // answered, declined or swiped away
+      await self.registration.showNotification(title, { ...options, timestamp: Date.now() });
+    }
+    // the call stopped ringing: remove the stale "incoming call" so it cannot be tapped minutes later
+    (await self.registration.getNotifications({ tag: data.tag })).forEach((n) => n.close());
   })());
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'decline') return;     // dismissed from the notification: nothing to open
   // Only ever open this app's own pages
   let target;
   try {
