@@ -1,0 +1,42 @@
+/* ====================================================================
+   FINANCE — toolbar, lists, invoice editor, totals. Mobile first.
+   ==================================================================== */
+.fin-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-3) 0; }
+.fin-toolbar .form-control { height: 36px; width: auto; min-width: 130px; }
+.fin-toolbar input[type="search"] { flex: 1; min-width: 160px; }
+
+.fin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-4); }
+.fin-plan { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); font-size: var(--text-xs); }
+.fin-plan.inactive { opacity: .55; }
+
+.fin-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-3); }
+
+.fin-items { display: flex; flex-direction: column; gap: var(--space-2); }
+.fin-item { display: grid; grid-template-columns: 1fr 1fr 70px 100px 70px 70px 100px 32px; gap: 6px; align-items: end; padding: var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); }
+.fin-item label { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--text-dim); }
+.fin-item input { height: 34px; }
+.fin-line-total { text-align: right; padding-bottom: 8px; font-weight: 600; }
+
+.fin-totals { display: flex; flex-direction: column; gap: 4px; margin-left: auto; width: min(340px, 100%); font-size: var(--text-xs); }
+.fin-totals > div { display: flex; justify-content: space-between; gap: var(--space-3); }
+.fin-totals b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.fin-totals-main { padding: 8px 10px; margin-top: 4px; border-radius: var(--radius-lg); background: color-mix(in srgb, #e01b28 10%, transparent); color: #e01b28; font-size: var(--text-sm) !important; font-weight: 700; }
+
+.fin-pay { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: var(--text-xs); }
+.fin-pay b { margin-left: auto; }
+.fin-pay.reversed { opacity: .5; text-decoration: line-through; }
+.fin-pay.reversed .badge { text-decoration: none; }
+
+/* phones: the invoice table becomes cards */
+@media (max-width: 767px) {
+  .fin-table thead { display: none; }
+  .fin-table, .fin-table tbody, .fin-table tr, .fin-table td { display: block; width: 100%; }
+  .fin-table tr { padding: var(--space-3); margin-bottom: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--studio-900); }
+  .fin-table td { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: 3px 0 !important; border: 0 !important; text-align: right !important; }
+  .fin-table td[data-label]::before { content: attr(data-label); color: var(--text-dim); font-size: 11px; text-align: left; }
+  .fin-table td:last-child { justify-content: flex-end; padding-top: var(--space-2) !important; }
+  .fin-item { grid-template-columns: 1fr 1fr; }
+  .fin-item input[data-f^="description"] { grid-column: 1 / -1; }
+  .fin-line-total { grid-column: 1 / 2; text-align: left; }
+  .fin-toolbar .form-control, .fin-toolbar .btn { flex: 1 1 140px; }
+}

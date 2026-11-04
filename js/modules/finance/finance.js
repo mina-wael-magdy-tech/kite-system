@@ -5,13 +5,22 @@
 
 import { Realtime } from '../../services/realtime-service.js';
 import { getSupabase } from '../../supabase-client.js';
-import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
 import { Api } from '../../services/api.js';
+import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
 import { formatExpenseStatusBadge } from '../../utils/formatters.js';
+import { loadBase, egp } from './fin-util.js';
+import { InvoicesTab } from './tabs/invoices.js';
+import { ClientsTab } from './tabs/clients.js';
+import { SettingsTab } from './tabs/settings.js';
 
-import { Money } from '../../services/money.js';
+const TABS = [
+  { id: 'invoices', label: 'Invoices', icon: 'receipt' },
+  { id: 'clients', label: 'Clients & retainers', icon: 'repeat' },
+  { id: 'expenses', label: 'Expenses', icon: 'wallet' },
+  { id: 'settings', label: 'Settings', icon: 'settings' }
+];
 
 export class FinanceModule {
   constructor(app) {
@@ -21,108 +30,118 @@ export class FinanceModule {
     this.departments = [];
   }
 
-  async render(container) {
-    if (!Money.canSee()) {
+  async render(container, query = '') {
+    if (!Money.canFinance()) {
       container.innerHTML = `<div class="page-container"><div class="empty-state"><div class="empty-state-icon"><i data-lucide="lock"></i></div>
-        <div class="empty-state-title">Owner and CEO only</div><div class="empty-state-desc">Finance is only available to the owner or CEO.</div></div></div>`;
+        <div class="empty-state-title">Finance team only</div><div class="empty-state-desc">Finance is available to the owner, the finance manager and the accountant.</div></div></div>`;
       return;
     }
-    const isFinanceOrAdmin = Permissions.isAdmin() || Permissions.hasRole('finance_manager');
+    const wanted = new URLSearchParams(query || '').get('tab');
+    this.tab = TABS.some(t => t.id === wanted) ? wanted : (this.tab || 'invoices');
 
     container.innerHTML = `
       <div class="page-container animate-fade-in">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4);">
-          <div>
-            <h1 class="font-display font-bold text-xl text-white">Finance & Operational Budgets</h1>
-            <p class="text-xs text-muted" style="margin-top: 2px;">
-              Submit expense claims and review approvals.
-            </p>
-          </div>
-
-          <div style="display: flex; gap: var(--space-2);">
-            <button type="button" class="btn btn-primary btn-sm" id="btnSubmitExpense">
-              <i data-lucide="receipt"></i> Submit Expense
-            </button>
-          </div>
+        <div>
+          <h1 class="font-display font-bold text-xl text-white">Finance & Operational Budgets</h1>
+          <p class="text-xs text-muted" style="margin-top: 2px;">Invoices, retainers, expenses and company finance settings. All figures in EGP.</p>
         </div>
 
-        <!-- Budget & Expense KPI Cards -->
         <div class="kpi-grid">
-          ${isFinanceOrAdmin ? `
-          <div class="stat-card border-indigo">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Annual Budget</span>
-              <span class="badge badge-indigo">FY ${new Date().getFullYear()}</span>
-            </div>
-            <div class="stat-card-value font-mono" id="kpiBudget">—</div>
-            <div class="stat-card-footer">Sum of budgets recorded for this fiscal year</div>
-          </div>
-
-          <div class="stat-card border-emerald">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Client Invoices Paid</span>
-              <span class="badge badge-emerald">Receivables</span>
-            </div>
-            <div class="stat-card-value font-mono" id="kpiInvoicesPaid">—</div>
-            <div class="stat-card-footer">Total of paid receivable invoices</div>
-          </div>
-          ` : ''}
-
-          <div class="stat-card border-amber">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Pending Expense Approvals</span>
-              <span class="badge badge-amber">Sign-Off</span>
-            </div>
-            <div class="stat-card-value" id="kpiPendingExpenses">0</div>
-            <div class="stat-card-footer">Awaiting finance review</div>
-          </div>
-
-          ${isFinanceOrAdmin ? `
-          <div class="stat-card border-sky">
-            <div class="stat-card-header">
-              <span class="stat-card-label">Vendor Payables</span>
-              <span class="badge badge-sky">Suppliers</span>
-            </div>
-            <div class="stat-card-value font-mono" id="kpiPayables">—</div>
-            <div class="stat-card-footer">Unpaid payable invoices</div>
-          </div>
-          ` : ''}
+          <div class="stat-card border-sky"><div class="stat-card-header"><span class="stat-card-label">Outstanding</span><span class="badge badge-sky">Receivables</span></div>
+            <div class="stat-card-value font-mono" id="kpiOutstanding">—</div><div class="stat-card-footer">Unpaid balance on issued invoices</div></div>
+          <div class="stat-card border-rose"><div class="stat-card-header"><span class="stat-card-label">Overdue</span><span class="badge badge-rose">Past due date</span></div>
+            <div class="stat-card-value font-mono" id="kpiOverdue">—</div><div class="stat-card-footer">Needs a reminder or a call</div></div>
+          <div class="stat-card border-emerald"><div class="stat-card-header"><span class="stat-card-label">Collected this month</span><span class="badge badge-emerald">Payments</span></div>
+            <div class="stat-card-value font-mono" id="kpiCollected">—</div><div class="stat-card-footer">Payments received, reversals excluded</div></div>
+          <div class="stat-card border-amber"><div class="stat-card-header"><span class="stat-card-label">Pending expense approvals</span><span class="badge badge-amber">Sign-off</span></div>
+            <div class="stat-card-value" id="kpiPendingExpenses">0</div><div class="stat-card-footer">Awaiting finance review</div></div>
         </div>
 
-        <!-- Expense Claims Table -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Studio Expense Submissions</div>
-            <span class="badge badge-slate" id="expenseCountBadge">0 Records</span>
-          </div>
-          <div class="card-body" style="padding: 0;">
-            <div class="table-responsive" style="border: none; border-radius: 0;">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Title & Category</th>
-                    <th>Submitted By</th>
-                    <th>Department</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                    <th>Date</th>
-                    ${isFinanceOrAdmin ? '<th style="text-align: right;">Approval Action</th>' : ''}
-                  </tr>
-                </thead>
-                <tbody id="expensesTableBody">
-                  <tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">Loading expenses...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <div class="tabs-nav" role="tablist" id="finTabs">
+          ${TABS.map(t => `<button type="button" class="tab-btn ${t.id === this.tab ? 'active' : ''}" role="tab" data-tab="${t.id}"><i data-lucide="${t.icon}"></i> ${t.label}</button>`).join('')}
         </div>
+        <div id="financePanel"></div>
       </div>
     `;
+    document.querySelectorAll('#finTabs [data-tab]').forEach(b => b.addEventListener('click', () => this.showTab(b.dataset.tab)));
+    if (window.lucide) window.lucide.createIcons();
 
-    document.getElementById('btnSubmitExpense')?.addEventListener('click', () => this.openExpenseModal());
+    try { await this.reloadBase(); } catch (err) {
+      document.getElementById('financePanel').innerHTML = `<div class="alert alert-error">Could not load finance data: ${escapeHTML(err.message || 'unknown error')}. Has migration 017 been applied?</div>`;
+      return;
+    }
+    await this.showTab(this.tab);
+    this.refreshKpis();
+    Realtime.watch(['invoices', 'invoice_payments', 'retainer_plans', 'client_billing', 'expenses'], async () => {
+      await this.current?.load?.();
+      this.refreshKpis();
+    });
+  }
 
-    await this.loadFinanceData();
-    Realtime.watch(['expenses', 'invoices', 'budgets'], () => this.loadFinanceData()); // live updates for everyone
+  async reloadBase() { this.base = await loadBase(); }
+
+  async showTab(id) {
+    this.tab = id;
+    document.querySelectorAll('#finTabs [data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+    const panel = document.getElementById('financePanel');
+    if (!panel) return;
+    const Tab = { invoices: InvoicesTab, clients: ClientsTab, settings: SettingsTab }[id];
+    this.current = Tab ? new Tab(this) : null;
+    if (this.current) {
+      panel.innerHTML = this.current.html();
+      if (window.lucide) window.lucide.createIcons();
+      await this.current.mount();
+    } else {
+      panel.innerHTML = this.expensesHtml();
+      document.getElementById('btnSubmitExpense')?.addEventListener('click', () => this.openExpenseModal());
+      await this.loadFinanceData();
+    }
+  }
+
+  /** "Invoice" button on a client card: open the editor with that client already chosen. */
+  async newInvoiceFor(clientId) {
+    await this.showTab('invoices');
+    this.current.openEditor(null, { client_id: clientId });
+  }
+
+  async refreshKpis() {
+    const sb = getSupabase();
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    try {
+      const monthStart = new Date().toISOString().slice(0, 7) + '-01';
+      const [inv, pay] = await Promise.all([
+        sb.from('invoices').select('balance, status').in('status', ['sent', 'partially_paid', 'overdue']),
+        sb.from('invoice_payments').select('amount').gte('paid_on', monthStart).is('reversed_at', null)
+      ]);
+      if (inv.error || pay.error) throw (inv.error || pay.error);
+      const sum = (rows, k) => (rows || []).reduce((a, r) => a + (Number(r[k]) || 0), 0);
+      set('kpiOutstanding', egp(sum(inv.data, 'balance')));
+      set('kpiOverdue', egp(sum((inv.data || []).filter(i => i.status === 'overdue'), 'balance')));
+      set('kpiCollected', egp(sum(pay.data, 'amount')));
+    } catch (err) {
+      console.warn('Finance KPIs:', err);
+      ['kpiOutstanding', 'kpiOverdue', 'kpiCollected'].forEach(id => set(id, 'n/a'));
+    }
+  }
+
+  expensesHtml() {
+    const isFinanceOrAdmin = Money.canFinance();
+    return `
+      <div style="display: flex; justify-content: flex-end; margin-bottom: var(--space-3);">
+        <button type="button" class="btn btn-primary btn-sm" id="btnSubmitExpense"><i data-lucide="receipt"></i> Submit Expense</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Studio Expense Submissions</div><span class="badge badge-slate" id="expenseCountBadge">0 Records</span></div>
+        <div class="card-body" style="padding: 0;">
+          <div class="table-responsive" style="border: none; border-radius: 0;">
+            <table class="data-table">
+              <thead><tr><th>Title & Category</th><th>Submitted By</th><th>Department</th><th>Amount</th><th>Status</th><th>Date</th>
+                ${isFinanceOrAdmin ? '<th style="text-align: right;">Approval Action</th>' : ''}</tr></thead>
+              <tbody id="expensesTableBody"><tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">Loading expenses...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
   }
 
   async loadFinanceData() {
@@ -147,32 +166,9 @@ export class FinanceModule {
       if (error) throw error;
       this.expenses = expenses || [];
       this.renderExpensesTable();
-      await this.loadTotals();
     } catch (err) {
       console.warn('Finance data fetch error:', err);
       this.renderExpensesTable();
-    }
-  }
-
-  // Real figures from the database. Only finance/admin can read these tables (RLS).
-  async loadTotals() {
-    if (!(Permissions.isAdmin() || Permissions.hasRole('finance_manager'))) return;
-    const supabase = getSupabase();
-    const sum = (rows, key) => (rows || []).reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
-    const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = formatCurrency(value); };
-    try {
-      const year = new Date().getFullYear();
-      const [{ data: budgets, error: e1 }, { data: invoices, error: e2 }] = await Promise.all([
-        supabase.from('budgets').select('amount').eq('fiscal_year', year),
-        supabase.from('invoices').select('type, status, total')
-      ]);
-      if (e1 || e2) throw (e1 || e2);
-      set('kpiBudget', sum(budgets, 'amount'));
-      set('kpiInvoicesPaid', sum((invoices || []).filter(i => i.type === 'receivable' && i.status === 'paid'), 'total'));
-      set('kpiPayables', sum((invoices || []).filter(i => i.type === 'payable' && ['draft', 'sent', 'overdue'].includes(i.status)), 'total'));
-    } catch (err) {
-      console.warn('Finance totals error:', err);
-      ['kpiBudget', 'kpiInvoicesPaid', 'kpiPayables'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = 'n/a'; });
     }
   }
 
@@ -190,7 +186,7 @@ export class FinanceModule {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No expense claims yet.</td></tr>';
       return;
     }
-    const isFinanceOrAdmin = Permissions.isAdmin() || Permissions.hasRole('finance_manager');
+    const isFinanceOrAdmin = Money.canFinance();
 
     tbody.innerHTML = displayExpenses.map(e => `
       <tr>

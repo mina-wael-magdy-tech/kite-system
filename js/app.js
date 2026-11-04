@@ -12,6 +12,7 @@ import { PWA } from './pwa.js';
 import { Push } from './services/push-service.js';
 import { Toast } from './services/toast-service.js';
 import { Calls } from './services/call-service.js';
+import { Money } from './services/money.js';
 import { infoDialog } from './ui/dialogs.js';
 import { getInitials, getAccentHex, escapeHTML, formatRelativeTime } from './utils/helpers.js';
 
@@ -140,9 +141,9 @@ class PulseStudioApp {
     if (adminNavGroup) adminNavGroup.style.display = isAdmin ? 'block' : 'none';
     const bcNav = document.getElementById('broadcastNavItem');
     if (bcNav) bcNav.style.display = canBroadcast() ? 'flex' : 'none';
-    // money is for the owner / CEO only
+    // finance: owner / CEO, finance manager and accountant (payroll inside it stays owner-only)
     const finNav = document.getElementById('financeNavItem');
-    if (finNav) finNav.style.display = canBroadcast() ? 'flex' : 'none';
+    if (finNav) finNav.style.display = Money.canFinance() ? 'flex' : 'none';
     if (menuAdminLink) menuAdminLink.style.display = isAdmin ? 'flex' : 'none';
   }
 

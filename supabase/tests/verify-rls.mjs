@@ -246,5 +246,248 @@ console.log('non-predicate functions in public:', fns.rows.map(x => x.proname).j
 const nopol = await db.query(`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN (SELECT tablename FROM pg_policies WHERE schemaname='public') ORDER BY 1`);
 console.log('tables with RLS but no policy (service-only):', nopol.rows.map(x => x.tablename).join(', '));
 
+
+// ===================================================================================================
+// FINANCE (migration 017): invoice totals, numbering, payments, retainers, audit, access
+// ===================================================================================================
+// legacy rows that exist BEFORE the migration must be kept and migrated in place
+await db.query(`INSERT INTO public.invoices(id,invoice_number,type,amount,tax,total,status,due_date,paid_date) VALUES
+  ('aaaaaaaa-0000-0000-0000-000000000001','OLD-1','receivable',1000,140,1140,'paid','2026-01-31','2026-01-20'),
+  ('aaaaaaaa-0000-0000-0000-000000000002','OLD-2','receivable',500,0,500,'cancelled','2026-01-31',NULL),
+  ('aaaaaaaa-0000-0000-0000-000000000003','OLD-3','receivable',2000,280,2280,'sent','2099-01-31',NULL)`);
+
+{
+  const sql017 = fs.readFileSync(M + 'migrations/017_finance_invoicing.sql', 'utf8');
+  try { await db.exec(sql017); console.log('OK    migrations/017_finance_invoicing.sql'); }
+  catch (e) { console.log('FAIL  017 ->', e.message); process.exit(1); }
+  try { await db.exec(sql017); check('017 can be run twice', true); } catch (e) { check('017 can be run twice', false, e.message); }
+}
+
+const fq = async (sql, params = []) => { try { return { rows: (await db.query(sql, params)).rows }; } catch (e) { return { error: e.message }; } };
+const num = (v) => Number(v);
+const CLIENT = 'cccccccc-0000-0000-0000-000000000001';
+await db.query(`INSERT INTO public.clients(id,name,company_name) VALUES ($1,'Nour','Al Nour Marketing')`, [CLIENT]);
+
+// ---- migration of the old data
+let r2 = await fq(`SELECT invoice_number, status, subtotal, vat_amount, total, amount_paid, balance, kind,
+  (SELECT count(*)::int FROM public.invoice_items i WHERE i.invoice_id = v.id) items,
+  (SELECT count(*)::int FROM public.invoice_payments p WHERE p.invoice_id = v.id) pays FROM public.invoices v WHERE invoice_number LIKE 'OLD-%' ORDER BY 1`);
+const old = Object.fromEntries(r2.rows.map(x => [x.invoice_number, x]));
+check('legacy paid invoice kept: paid, balance 0, one line, one payment', old['OLD-1'].status === 'paid' && num(old['OLD-1'].total) === 1140 && num(old['OLD-1'].balance) === 0 && old['OLD-1'].items === 1 && old['OLD-1'].pays === 1, JSON.stringify(old['OLD-1']));
+check('legacy cancelled invoice becomes void', old['OLD-2'].status === 'void', JSON.stringify(old['OLD-2']));
+check('legacy open invoice keeps its balance', old['OLD-3'].status === 'sent' && num(old['OLD-3'].balance) === 2280, JSON.stringify(old['OLD-3']));
+r2 = await fq(`SELECT (SELECT count(*)::int FROM finance_backup.invoices_pre017) n`);
+check('old invoices were backed up before migrating', r2.rows[0].n === 3, JSON.stringify(r2));
+
+// ---- line maths (half-up, per line)
+r2 = await fq(`SELECT * FROM public.fin_calc_line(3, 3250.50, 10, 14)`);
+check('line: 3 x 3250.50, 10% off, 14% VAT = 10005.04', num(r2.rows[0].gross) === 9751.5 && num(r2.rows[0].discount) === 975.15 && num(r2.rows[0].net) === 8776.35 && num(r2.rows[0].vat) === 1228.69 && num(r2.rows[0].total) === 10005.04, JSON.stringify(r2));
+r2 = await fq(`SELECT vat FROM public.fin_calc_line(1, 1.25, 0, 14)`);
+check('rounding is half-up (1.25 x 14% = 0.175 -> 0.18, not 0.17)', num(r2.rows[0].vat) === 0.18, JSON.stringify(r2));
+r2 = await fq(`SELECT gross FROM public.fin_calc_line(1, 0.125, 0, 0)`);
+check('rounding is half-up (0.125 -> 0.13)', num(r2.rows[0].gross) === 0.13, JSON.stringify(r2));
+r2 = await fq(`SELECT vat, total FROM public.fin_calc_line(1, 0.35, 0, 14)`);
+check('small amounts: 0.35 + 14% VAT = 0.05 VAT, 0.40 total', num(r2.rows[0].vat) === 0.05 && num(r2.rows[0].total) === 0.4, JSON.stringify(r2));
+
+// ---- an invoice: the same numbers as the Arabic sample invoice
+const items = [
+  { description_en: 'Brand identity', description_ar: 'تصميم هوية بصرية', quantity: 1, unit_price: 12500 },
+  { description_en: 'Social ads', description_ar: 'إدارة حملة إعلانية', quantity: 1, unit_price: 8000 },
+  { description_en: 'WordPress site', quantity: 2, unit_price: 3250.5 },
+];
+const save = (extra = {}, its = items) => fq(`SELECT public.fin_invoice_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, kind: 'project', withholding_rate: 1, items: its, ...extra })]);
+let s1 = await save();
+check('invoice saves as a draft', !s1.error && s1.rows[0].id, JSON.stringify(s1));
+const inv1 = s1.rows[0].id;
+r2 = await fq(`SELECT invoice_number, status, subtotal, vat_amount, withholding_amount, total, net_receivable, balance FROM public.invoices WHERE id=$1`, [inv1]);
+let i1 = r2.rows[0];
+check('draft has a placeholder number', /^DRAFT-/.test(i1.invoice_number) && i1.status === 'draft', JSON.stringify(i1));
+check('subtotal 27001.00, VAT 3780.14, withholding 270.01, total 30781.14, net receivable 30511.13',
+  num(i1.subtotal) === 27001 && num(i1.vat_amount) === 3780.14 && num(i1.withholding_amount) === 270.01 && num(i1.total) === 30781.14 && num(i1.net_receivable) === 30511.13, JSON.stringify(i1));
+
+r2 = await save({ id: inv1 }, [{ description_en: 'Only line', quantity: 1, unit_price: 100, vat_rate: 0 }]);
+r2 = await fq(`SELECT total, (SELECT count(*)::int FROM public.invoice_items WHERE invoice_id=$1) n FROM public.invoices WHERE id=$1`, [inv1]);
+check('re-saving a draft replaces its lines and totals', num(r2.rows[0].total) === 100 && r2.rows[0].n === 1, JSON.stringify(r2));
+await save({ id: inv1 });
+
+r2 = await save({}, [{ description_en: 'x', quantity: 0, unit_price: 5 }]);
+check('zero quantity is rejected', !!r2.error && /quantity/i.test(r2.error), JSON.stringify(r2));
+r2 = await save({}, [{ description_en: 'x', quantity: 1, unit_price: -5 }]);
+check('negative price is rejected', !!r2.error && /negative/i.test(r2.error), JSON.stringify(r2));
+r2 = await save({}, [{ description_en: 'x', quantity: 1, unit_price: 5, discount_pct: 150 }]);
+check('discount over 100% is rejected', !!r2.error && /discount/i.test(r2.error), JSON.stringify(r2));
+r2 = await save({}, [{ quantity: 1, unit_price: 5 }]);
+check('a line without a description is rejected', !!r2.error, JSON.stringify(r2));
+r2 = await save({ due_date: '2000-01-01', issue_date: '2026-01-01' });
+check('due date before issue date is rejected', !!r2.error && /due date/i.test(r2.error), JSON.stringify(r2));
+
+// ---- client billing profile drives the withholding rate
+await db.query(`SELECT public.fin_billing_save($1, $2::jsonb)`, [U.admin, JSON.stringify({ client_id: CLIENT, billing_type: 'retainer', withholding_rate: 3, payment_terms_days: 45 })]);
+r2 = await fq(`SELECT public.fin_invoice_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, items: [{ description_en: 'a', quantity: 1, unit_price: 1000 }] })]);
+r2 = await fq(`SELECT withholding_rate, withholding_amount, issue_date, due_date FROM public.invoices WHERE id=$1`, [r2.rows[0].id]);
+check('client withholding rate (3%) and 45-day terms are applied by default', num(r2.rows[0].withholding_rate) === 3 && num(r2.rows[0].withholding_amount) === 30 && (new Date(r2.rows[0].due_date) - new Date(r2.rows[0].issue_date)) / 86400000 === 45, JSON.stringify(r2));
+
+// ---- issuing and sequential numbers
+let r3 = await fq(`SELECT public.fin_invoice_issue($1, $2) n`, [U.admin, inv1]);
+check('issuing gives KITE-<year>-0001', !r3.error && /^KITE-\d{4}-0001$/.test(r3.rows[0].n), JSON.stringify(r3));
+const zero = (await save({}, [{ description_en: 'free', quantity: 1, unit_price: 0 }])).rows[0].id;
+r3 = await fq(`SELECT public.fin_invoice_issue($1, $2)`, [U.admin, zero]);
+check('a zero-value invoice cannot be issued', !!r3.error && /greater than zero/.test(r3.error), JSON.stringify(r3));
+const inv2 = (await save()).rows[0].id;
+r3 = await fq(`SELECT public.fin_invoice_issue($1, $2) n`, [U.admin, inv2]);
+check('the failed issue did not burn a number: next is 0002', !r3.error && /-0002$/.test(r3.rows[0].n), JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_invoice_issue($1, $2)`, [U.admin, inv2]);
+check('an issued invoice cannot be issued again', !!r3.error, JSON.stringify(r3));
+
+// ---- issued invoices are frozen
+r3 = await save({ id: inv1 });
+check('an issued invoice cannot be edited through the save function', !!r3.error && /draft/i.test(r3.error), JSON.stringify(r3));
+r3 = await fq(`UPDATE public.invoices SET total = 1 WHERE id=$1`, [inv1]);
+check('totals of an issued invoice cannot be changed by SQL', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`UPDATE public.invoice_items SET unit_price = 1 WHERE invoice_id=$1`, [inv1]);
+check('lines of an issued invoice cannot be changed', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`DELETE FROM public.invoices WHERE id=$1`, [inv1]);
+check('invoices can never be deleted', !!r3.error, JSON.stringify(r3));
+
+// ---- payments
+r3 = await fq(`SELECT public.fin_payment_add($1, $2, 10000, current_date, 'bank_transfer', 'TX1', NULL) id`, [U.admin, inv1]);
+const pay1 = r3.rows?.[0]?.id;
+r3 = await fq(`SELECT status, amount_paid, balance FROM public.invoices WHERE id=$1`, [inv1]);
+check('part payment -> partially_paid, balance 20511.13', r3.rows[0].status === 'partially_paid' && num(r3.rows[0].amount_paid) === 10000 && num(r3.rows[0].balance) === 20511.13, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_add($1, $2, 30000, current_date, 'cash', NULL, NULL)`, [U.admin, inv1]);
+check('overpayment is rejected', !!r3.error && /more than the balance/.test(r3.error), JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_add($1, $2, 5, current_date + 3, 'cash', NULL, NULL)`, [U.admin, inv1]);
+check('a payment dated in the future is rejected', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_add($1, $2, 0, current_date, 'cash', NULL, NULL)`, [U.admin, inv1]);
+check('a zero payment is rejected', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_add($1, $2, 20511.13, current_date, 'cash', NULL, NULL) id`, [U.admin, inv1]);
+r3 = await fq(`SELECT status, balance, paid_date FROM public.invoices WHERE id=$1`, [inv1]);
+check('paying the balance -> paid', r3.rows[0].status === 'paid' && num(r3.rows[0].balance) === 0 && !!r3.rows[0].paid_date, JSON.stringify(r3));
+r3 = await fq(`UPDATE public.invoice_payments SET amount = 1 WHERE id=$1`, [pay1]);
+check('a payment cannot be edited', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`DELETE FROM public.invoice_payments WHERE id=$1`, [pay1]);
+check('a payment cannot be deleted', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_invoice_void($1, $2, 'oops')`, [U.admin, inv1]);
+check('an invoice with live payments cannot be voided', !!r3.error && /Reverse the payments/.test(r3.error), JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_reverse($1, $2, '')`, [U.admin, pay1]);
+check('reversing needs a reason', !!r3.error, JSON.stringify(r3));
+await db.query(`SELECT public.fin_payment_reverse($1, $2, 'bounced cheque')`, [U.admin, pay1]);
+r3 = await fq(`SELECT status, amount_paid, balance FROM public.invoices WHERE id=$1`, [inv1]);
+check('reversing a payment re-opens the invoice (partially_paid, balance 10000 + 10511.13...)', r3.rows[0].status === 'partially_paid' && num(r3.rows[0].amount_paid) === 20511.13 && num(r3.rows[0].balance) === 10000, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_reverse($1, $2, 'again')`, [U.admin, pay1]);
+check('a payment can only be reversed once', !!r3.error, JSON.stringify(r3));
+
+// ---- void
+const live = await fq(`SELECT id FROM public.invoice_payments WHERE invoice_id=$1 AND reversed_at IS NULL`, [inv1]);
+for (const p of live.rows) await db.query(`SELECT public.fin_payment_reverse($1, $2, 'cleanup')`, [U.admin, p.id]);
+r3 = await fq(`SELECT public.fin_invoice_void($1, $2, '')`, [U.admin, inv1]);
+check('voiding needs a reason', !!r3.error, JSON.stringify(r3));
+await db.query(`SELECT public.fin_invoice_void($1, $2, 'issued to the wrong client')`, [U.admin, inv1]);
+r3 = await fq(`SELECT status, invoice_number, void_reason FROM public.invoices WHERE id=$1`, [inv1]);
+check('void keeps the invoice and its number', r3.rows[0].status === 'void' && /-0001$/.test(r3.rows[0].invoice_number) && !!r3.rows[0].void_reason, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_payment_add($1, $2, 1, current_date, 'cash', NULL, NULL)`, [U.admin, inv1]);
+check('no payment on a void invoice', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`UPDATE public.invoices SET notes = 'x' WHERE id=$1`, [inv1]);
+check('a void invoice is frozen', !!r3.error, JSON.stringify(r3));
+
+// ---- overdue
+const late = (await save({ issue_date: '2026-01-01', due_date: '2026-01-31' })).rows[0].id;
+await db.query(`SELECT public.fin_invoice_issue($1, $2)`, [U.admin, late]);
+r3 = await fq(`SELECT status FROM public.invoices WHERE id=$1`, [late]);
+check('an unpaid invoice past its due date is overdue', r3.rows[0].status === 'overdue', JSON.stringify(r3));
+await db.query(`SELECT public.fin_payment_add($1, $2, 100, '2026-02-01', 'cash', NULL, NULL)`, [U.admin, late]);
+r3 = await fq(`SELECT status FROM public.invoices WHERE id=$1`, [late]);
+check('a part-paid invoice past its due date stays overdue', r3.rows[0].status === 'overdue', JSON.stringify(r3));
+
+// ---- retainers: one invoice per plan per month
+r3 = await fq(`SELECT public.fin_plan_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, name: 'Social media retainer', monthly_fee: 5000, start_date: '2026-01-01', billing_day: 5 })]);
+check('retainer plan saves', !r3.error, JSON.stringify(r3));
+const plan = r3.rows[0].id;
+r3 = await fq(`SELECT public.fin_retainer_generate($1, '2026-03-17') n`, [U.admin]);
+check('retainer run creates one draft for the month', r3.rows[0].n === 1, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_retainer_generate($1, '2026-03-02') n`, [U.admin]);
+check('running it again creates nothing (no double billing)', r3.rows[0].n === 0, JSON.stringify(r3));
+r3 = await fq(`SELECT kind, status, period_month, issue_date, subtotal, vat_amount FROM public.invoices WHERE retainer_plan_id=$1`, [plan]);
+check('retainer invoice: draft, kind retainer, 5000 + 14% VAT, billing day 5', r3.rows.length === 1 && r3.rows[0].kind === 'retainer' && r3.rows[0].status === 'draft' && num(r3.rows[0].subtotal) === 5000 && num(r3.rows[0].vat_amount) === 700 && new Date(r3.rows[0].issue_date).getUTCDate() === 5, JSON.stringify(r3));
+r3 = await fq(`SELECT public.fin_retainer_generate($1, '2025-12-10') n`, [U.admin]);
+check('a month before the plan started gets no invoice', r3.rows[0].n === 0, JSON.stringify(r3));
+await db.query(`UPDATE public.retainer_plans SET is_active = false WHERE id=$1`, [plan]);
+r3 = await fq(`SELECT public.fin_retainer_generate($1, '2026-04-10') n`, [U.admin]);
+check('an inactive plan is not billed', r3.rows[0].n === 0, JSON.stringify(r3));
+
+// ---- audit trail
+r3 = await fq(`SELECT count(*)::int n, count(*) FILTER (WHERE actor = $1)::int by_admin FROM public.finance_audit_log WHERE table_name IN ('invoices','invoice_items','invoice_payments')`, [U.admin]);
+check('every invoice / line / payment change is in the audit log with the actor', r3.rows[0].n > 20 && r3.rows[0].by_admin > 20, JSON.stringify(r3));
+r3 = await fq(`SELECT count(*)::int n FROM public.finance_audit_log WHERE table_name='invoices' AND row_id=$1 AND action='UPDATE' AND new_data->>'status'='void'`, [inv1]);
+check('the void is in the audit log', r3.rows[0].n === 1, JSON.stringify(r3));
+r3 = await fq(`UPDATE public.finance_audit_log SET actor = NULL`);
+check('the audit log cannot be edited', !!r3.error, JSON.stringify(r3));
+r3 = await fq(`DELETE FROM public.finance_audit_log`);
+check('the audit log cannot be deleted', !!r3.error, JSON.stringify(r3));
+
+
+// ---- the browser's invoice preview must equal the server to the cent (random invoices, same formula, exact integers)
+{
+  const mm = await import(new URL('../../js/modules/finance/money-math.mjs', import.meta.url).href);
+  let seed = 12345; const rnd = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+  const pick = (max, dec) => Number((rnd() * max).toFixed(dec));
+  let bad = 0, first = '';
+  for (let n = 0; n < 400; n++) {
+    const its = Array.from({ length: 1 + Math.floor(rnd() * 4) }, () => ({
+      quantity: Math.max(0.001, pick(30, 3)), unit_price: pick(50000, 2), discount_pct: rnd() < 0.4 ? pick(100, 2) : 0, vat_rate: rnd() < 0.8 ? 14 : pick(30, 2) }));
+    const wht = [0, 1, 3, 5][Math.floor(rnd() * 4)];
+    const js = mm.calcTotals(its, wht);
+    const sql = await db.query(
+      `WITH l AS (SELECT (public.fin_calc_line((x->>'q')::numeric, (x->>'p')::numeric, (x->>'d')::numeric, (x->>'v')::numeric)).* FROM jsonb_array_elements($1::jsonb) x)
+       SELECT sum(net) sub, sum(discount) disc, sum(vat) vat, public.fin_round(sum(net) * $2::numeric / 100) wht, sum(total) total FROM l`,
+      [JSON.stringify(its.map(i => ({ q: i.quantity, p: i.unit_price, d: i.discount_pct, v: i.vat_rate }))), wht]);
+    const r = sql.rows[0];
+    const same = Number(r.sub) === js.subtotal && Number(r.disc) === js.discount && Number(r.vat) === js.vat && Number(r.wht) === js.wht && Number(r.total) === js.total;
+    if (!same) { bad++; if (!first) first = JSON.stringify({ its, wht, js: { s: js.subtotal, d: js.discount, v: js.vat, w: js.wht, t: js.total }, sql: r }); }
+  }
+  check('browser preview == server maths on 400 random invoices', bad === 0, `${bad} differ, e.g. ${first}`);
+}
+
+// ---- who can do what
+r3 = await as('emp', `SELECT count(*)::int c FROM public.invoices`);
+check('an employee sees no invoices', denied(r3) || r3.rows[0].c === 0, JSON.stringify(r3));
+r3 = await as('emp', `SELECT count(*)::int c FROM public.invoice_payments`);
+check('an employee sees no payments', denied(r3) || r3.rows[0].c === 0, JSON.stringify(r3));
+r3 = await as('hr', `SELECT count(*)::int c FROM public.invoices`);
+check('HR sees no invoices', denied(r3) || r3.rows[0].c === 0, JSON.stringify(r3));
+r3 = await as('fin', `SELECT count(*)::int c FROM public.invoices`);
+check('the finance manager sees invoices', !r3.error && r3.rows[0].c >= 5, JSON.stringify(r3));
+r3 = await as('fin', `SELECT count(*)::int c FROM public.clients`);
+check('the finance manager can see every client', !r3.error && r3.rows[0].c >= 1, JSON.stringify(r3));
+r3 = await as('admin', `SELECT count(*)::int c FROM public.finance_audit_log`);
+check('the owner / super admin reads the audit log', !r3.error && r3.rows[0].c > 0, JSON.stringify(r3));
+r3 = await as('emp', `SELECT count(*)::int c FROM public.finance_audit_log`);
+check('an employee cannot read the audit log', denied(r3) || r3.rows[0].c === 0, JSON.stringify(r3));
+r3 = await as('fin', `INSERT INTO public.invoices(invoice_number,type,due_date,status) VALUES ('HACK','receivable',current_date,'paid')`);
+check('even finance cannot insert invoices directly (only through the server functions)', denied(r3), JSON.stringify(r3));
+r3 = await as('fin', `UPDATE public.invoices SET status = 'paid'`);
+check('even finance cannot update invoices directly', denied(r3), JSON.stringify(r3));
+r3 = await as('admin', `DELETE FROM public.invoices`);
+check('even the owner cannot delete invoices', denied(r3), JSON.stringify(r3));
+r3 = await as('emp', `SELECT public.fin_invoice_issue('${U.emp}', '${inv2}')`);
+check('an employee cannot call the finance functions', denied(r3), JSON.stringify(r3));
+r3 = await as('fin', `SELECT public.fin_payment_add('${U.fin}', '${inv2}', 1, current_date, 'cash', NULL, NULL)`);
+check('a signed-in finance user cannot call the write functions directly either', denied(r3), JSON.stringify(r3));
+r3 = await as('fin', `UPDATE public.finance_settings SET vat_rate = 0`);
+check('settings cannot be changed directly', denied(r3), JSON.stringify(r3));
+r3 = await as('emp', `SELECT vat_rate FROM public.finance_settings`);
+check('an employee cannot read finance settings', denied(r3) || r3.rows.length === 0, JSON.stringify(r3));
+r3 = await as('emp', `SELECT count(*)::int c FROM finance_backup.invoices_pre017`);
+check('the backup schema is not reachable from the API roles', denied(r3), JSON.stringify(r3));
+
+
+// ---- the optional demo seed runs cleanly on top of real data
+await db.query(`INSERT INTO public.clients(id,name,company_name) VALUES ('cccccccc-0000-0000-0000-000000000002','Sama','Sama Studio')`);
+try {
+  await db.exec(fs.readFileSync(M + 'seed-finance-demo.sql', 'utf8'));
+  const sd = await db.query(`SELECT count(*)::int n FROM public.invoices WHERE notes IS NULL AND status IN ('draft','sent','partially_paid','paid')`);
+  check('demo seed runs and creates invoices in several states', sd.rows[0].n > 5, JSON.stringify(sd.rows));
+} catch (e) { check('demo seed runs and creates invoices in several states', false, e.message); }
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

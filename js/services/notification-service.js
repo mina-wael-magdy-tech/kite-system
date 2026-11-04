@@ -14,6 +14,7 @@ const BASE_TITLE = document.title;
 /** icon = lucide icon; tone = css colour variable used for the icon bubble. */
 export const NOTIFICATION_TYPES = {
   chat_message:        { icon: 'message-circle', tone: 'var(--kite-blue-400)',  label: 'Chat' },
+  invoice_drafts:      { icon: 'receipt',        tone: 'var(--kite-amber-400)', label: 'Finance' },
   call_incoming:       { icon: 'video',          tone: 'var(--kite-red-500)',   label: 'Calls' },
   task_assigned:       { icon: 'clipboard-check', tone: 'var(--kite-red-500)',   label: 'Tasks' },
   task_status_updated: { icon: 'refresh-cw',      tone: 'var(--kite-amber-400)', label: 'Tasks' },

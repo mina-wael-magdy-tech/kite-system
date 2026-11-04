@@ -8,8 +8,16 @@ import { getSupabase } from '../supabase-client.js';
 import { Permissions } from '../permissions/permission-service.js';
 
 export const OWNER_ROLES = ['owner', 'ceo', 'super_admin'];
+/** finance tier: the owner roles plus the finance manager and the accountant (invoices, expenses, taxes, reports) */
+export const FINANCE_ROLES = [...OWNER_ROLES, 'finance_manager', 'accountant'];
+/** can void invoices / reverse payments / change tax settings */
+export const FINANCE_SENIOR_ROLES = [...OWNER_ROLES, 'finance_manager'];
 
 export const Money = {
+  /** true for the finance tier (owner, CEO, finance manager, accountant) */
+  canFinance() { return FINANCE_ROLES.some(r => Permissions.hasRole(r)); },
+  isSenior() { return FINANCE_SENIOR_ROLES.some(r => Permissions.hasRole(r)); },
+
   /** true for the owner / CEO only */
   canSee() { return OWNER_ROLES.some(r => Permissions.hasRole(r)); },
 
