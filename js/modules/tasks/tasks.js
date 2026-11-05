@@ -14,11 +14,32 @@ import { escapeHTML, formatDate, debounce } from '../../utils/helpers.js';
 import { formatTaskStatusBadge, formatPriorityBadge } from '../../utils/formatters.js';
 import { linkify } from '../../utils/linkify.js';
 import { CONFIG } from '../../config.js';
+import { PAGE_SIZE, fetchPage, mountPager, searchFilter } from '../../ui/pagination.js';
+
+const TASK_SELECT = `
+  *,
+  profiles!tasks_assigned_to_fkey(id, full_name, job_title),
+  creator:profiles!tasks_created_by_fkey(id, full_name),
+  departments!tasks_department_id_fkey(id, name, code),
+  projects(id, name, code)
+`;
+
+const BOARD_COLUMNS = [
+  { id: 'todo', statuses: ['todo'] },
+  { id: 'in_progress', statuses: ['in_progress'] },
+  { id: 'under_review', statuses: ['under_review'] },
+  { id: 'completed', statuses: ['completed', 'approved'] }
+];
 
 export class TasksModule {
   constructor(app) {
     this.app = app;
-    this.tasks = [];
+    this.tasks = [];              // only the rows on screen: a table page, or what each board column has loaded
+    this.tablePage = 1;
+    this.tableTotal = 0;
+    this.columnShown = {};        // board column -> how many cards it has asked for
+    this.columnTotals = {};       // board column -> how many cards exist
+    this.loadSeq = 0;
     this.departments = [];
     this.projects = [];
     this.viewMode = 'kanban'; // 'kanban' or 'table'
@@ -113,6 +134,7 @@ export class TasksModule {
       const field = document.getElementById('taskSearchField');
       if (field) field.value = q;
     }
+    await this.loadLookups();
     await this.loadData();
     Realtime.watch(['tasks', 'task_comments', 'task_attachments', 'task_links'], async () => {
       await this.loadData();
@@ -130,128 +152,142 @@ export class TasksModule {
 
     document.getElementById('taskSearchField')?.addEventListener('input', debounce((e) => {
       this.searchQuery = e.target.value.toLowerCase();
-      this.renderCurrentView();
+      this.reloadFromStart();
     }, 250));
 
     document.getElementById('filterDeptSelect')?.addEventListener('change', (e) => {
       this.selectedDept = e.target.value;
-      this.renderCurrentView();
+      this.reloadFromStart();
     });
 
     document.getElementById('filterPrioritySelect')?.addEventListener('change', (e) => {
       this.selectedPriority = e.target.value;
-      this.renderCurrentView();
+      this.reloadFromStart();
     });
 
     document.getElementById('btnViewKanban')?.addEventListener('click', () => {
       this.viewMode = 'kanban';
       document.getElementById('btnViewKanban')?.classList.add('btn-secondary');
       document.getElementById('btnViewTable')?.classList.remove('btn-secondary');
-      this.renderCurrentView();
+      this.reloadFromStart();
     });
 
     document.getElementById('btnViewTable')?.addEventListener('click', () => {
       this.viewMode = 'table';
       document.getElementById('btnViewTable')?.classList.add('btn-secondary');
       document.getElementById('btnViewKanban')?.classList.remove('btn-secondary');
-      this.renderCurrentView();
+      this.reloadFromStart();
     });
 
     document.getElementById('btnScopeAll')?.addEventListener('click', () => {
       this.scopeFilter = 'all';
-      this.renderCurrentView();
+      this.reloadFromStart();
     });
 
     document.getElementById('btnScopeAssigned')?.addEventListener('click', () => {
       this.scopeFilter = 'assigned';
-      this.renderCurrentView();
+      this.reloadFromStart();
     });
+  }
+
+  /** Departments and projects for the filter and forms. Loaded once per visit, not on every live update. */
+  async loadLookups() {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const [{ data: depts }, { data: projs }] = await Promise.all([
+      supabase.from('departments').select('id, name, code'),
+      supabase.from('projects').select('id, name, code')
+    ]);
+    this.departments = depts || [];
+    this.projects = projs || [];
+    const deptSelect = document.getElementById('filterDeptSelect');
+    if (deptSelect) {
+      deptSelect.innerHTML = `<option value="ALL">All 5 Departments</option>` +
+        this.departments.map(d => `<option value="${d.id}">${escapeHTML(d.name)}</option>`).join('');
+    }
+  }
+
+  /** The filtered, newest-first query. RLS still decides which tasks each person gets. */
+  taskQuery() {
+    let q = getSupabase().from('tasks').select(TASK_SELECT, { count: 'exact' })
+      .order('created_at', { ascending: false }).order('id', { ascending: true });
+    const search = searchFilter(['title', 'description', 'task_number'], this.searchQuery);
+    if (search) q = q.or(search);
+    if (this.selectedDept !== 'ALL') q = q.eq('department_id', this.selectedDept);
+    if (this.selectedPriority !== 'ALL') q = q.eq('priority', this.selectedPriority);
+    if (this.scopeFilter === 'assigned') q = q.eq('assigned_to', this.app.currentUser.id);
+    return q;
+  }
+
+  reloadFromStart() {
+    this.tablePage = 1;
+    this.columnShown = {};
+    return this.loadData();
   }
 
   async loadData() {
     const supabase = getSupabase();
     if (!supabase) return;
+    const seq = ++this.loadSeq;
 
     try {
-      // 1. Fetch departments
-      const { data: depts } = await supabase.from('departments').select('id, name, code');
-      this.departments = depts || [];
+      const load = this.viewMode === 'kanban' ? this.fetchBoard() : this.fetchTablePage();
+      const [apply, count] = await Promise.all([
+        load,
+        supabase.from('tasks').select('id', { count: 'exact', head: true })
+      ]);
+      if (seq !== this.loadSeq) return; // a newer request has taken over
 
-      const deptSelect = document.getElementById('filterDeptSelect');
-      if (deptSelect) {
-        deptSelect.innerHTML = `<option value="ALL">All 5 Departments</option>` +
-          this.departments.map(d => `<option value="${d.id}">${escapeHTML(d.name)}</option>`).join('');
-      }
-
-      // 2. Fetch projects for linking
-      const { data: projs } = await supabase.from('projects').select('id, name, code');
-      this.projects = projs || [];
-
-      // 3. Fetch Tasks (RLS will automatically enforce peer isolation & hierarchy permissions)
-      const { data: tasks, error } = await supabase
-        .from('tasks')
-        .select(`
-          *,
-          profiles!tasks_assigned_to_fkey(id, full_name, job_title),
-          creator:profiles!tasks_created_by_fkey(id, full_name),
-          departments!tasks_department_id_fkey(id, name, code),
-          projects(id, name, code)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      this.tasks = tasks || [];
-
-      // Update badge in sidebar
+      apply();
       const badge = document.getElementById('tasksBadge');
-      if (badge) badge.textContent = String(this.tasks.length);
-
+      if (badge && count.count != null) badge.textContent = String(count.count);
       this.renderCurrentView();
     } catch (err) {
       console.error('Error loading tasks:', err);
-      Toast.error('Could not load tasks from database', 'Fetch Error');
+      if (seq === this.loadSeq) Toast.error('Could not load tasks from database', 'Fetch Error');
     }
   }
 
-  getFilteredTasks() {
-    return this.tasks.filter(t => {
-      // Search
-      if (this.searchQuery) {
-        const titleMatch = t.title.toLowerCase().includes(this.searchQuery);
-        const descMatch = (t.description || '').toLowerCase().includes(this.searchQuery);
-        const numMatch = (t.task_number || '').toLowerCase().includes(this.searchQuery);
-        if (!titleMatch && !descMatch && !numMatch) return false;
-      }
+  /** Each column asks for its own cards, so a long "done" column can't crowd out the others. */
+  async fetchBoard() {
+    const results = await Promise.all(BOARD_COLUMNS.map(async (col) => {
+      const shown = this.columnShown[col.id] || PAGE_SIZE.board;
+      const res = await this.taskQuery().in('status', col.statuses).range(0, shown - 1);
+      if (res.error) throw res.error;
+      return { id: col.id, rows: res.data || [], total: res.count ?? 0 };
+    }));
+    return () => {
+      this.tasks = results.flatMap(r => r.rows);
+      this.columnTotals = Object.fromEntries(results.map(r => [r.id, r.total]));
+    };
+  }
 
-      // Dept
-      if (this.selectedDept !== 'ALL' && t.department_id !== this.selectedDept) {
-        return false;
-      }
+  async fetchTablePage() {
+    const res = await fetchPage(() => this.taskQuery(), this.tablePage, PAGE_SIZE.table);
+    if (res.error) throw res.error;
+    return () => {
+      this.tasks = res.rows;
+      this.tableTotal = res.total;
+      this.tablePage = res.page;
+    };
+  }
 
-      // Priority
-      if (this.selectedPriority !== 'ALL' && t.priority !== this.selectedPriority) {
-        return false;
-      }
-
-      // Scope
-      if (this.scopeFilter === 'assigned' && t.assigned_to !== this.app.currentUser.id) {
-        return false;
-      }
-
-      return true;
-    });
+  /** The task on screen, or from the database if a filter or page change has since taken it off screen. */
+  async taskById(taskId) {
+    const known = this.tasks.find(t => t.id === taskId);
+    if (known) return known;
+    const { data } = await getSupabase().from('tasks').select(TASK_SELECT).eq('id', taskId).maybeSingle();
+    return data || null;
   }
 
   renderCurrentView() {
     const container = document.getElementById('taskContentContainer');
     if (!container) return;
 
-    const filtered = this.getFilteredTasks();
-
     if (this.viewMode === 'kanban') {
-      this.renderKanbanBoard(container, filtered);
+      this.renderKanbanBoard(container, this.tasks);
     } else {
-      this.renderTableView(container, filtered);
+      this.renderTableView(container, this.tasks);
     }
 
     if (window.lucide) window.lucide.createIcons();
@@ -272,6 +308,7 @@ export class TasksModule {
             if (col.id === 'completed') return t.status === 'completed' || t.status === 'approved';
             return t.status === col.id;
           });
+          const total = Math.max(this.columnTotals[col.id] ?? 0, colTasks.length);
 
           return `
             <div class="kanban-column kanban-tone-${col.tone}" data-column="${col.id}">
@@ -280,13 +317,14 @@ export class TasksModule {
                   <span class="kanban-column-dot" style="background-color: ${col.dot};"></span>
                   <span>${col.title}</span>
                 </div>
-                <span class="badge badge-slate kanban-count">${colTasks.length}</span>
+                <span class="badge badge-slate kanban-count">${total}</span>
               </div>
 
               <div class="kanban-tasks-list" data-drop-column="${col.id}">
                 ${colTasks.length === 0 ? `
                   <div class="kanban-empty">Drop a deliverable here</div>
                 ` : colTasks.map(t => this.renderTaskCardHTML(t)).join('')}
+                ${total > colTasks.length ? `<button type="button" class="btn btn-secondary btn-sm kanban-more" data-more-column="${col.id}">Show more (${total - colTasks.length} left)</button>` : ''}
               </div>
             </div>
           `;
@@ -301,6 +339,13 @@ export class TasksModule {
       el.querySelector('.card-act-edit')?.addEventListener('click', (e) => { e.stopPropagation(); this.openTaskEditDialog(taskId); });
       el.querySelector('.card-act-delete')?.addEventListener('click', (e) => { e.stopPropagation(); this.deleteTask(taskId); });
     });
+
+    container.querySelectorAll('[data-more-column]').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.moreColumn;
+      this.columnShown[id] = (this.columnShown[id] || PAGE_SIZE.board) + PAGE_SIZE.board;
+      b.disabled = true;
+      this.loadData();
+    }));
 
     this.bindDragAndDrop(container);
   }
@@ -355,6 +400,9 @@ export class TasksModule {
     if (groupOf(task.status) === columnId) return; // dropped where it already is
 
     const previous = task.status;
+    const totals = { ...this.columnTotals };
+    if (this.columnTotals[groupOf(previous)]) this.columnTotals[groupOf(previous)]--;
+    this.columnTotals[columnId] = (this.columnTotals[columnId] || 0) + 1;
     task.status = columnId;           // optimistic
     this.renderCurrentView();
     try {
@@ -362,6 +410,7 @@ export class TasksModule {
       Toast.success(`Moved ${task.task_number} to ${columnId.replace('_', ' ').toUpperCase()}`, 'Stage updated');
     } catch (err) {
       task.status = previous;         // snap back
+      this.columnTotals = totals;
       this.renderCurrentView();
       Toast.error(err.message || 'Could not move this task', 'Move refused');
     }
@@ -380,7 +429,7 @@ export class TasksModule {
   }
 
   async openTaskEditDialog(taskId) {
-    const t = this.tasks.find(x => x.id === taskId);
+    const t = await this.taskById(taskId);
     if (!t) return;
 
     const supabase = getSupabase();
@@ -435,7 +484,7 @@ export class TasksModule {
   }
 
   async deleteTask(taskId) {
-    const t = this.tasks.find(x => x.id === taskId);
+    const t = await this.taskById(taskId);
     if (!t) return;
     const ok = await confirmDialog({
       title: 'Delete this task?',
@@ -526,7 +575,13 @@ export class TasksModule {
           </tbody>
         </table>
       </div>
+      <div id="taskPager"></div>
     `;
+
+    mountPager(document.getElementById('taskPager'), {
+      page: this.tablePage, total: this.tableTotal, size: PAGE_SIZE.table, label: 'tasks', top: container,
+      onPage: (n) => { this.tablePage = n; return this.loadData(); }
+    });
 
     container.querySelectorAll('.btn-inspect-task').forEach(el => {
       el.addEventListener('click', () => this.openTaskDetailModal(el.getAttribute('data-task-id')));
@@ -543,7 +598,7 @@ export class TasksModule {
   // TASK DETAILS DRAWER / MODAL
   // ====================================================================
   async openTaskDetailModal(taskId) {
-    const task = this.tasks.find(t => t.id === taskId);
+    const task = await this.taskById(taskId);
     if (!task) return;
 
     const modalBackdrop = document.getElementById('globalModalBackdrop');
@@ -1014,6 +1069,7 @@ export class TasksModule {
 
         Toast.success('Deliverable task dispatched successfully', 'Created');
         modalBackdrop.classList.remove('active');
+        this.tablePage = 1; // the new task is the newest
         await this.loadData();
       } catch (err) {
         console.error('Task creation error:', err);

@@ -11,10 +11,12 @@ import { Api } from '../../services/api.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, getInitials, getAccentHex } from '../../utils/helpers.js';
 import { formatEmploymentStatusBadge } from '../../utils/formatters.js';
+import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
 export class EmployeesModule {
   constructor(app) {
     this.app = app;
+    this.page = 1;
     this.employees = [];
     this.departments = [];
     this.roles = [];
@@ -65,6 +67,7 @@ export class EmployeesModule {
             <div class="empty-state-title">Loading studio directory...</div>
           </div>
         </div>
+        <div id="employeesPager"></div>
       </div>
     `;
 
@@ -139,6 +142,9 @@ export class EmployeesModule {
     const container = document.getElementById('employeesGrid');
     if (!container) return;
 
+    const filterKey = `${query}|${deptFilter}`;
+    if (filterKey !== this.filterKey) { this.filterKey = filterKey; this.page = 1; }
+
     let filtered = this.employees;
 
     if (deptFilter !== 'ALL') {
@@ -154,6 +160,13 @@ export class EmployeesModule {
       });
     }
 
+    const shown = pageSlice(filtered, this.page, PAGE_SIZE.cards);
+    this.page = shown.page;
+    mountPager(document.getElementById('employeesPager'), {
+      page: shown.page, total: shown.total, size: PAGE_SIZE.cards, label: 'people', top: container,
+      onPage: (n) => { this.page = n; this.filterAndRender(query, deptFilter); }
+    });
+
     if (filtered.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
@@ -165,7 +178,7 @@ export class EmployeesModule {
       return;
     }
 
-    container.innerHTML = filtered.map(emp => {
+    container.innerHTML = shown.rows.map(emp => {
       const initials = getInitials(emp.full_name || emp.email);
       const accent = getAccentHex(emp.full_name || emp.email);
       const deptNames = this.deptIdsOf(emp).map(id => this.departments.find(d => d.id === id)?.name).filter(Boolean);

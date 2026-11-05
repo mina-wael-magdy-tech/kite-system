@@ -15,6 +15,7 @@ import { Realtime } from '../../services/realtime-service.js';
 import { formDialog } from '../../ui/dialogs.js';
 import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency, debounce } from '../../utils/helpers.js';
+import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 import { DrivePanel } from './drive-panel.js';
 import { Permissions } from '../../permissions/permission-service.js';
 
@@ -94,11 +95,12 @@ export class ClientHubModule {
           <select id="chDept" class="form-control" style="width:auto;height:36px;"><option value="all">All departments</option></select>
         </div>
         <div id="chGrid" class="ch-grid"><div class="empty-state" style="border:none;padding:40px 0;grid-column:1/-1;"><div class="empty-state-icon animate-spin">⟳</div><div class="empty-state-title">Loading clients…</div></div></div>
+        <div id="chPager"></div>
       </div>`;
     document.getElementById('chType').value = this.fType;
-    document.getElementById('chSearch').addEventListener('input', debounce((e) => { this.search = e.target.value.trim().toLowerCase(); this.paintGrid(); }, 200));
-    document.getElementById('chType').addEventListener('change', (e) => { this.fType = e.target.value; this.paintGrid(); });
-    document.getElementById('chDept').addEventListener('change', (e) => { this.fDept = e.target.value; this.paintGrid(); });
+    document.getElementById('chSearch').addEventListener('input', debounce((e) => { this.search = e.target.value.trim().toLowerCase(); this.gridPage = 1; this.paintGrid(); }, 200));
+    document.getElementById('chType').addEventListener('change', (e) => { this.fType = e.target.value; this.gridPage = 1; this.paintGrid(); });
+    document.getElementById('chDept').addEventListener('change', (e) => { this.fDept = e.target.value; this.gridPage = 1; this.paintGrid(); });
     window.lucide?.createIcons();
 
     await this.loadHub();
@@ -151,13 +153,19 @@ export class ClientHubModule {
       if (this.search && !`${c.name || ''} ${c.company_name || ''} ${c.industry || ''}`.toLowerCase().includes(this.search)) return false;
       return true;
     });
+    const shown = pageSlice(list, this.gridPage || 1, PAGE_SIZE.cards);
+    this.gridPage = shown.page;
+    mountPager(document.getElementById('chPager'), {
+      page: shown.page, total: shown.total, size: PAGE_SIZE.cards, label: 'clients', top: grid,
+      onPage: (n) => { this.gridPage = n; this.paintGrid(); }
+    });
     if (!list.length) {
       grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><div class="empty-state-icon"><i data-lucide="building-2"></i></div>
         <div class="empty-state-title">${this.clients.length ? 'No clients match' : 'No clients yet'}</div>
         <div class="empty-state-desc">${this.clients.length ? 'Try another filter.' : 'Add your first client from the CRM page.'}</div></div>`;
       return;
     }
-    grid.innerHTML = list.map(c => {
+    grid.innerHTML = shown.rows.map(c => {
       const s = this.stats.get(c.id) || { open: 0, done: 0, projects: 0, late: 0 };
       const total = s.open + s.done;
       const pct = total ? Math.round((s.done / total) * 100) : 0;

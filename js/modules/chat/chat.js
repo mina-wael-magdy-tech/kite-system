@@ -19,6 +19,7 @@ import { escapeHTML, getInitials, getAccentHex } from '../../utils/helpers.js';
 import { linkify } from '../../utils/linkify.js';
 import { ASSIGNEE_SELECT, assigneeOptionsHTML, selectedDeptId } from '../../utils/assignees.js';
 import { Notifications } from '../../services/notification-service.js';
+import { PAGE_SIZE } from '../../ui/pagination.js';
 
 const MESSAGE_SELECT = '*, sender:profiles!messages_sender_id_fkey(id, full_name, avatar_url)';
 const BUCKET = CONFIG.STORAGE_BUCKETS.CHAT_MEDIA;
@@ -277,27 +278,43 @@ export class ChatModule {
     return ch.name || 'Untitled';
   }
 
-  async loadMessages(channelId) {
+  async loadMessages(channelId, { older = false } = {}) {
     this.bindTyping(channelId);
     const supabase = getSupabase();
     if (!supabase) return;
+    // The newest messages first; "Show earlier messages" asks for more. A refresh keeps what was opened.
+    if (this.msgLimitFor !== channelId) { this.msgLimitFor = channelId; this.msgLimit = PAGE_SIZE.messages; }
+    const limit = this.msgLimit;
     try {
-      const [{ data: msgs }, { data: reacts }] = await Promise.all([
-        supabase.from('messages').select(MESSAGE_SELECT).eq('conversation_id', channelId)
-          .order('created_at', { ascending: false }).limit(200),
-        supabase.from('message_reactions').select('id, message_id, user_id, emoji').eq('conversation_id', channelId)
-      ]);
+      const { data: msgs } = await supabase.from('messages').select(MESSAGE_SELECT).eq('conversation_id', channelId)
+        .order('created_at', { ascending: false }).limit(limit);
+      // A reaction is never older than its message, so this covers every message on screen.
+      const oldest = msgs?.[msgs.length - 1]?.created_at;
+      const { data: reacts } = oldest
+        ? await supabase.from('message_reactions').select('id, message_id, user_id, emoji').eq('conversation_id', channelId).gte('created_at', oldest)
+        : { data: [] };
       if (channelId !== this.activeChannelId) return; // user switched away meanwhile
       Notifications.activeConversationId = channelId;
       Notifications.markConversationRead(channelId);
       this.messages = (msgs || []).reverse();
       this.reactions = reacts || [];
-      this.replyTo = null; this.renderReplyBar();
+      this.msgHasMore = (msgs || []).length === limit;
+      if (!older) { this.replyTo = null; this.renderReplyBar(); }
       this.renderMessagesFeed();
     } catch (err) {
       console.warn('Messages error:', err);
       this.renderMessagesFeed();
     }
+  }
+
+  /** Adds earlier messages above the current ones without moving what the reader is looking at. */
+  async loadEarlierMessages() {
+    const feed = document.getElementById('chatFeed');
+    if (!feed || !this.activeChannelId) return;
+    const fromBottom = feed.scrollHeight - feed.scrollTop;
+    this.msgLimit += PAGE_SIZE.messages;
+    await this.loadMessages(this.activeChannelId, { older: true });
+    feed.scrollTop = feed.scrollHeight - fromBottom;
   }
 
   // ------------------------------------------------------------ realtime
@@ -751,7 +768,8 @@ export class ChatModule {
     const canModerate = Permissions.isAdmin() && ch && ch.type !== 'direct';
 
     let lastDay = '', prev = null;
-    feed.innerHTML = this.messages.map(m => {
+    const earlier = this.msgHasMore ? '<button type="button" class="btn btn-secondary btn-sm chat-more" data-earlier>Show earlier messages</button>' : '';
+    feed.innerHTML = earlier + this.messages.map(m => {
       const isMe = m.sender_id === me;
       const name = m.sender?.full_name || 'Specialist';
       const day = new Date(m.created_at).toDateString();
@@ -823,6 +841,7 @@ export class ChatModule {
       const u = await this.signedUrl(b.dataset.filePath, b.dataset.fileName);
       if (u) { const a = document.createElement('a'); a.href = u; a.rel = 'noopener'; a.click(); }
     }));
+    feed.querySelector('[data-earlier]')?.addEventListener('click', (e) => { e.currentTarget.disabled = true; this.loadEarlierMessages(); });
     this.hydrateImages(feed);
     if (window.lucide) window.lucide.createIcons();
 

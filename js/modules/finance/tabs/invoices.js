@@ -9,13 +9,18 @@ import { Api } from '../../../services/api.js';
 import { Toast } from '../../../services/toast-service.js';
 import { Money } from '../../../services/money.js';
 import { formDialog, confirmDialog } from '../../../ui/dialogs.js';
-import { escapeHTML } from '../../../utils/helpers.js';
+import { escapeHTML, debounce } from '../../../utils/helpers.js';
+import { PAGE_SIZE, fetchPage, mountPager, searchFilter } from '../../../ui/pagination.js';
 import { fmt, egp, day, today, statusBadge, STATUS_LABELS, KIND_LABELS, previewTotals, previewLine, clientLabel, openModal } from '../fin-util.js';
 
 export class InvoicesTab {
   constructor(shell) {
     this.shell = shell;          // FinanceModule: base data (clients, billing, departments, settings)
-    this.invoices = [];
+    this.invoices = [];          // the invoices on the current page
+    this.page = 1;
+    this.total = 0;
+    this.hasAny = true;          // false only when no invoice exists at all, for the empty message
+    this.loadSeq = 0;
     this.filter = { q: '', status: 'open', kind: 'all' };
   }
 
@@ -35,46 +40,75 @@ export class InvoicesTab {
         <button type="button" class="btn btn-secondary btn-sm" id="btnRetainerRun" title="Create this month's draft invoices for every active retainer plan"><i data-lucide="repeat"></i> Run retainer billing</button>
         <button type="button" class="btn btn-primary btn-sm" id="btnNewInvoice"><i data-lucide="plus"></i> New invoice</button>
       </div>
-      <div id="invList" class="fin-list"></div>`;
+      <div id="invList" class="fin-list"></div>
+      <div id="invPager"></div>`;
   }
 
   async mount() {
     const q = document.getElementById('invSearch');
-    q?.addEventListener('input', () => { this.filter.q = q.value.trim().toLowerCase(); this.renderList(); });
-    document.getElementById('invStatus')?.addEventListener('change', (e) => { this.filter.status = e.target.value; this.renderList(); });
-    document.getElementById('invKind')?.addEventListener('change', (e) => { this.filter.kind = e.target.value; this.renderList(); });
+    const fromStart = () => { this.page = 1; return this.loadPage(); };
+    q?.addEventListener('input', debounce(() => { this.filter.q = q.value.trim(); fromStart(); }, 250));
+    document.getElementById('invStatus')?.addEventListener('change', (e) => { this.filter.status = e.target.value; fromStart(); });
+    document.getElementById('invKind')?.addEventListener('change', (e) => { this.filter.kind = e.target.value; fromStart(); });
     document.getElementById('btnNewInvoice')?.addEventListener('click', () => this.openEditor());
     document.getElementById('btnRetainerRun')?.addEventListener('click', () => this.runRetainers());
     await this.load();
   }
 
+  /** After a change: the current page and the figures at the top. */
   async load() {
-    const { data, error } = await getSupabase().from('invoices')
-      .select('*, client:clients(company_name, name)')
-      .order('created_at', { ascending: false }).limit(1000);
-    if (error) { Toast.error(error.message, 'Invoices'); return; }
-    this.invoices = data || [];
-    this.renderList();
+    await this.loadPage();
     this.shell.refreshKpis?.();
   }
 
-  filtered() {
-    const { q, status, kind } = this.filter;
-    return this.invoices.filter(i => {
-      if (status === 'open' ? ['paid', 'void'].includes(i.status) : (status !== 'all' && i.status !== status)) return false;
-      if (kind !== 'all' && i.kind !== kind) return false;
-      return !q || `${i.invoice_number} ${clientLabel(i.client)}`.toLowerCase().includes(q);
-    });
+  /** Invoices are matched by their number or by their client's name, so the clients are found first. */
+  async query() {
+    const sb = getSupabase();
+    const { q: term, status, kind } = this.filter;
+    let search = searchFilter(['invoice_number'], term);
+    if (search) {
+      const { data: clients } = await sb.from('clients').select('id').or(searchFilter(['company_name', 'name'], term)).limit(200);
+      if (clients?.length) search += `,client_id.in.(${clients.map(c => c.id).join(',')})`;
+    }
+    return () => {
+      let qb = sb.from('invoices').select('*, client:clients(company_name, name)', { count: 'exact' })
+        .order('created_at', { ascending: false }).order('id', { ascending: true });
+      if (status === 'open') qb = qb.not('status', 'in', '("paid","void")');
+      else if (status !== 'all') qb = qb.eq('status', status);
+      if (kind !== 'all') qb = qb.eq('kind', kind);
+      if (search) qb = qb.or(search);
+      return qb;
+    };
+  }
+
+  async loadPage() {
+    const seq = ++this.loadSeq;
+    const res = await fetchPage(await this.query(), this.page, PAGE_SIZE.table);
+    if (seq !== this.loadSeq) return;
+    if (res.error) { Toast.error(res.error.message, 'Invoices'); return; }
+    this.invoices = res.rows;
+    this.total = res.total;
+    this.page = res.page;
+    if (!res.total) {
+      const { count } = await getSupabase().from('invoices').select('id', { count: 'exact', head: true });
+      if (seq !== this.loadSeq) return;
+      this.hasAny = Boolean(count);
+    }
+    this.renderList();
   }
 
   renderList() {
     const el = document.getElementById('invList');
     if (!el) return;
-    const rows = this.filtered();
+    mountPager(document.getElementById('invPager'), {
+      page: this.page, total: this.total, size: PAGE_SIZE.table, label: 'invoices', top: el,
+      onPage: (n) => { this.page = n; return this.loadPage(); }
+    });
+    const rows = this.invoices;
     if (!rows.length) {
       el.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><i data-lucide="receipt"></i></div>
-        <div class="empty-state-title">${this.invoices.length ? 'No invoices match' : 'No invoices yet'}</div>
-        <div class="empty-state-desc">${this.invoices.length ? 'Try another filter.' : 'Create the first invoice, or set up a retainer plan under Clients & retainers.'}</div></div>`;
+        <div class="empty-state-title">${this.hasAny ? 'No invoices match' : 'No invoices yet'}</div>
+        <div class="empty-state-desc">${this.hasAny ? 'Try another filter.' : 'Create the first invoice, or set up a retainer plan under Clients & retainers.'}</div></div>`;
       if (window.lucide) window.lucide.createIcons();
       return;
     }

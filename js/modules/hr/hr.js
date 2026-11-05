@@ -9,12 +9,16 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { Toast } from '../../services/toast-service.js';
 import { Api } from '../../services/api.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
+import { PAGE_SIZE, fetchPage, pageSlice, mountPager } from '../../ui/pagination.js';
 
 export class HrModule {
   constructor(app) {
     this.app = app;
     this.attendanceToday = null;
-    this.leaveRequests = [];
+    this.leaveRequests = [];   // the requests on the current page
+    this.leavePage = 1;
+    this.leaveTotal = 0;
+    this.attPage = 1;
     this.leaveTypes = [];
   }
 
@@ -75,6 +79,7 @@ export class HrModule {
               </table>
             </div>
           </div>
+          <div id="attPager"></div>
         </div>
 
         <!-- Leave Requests Table -->
@@ -102,6 +107,7 @@ export class HrModule {
               </table>
             </div>
           </div>
+          <div id="leavePager"></div>
         </div>
       </div>
     `;
@@ -149,34 +155,42 @@ export class HrModule {
       this.leaveTypes = leaveTypes || [];
 
       // 3. Fetch Leave Requests (Filtered by RLS)
-      let { data: requests, error: reqErr } = await supabase
-        .from('leave_requests')
-        .select(`
-          *,
-          profiles!leave_requests_user_id_fkey(full_name),
-          leave_types(name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (reqErr) {
-        // the names are a nicety: if the joined query fails, fall back to the plain list and fill the names in here
-        console.warn('Leave requests (joined) error:', reqErr);
-        const plain = await supabase.from('leave_requests').select('*').order('created_at', { ascending: false });
-        if (plain.error) { this.renderLeaveRequests(plain.error.message); return; }
-        const typeName = new Map(this.leaveTypes.map(t => [t.id, t.name]));
-        requests = (plain.data || []).map(r => ({
-          ...r, leave_types: { name: typeName.get(r.leave_type_id) },
-          profiles: r.user_id === this.app.currentUser.id ? { full_name: this.app.currentUser.full_name } : null
-        }));
-      }
-
-      this.leaveRequests = requests || [];
-      this.renderLeaveRequests();
+      await this.loadLeavePage();
       await this.loadAttendanceLog();
     } catch (err) {
       console.warn('HR data fetch error:', err);
       this.renderLeaveRequests();
     }
+  }
+
+  async loadLeavePage() {
+    const supabase = getSupabase();
+    const seq = this.leaveSeq = (this.leaveSeq || 0) + 1;
+    const newestFirst = (q) => q.order('created_at', { ascending: false }).order('id', { ascending: true });
+    let res = await fetchPage(() => newestFirst(supabase.from('leave_requests').select(`
+          *,
+          profiles!leave_requests_user_id_fkey(full_name),
+          leave_types(name)
+        `, { count: 'exact' })), this.leavePage, PAGE_SIZE.table);
+
+    if (res.error) {
+      // the names are a nicety: if the joined query fails, fall back to the plain list and fill the names in here
+      console.warn('Leave requests (joined) error:', res.error);
+      res = await fetchPage(() => newestFirst(supabase.from('leave_requests').select('*', { count: 'exact' })), this.leavePage, PAGE_SIZE.table);
+      if (seq !== this.leaveSeq) return;
+      if (res.error) { this.renderLeaveRequests(res.error.message); return; }
+      const typeName = new Map(this.leaveTypes.map(t => [t.id, t.name]));
+      res.rows = res.rows.map(r => ({
+        ...r, leave_types: { name: typeName.get(r.leave_type_id) },
+        profiles: r.user_id === this.app.currentUser.id ? { full_name: this.app.currentUser.full_name } : null
+      }));
+    }
+    if (seq !== this.leaveSeq) return;
+
+    this.leaveRequests = res.rows;
+    this.leaveTotal = res.total;
+    this.leavePage = res.page;
+    this.renderLeaveRequests();
   }
 
   updateAttendanceUI() {
@@ -219,8 +233,8 @@ export class HrModule {
     this.attPerson = '';
     this.attRows = [];
     const month = document.getElementById('attMonth');
-    if (month) { month.value = this.attMonth; month.addEventListener('change', () => { this.attMonth = month.value || this.attMonth; this.loadAttendanceLog(); }); }
-    document.getElementById('attPerson')?.addEventListener('change', (e) => { this.attPerson = e.target.value; this.renderAttendanceLog(); });
+    if (month) { month.value = this.attMonth; month.addEventListener('change', () => { this.attMonth = month.value || this.attMonth; this.attPage = 1; this.loadAttendanceLog(); }); }
+    document.getElementById('attPerson')?.addEventListener('change', (e) => { this.attPerson = e.target.value; this.attPage = 1; this.renderAttendanceLog(); });
     document.getElementById('btnAttExport')?.addEventListener('click', () => this.exportAttendance());
     if (window.lucide) window.lucide.createIcons();
   }
@@ -276,11 +290,19 @@ export class HrModule {
         .map(([id, e]) => chip(`${escapeHTML(name(id))}: ${e.days} d · ${e.hours.toFixed(1)} h`)).join('');
     }
 
+    // The totals above and the CSV use every row of the month; only the table is paged.
+    const shown = pageSlice(rows, this.attPage, PAGE_SIZE.table);
+    this.attPage = shown.page;
+    mountPager(document.getElementById('attPager'), {
+      page: shown.page, total: shown.total, size: PAGE_SIZE.table, label: 'check-ins', top: body.closest('.card'),
+      onPage: (n) => { this.attPage = n; this.renderAttendanceLog(); }
+    });
+
     if (!rows.length) {
       body.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-dim); padding: var(--space-6);">No attendance recorded for this month. Press “Check In Now” above to record today.</td></tr>`;
       return;
     }
-    body.innerHTML = rows.map(r => `
+    body.innerHTML = shown.rows.map(r => `
       <tr>
         <td class="font-mono text-2xs">${escapeHTML(r.date)}</td>
         <td class="font-semibold text-white">${escapeHTML(name(r.user_id))}</td>
@@ -359,7 +381,11 @@ export class HrModule {
     const badge = document.getElementById('leaveCountBadge');
     if (!tbody) return;
 
-    if (badge) badge.textContent = `${this.leaveRequests.length} Requests`;
+    if (badge) badge.textContent = `${this.leaveTotal} Requests`;
+    mountPager(document.getElementById('leavePager'), {
+      page: this.leavePage, total: loadError ? 0 : this.leaveTotal, size: PAGE_SIZE.table, label: 'requests', top: tbody.closest('.card'),
+      onPage: (n) => { this.leavePage = n; return this.loadLeavePage(); }
+    });
 
     const canReview = Permissions.isAdmin() || Permissions.hasRole('hr_manager');
 
@@ -534,6 +560,7 @@ export class HrModule {
         Api.leaveSubmitted(created.id).catch(() => {}); // notify the approvers; never blocks the user
         Toast.success('Time off request submitted to studio manager', 'Submitted');
         modalBackdrop.classList.remove('active');
+        this.leavePage = 1; // the new request is the newest
         await this.loadHrData();
       } catch (err) {
         console.error('Leave submit error:', err);

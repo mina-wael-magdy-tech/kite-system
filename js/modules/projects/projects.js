@@ -10,11 +10,15 @@ import { Toast } from '../../services/toast-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
 import { Money } from '../../services/money.js';
+import { PAGE_SIZE, fetchPage, mountPager } from '../../ui/pagination.js';
 
 export class ProjectsModule {
   constructor(app) {
     this.app = app;
     this.projects = [];
+    this.page = 1;
+    this.total = 0;
+    this.loadSeq = 0;
   }
 
   async render(container) {
@@ -39,6 +43,7 @@ export class ProjectsModule {
             <div class="empty-state-title">Loading studio projects...</div>
           </div>
         </div>
+        <div id="projectsPager"></div>
       </div>
     `;
 
@@ -53,21 +58,28 @@ export class ProjectsModule {
   async loadProjects() {
     const supabase = getSupabase();
     if (!supabase) return;
+    const seq = ++this.loadSeq;
 
     try {
-      const { data: projects, error } = await supabase
+      const build = () => supabase
         .from('projects')
         .select(`
           *,
           client:clients(name, company_name),
           project_manager:profiles!projects_project_manager_id_fkey(full_name),
           tasks(id, status)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      this.budgets = await Money.map('project_budget'); // empty unless you are the owner / CEO
-      this.projects = projects || [];
+        `, { count: 'exact' })
+        .order('created_at', { ascending: false }).order('id', { ascending: true });
+      const [res, budgets] = await Promise.all([
+        fetchPage(build, this.page, PAGE_SIZE.projects),
+        Money.map('project_budget') // empty unless you are the owner / CEO
+      ]);
+      if (seq !== this.loadSeq) return;
+      if (res.error) throw res.error;
+      this.budgets = budgets;
+      this.projects = res.rows;
+      this.total = res.total;
+      this.page = res.page;
       this.renderProjectsGrid();
     } catch (err) {
       console.warn('Projects fetch error:', err);
@@ -89,6 +101,8 @@ export class ProjectsModule {
         </div>
       `;
       document.getElementById('btnCreateFirstProject')?.addEventListener('click', () => document.getElementById('btnCreateProject')?.click());
+      const pager = document.getElementById('projectsPager');
+      if (pager) pager.innerHTML = '';
       return;
     }
 
@@ -152,6 +166,10 @@ export class ProjectsModule {
 
     container.querySelectorAll('.card-act-edit').forEach(b => b.addEventListener('click', () => this.openEditDialog(b.dataset.id)));
     container.querySelectorAll('.card-act-delete').forEach(b => b.addEventListener('click', () => this.deleteProject(b.dataset.id)));
+    mountPager(document.getElementById('projectsPager'), {
+      page: this.page, total: this.total, size: PAGE_SIZE.projects, label: 'projects', top: container,
+      onPage: (n) => { this.page = n; return this.loadProjects(); }
+    });
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -301,6 +319,7 @@ export class ProjectsModule {
         await Money.save('project_budget', made.id, budget, this.app.currentUser.id);
         Toast.success('Client project created successfully', 'Project Added');
         modalBackdrop.classList.remove('active');
+        this.page = 1; // the new project is the newest
         await this.loadProjects();
       } catch (err) {
         console.error('Project creation error:', err);

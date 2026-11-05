@@ -481,10 +481,35 @@ switch ($action) {
         $folderId = int_or_null($_GET['folder'] ?? null);
         assert_folder($pdo, $clientId, $folderId);
 
-        $folders = $pdo->prepare('SELECT id, name FROM folders WHERE user_id = ? AND parent_id ' . ($folderId ? '= ?' : 'IS NULL') . ' ORDER BY name');
-        $folders->execute($folderId ? [$clientId, $folderId] : [$clientId]);
-        $files = $pdo->prepare('SELECT id, original_name, file_type, file_path, filename, uploaded_at FROM files WHERE user_id = ? AND folder_id ' . ($folderId ? '= ?' : 'IS NULL') . ' ORDER BY uploaded_at DESC, id DESC');
-        $files->execute($folderId ? [$clientId, $folderId] : [$clientId]);
+        $where = $folderId ? '= ?' : 'IS NULL';
+        $args = $folderId ? [$clientId, $folderId] : [$clientId];
+
+        // Paging: ?size=60&page=2 returns that page of "folders first, then files". Without ?size the whole
+        // folder comes back, as before. A page past the end falls back to the last page.
+        $size = isset($_GET['size']) ? max(1, min(200, (int) $_GET['size'])) : null;
+        $page = 1;
+        $total = null;
+        $folderLimit = '';
+        $fileLimit = '';
+        if ($size !== null) {
+            $countFolders = $pdo->prepare("SELECT COUNT(*) FROM folders WHERE user_id = ? AND parent_id $where");
+            $countFolders->execute($args);
+            $countFiles = $pdo->prepare("SELECT COUNT(*) FROM files WHERE user_id = ? AND folder_id $where");
+            $countFiles->execute($args);
+            $folderTotal = (int) $countFolders->fetchColumn();
+            $total = $folderTotal + (int) $countFiles->fetchColumn();
+            $page = max(1, min((int) ($_GET['page'] ?? 1), max(1, (int) ceil($total / $size))));
+            $offset = ($page - 1) * $size;
+            $folderCount = max(0, min($size, $folderTotal - $offset));
+            $fileOffset = max(0, $offset - $folderTotal);
+            $folderLimit = ' LIMIT ' . $folderCount . ' OFFSET ' . min($offset, $folderTotal);
+            $fileLimit = ' LIMIT ' . ($size - $folderCount) . ' OFFSET ' . $fileOffset;
+        }
+
+        $folders = $pdo->prepare("SELECT id, name FROM folders WHERE user_id = ? AND parent_id $where ORDER BY name, id" . $folderLimit);
+        $folders->execute($args);
+        $files = $pdo->prepare("SELECT id, original_name, file_type, file_path, filename, uploaded_at FROM files WHERE user_id = ? AND folder_id $where ORDER BY uploaded_at DESC, id DESC" . $fileLimit);
+        $files->execute($args);
 
         require __DIR__ . '/send.php';
         $breadcrumb = [];
@@ -504,6 +529,9 @@ switch ($action) {
 
         ok([
             'folder' => $folderId,
+            'page' => $page,
+            'size' => $size,
+            'total' => $total,
             'hasLogo' => $hasLogo,
             'breadcrumb' => $breadcrumb,
             'folders' => array_map(fn($r) => ['id' => (int) $r['id'], 'name' => $r['name']], $folders->fetchAll()),

@@ -10,6 +10,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
 import { ContentPlansSection, ContentPlanEditor } from './content-plan.js';
+import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
 const STATUS_LABEL = { planning: 'Planning', active: 'Active', on_hold: 'On hold', completed: 'Completed', cancelled: 'Cancelled' };
 const STATUS_TONE = { planning: 'badge-sky', active: 'badge-emerald', on_hold: 'badge-amber', completed: 'badge-slate', cancelled: 'badge-rose' };
@@ -66,6 +67,7 @@ export class CampaignsModule {
             <div class="empty-state-title">Loading studio campaigns...</div>
           </div>
         </div>
+        <div id="campaignsPager"></div>
 
         ${this.plansSection.html()}
       </div>
@@ -75,8 +77,8 @@ export class CampaignsModule {
       this.openCampaignModal();
     });
 
-    document.getElementById('campSearch')?.addEventListener('input', (e) => { this.filter.q = e.target.value.trim().toLowerCase(); this.renderCampaigns(); });
-    document.getElementById('campStatusFilter')?.addEventListener('change', (e) => { this.filter.status = e.target.value; this.renderCampaigns(); });
+    document.getElementById('campSearch')?.addEventListener('input', (e) => { this.filter.q = e.target.value.trim().toLowerCase(); this.page = 1; this.renderCampaigns(); });
+    document.getElementById('campStatusFilter')?.addEventListener('change', (e) => { this.filter.status = e.target.value; this.page = 1; this.renderCampaigns(); });
 
     await this.loadCampaigns();
     Realtime.watch(['campaigns'], () => this.loadCampaigns()); // live updates for everyone
@@ -116,6 +118,12 @@ export class CampaignsModule {
       if (status === 'open' ? !['planning', 'active', 'on_hold'].includes(c.status) : (status !== 'all' && c.status !== status)) return false;
       return !q || `${c.name} ${c.client?.company_name || ''} ${c.client?.name || ''}`.toLowerCase().includes(q);
     });
+    const shown = pageSlice(displayCampaigns, this.page || 1, PAGE_SIZE.projects);
+    this.page = shown.page;
+    mountPager(document.getElementById('campaignsPager'), {
+      page: shown.page, total: shown.total, size: PAGE_SIZE.projects, label: 'campaigns', top: container,
+      onPage: (n) => { this.page = n; this.renderCampaigns(); }
+    });
     if (displayCampaigns.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
@@ -127,7 +135,7 @@ export class CampaignsModule {
       return;
     }
 
-    container.innerHTML = displayCampaigns.map(c => `
+    container.innerHTML = shown.rows.map(c => `
       <div class="card entity-card" style="display: flex; flex-direction: column; justify-content: space-between;">
         <div class="card-header">
           <div>

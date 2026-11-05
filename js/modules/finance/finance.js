@@ -14,6 +14,7 @@ import { loadBase, egp } from './fin-util.js';
 import { InvoicesTab } from './tabs/invoices.js';
 import { ClientsTab } from './tabs/clients.js';
 import { SettingsTab } from './tabs/settings.js';
+import { PAGE_SIZE, fetchPage, mountPager } from '../../ui/pagination.js';
 
 const TABS = [
   { id: 'invoices', label: 'Invoices', icon: 'receipt' },
@@ -25,7 +26,11 @@ const TABS = [
 export class FinanceModule {
   constructor(app) {
     this.app = app;
-    this.expenses = [];
+    this.expenses = [];          // the expenses on the current page
+    this.expensePage = 1;
+    this.expenseTotal = 0;
+    this.expensePending = 0;
+    this.expenseSeq = 0;
     this.invoices = [];
     this.departments = [];
   }
@@ -140,6 +145,7 @@ export class FinanceModule {
               <tbody id="expensesTableBody"><tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">Loading expenses...</td></tr></tbody>
             </table>
           </div>
+          <div id="expensesPager"></div>
         </div>
       </div>`;
   }
@@ -147,24 +153,30 @@ export class FinanceModule {
   async loadFinanceData() {
     const supabase = getSupabase();
     if (!supabase) return;
+    const seq = ++this.expenseSeq;
 
     try {
-      // 1. Fetch departments
-      const { data: depts } = await supabase.from('departments').select('id, name');
-      this.departments = depts || [];
-
-      // 2. Fetch expenses (RLS ensures employees only see own, while finance/admin sees all)
-      const { data: expenses, error } = await supabase
+      // RLS ensures employees only see their own expenses, while finance/admin sees all
+      const build = () => supabase
         .from('expenses')
         .select(`
           *,
           profiles!expenses_submitted_by_fkey(full_name),
           departments!expenses_department_id_fkey(name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      this.expenses = expenses || [];
+        `, { count: 'exact' })
+        .order('created_at', { ascending: false }).order('id', { ascending: true });
+      const [{ data: depts }, res, pending] = await Promise.all([
+        supabase.from('departments').select('id, name'),
+        fetchPage(build, this.expensePage, PAGE_SIZE.table),
+        supabase.from('expenses').select('id', { count: 'exact', head: true }).in('status', ['submitted', 'draft'])
+      ]);
+      if (seq !== this.expenseSeq) return;
+      if (res.error) throw res.error;
+      this.departments = depts || [];
+      this.expenses = res.rows;
+      this.expenseTotal = res.total;
+      this.expensePage = res.page;
+      this.expensePending = pending.count ?? 0;
       this.renderExpensesTable();
     } catch (err) {
       console.warn('Finance data fetch error:', err);
@@ -180,8 +192,12 @@ export class FinanceModule {
 
     const displayExpenses = this.expenses;
 
-    if (badge) badge.textContent = `${displayExpenses.length} Claims`;
-    if (kpiPending) kpiPending.textContent = String(displayExpenses.filter(e => e.status === 'submitted' || e.status === 'draft').length);
+    if (badge) badge.textContent = `${this.expenseTotal} Claims`;
+    if (kpiPending) kpiPending.textContent = String(this.expensePending);
+    mountPager(document.getElementById('expensesPager'), {
+      page: this.expensePage, total: this.expenseTotal, size: PAGE_SIZE.table, label: 'claims', top: tbody.closest('.card'),
+      onPage: (n) => { this.expensePage = n; return this.loadFinanceData(); }
+    });
     if (displayExpenses.length === 0) {
       tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No expense claims yet.</td></tr>';
       return;
@@ -312,6 +328,7 @@ export class FinanceModule {
         Api.expenseSubmitted(created.id).catch(() => {}); // notify the approvers; never blocks the user
         Toast.success('Expense claim submitted for manager approval', 'Submitted');
         modalBackdrop.classList.remove('active');
+        this.expensePage = 1; // the new claim is the newest
         await this.loadFinanceData();
       } catch (err) {
         console.error('Expense submit error:', err);

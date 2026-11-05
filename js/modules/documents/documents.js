@@ -13,6 +13,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog, htmlDialog, closeDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
 import { CONFIG } from '../../config.js';
+import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
 const DEFAULT_FOLDERS = ['General', 'Branding', 'Logos', 'Social Media', 'Video & Motion', 'Print & BTL', 'Web', 'Client Files', 'Contracts', 'Guidelines'];
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
@@ -88,14 +89,16 @@ export class DocumentsModule {
             <div class="empty-state-title">Loading vault files...</div>
           </div>
         </div>
+        <div id="docsPager"></div>
       </div>
     `;
 
     document.getElementById('btnUploadDoc')?.addEventListener('click', () => this.openUploadModal());
-    document.getElementById('vaultSearch')?.addEventListener('input', (e) => { this.filters.q = e.target.value.toLowerCase(); this.renderDocs(); });
-    document.getElementById('vaultFolder')?.addEventListener('change', (e) => { this.filters.folder = e.target.value; this.renderDocs(); });
-    document.getElementById('vaultType')?.addEventListener('change', (e) => { this.filters.type = e.target.value; this.renderDocs(); });
-    document.getElementById('vaultSource')?.addEventListener('change', (e) => { this.filters.source = e.target.value; this.renderDocs(); });
+    const refilter = (key, value) => { this.filters[key] = value; this.page = 1; this.renderDocs(); };
+    document.getElementById('vaultSearch')?.addEventListener('input', (e) => refilter('q', e.target.value.toLowerCase()));
+    document.getElementById('vaultFolder')?.addEventListener('change', (e) => refilter('folder', e.target.value));
+    document.getElementById('vaultType')?.addEventListener('change', (e) => refilter('type', e.target.value));
+    document.getElementById('vaultSource')?.addEventListener('change', (e) => refilter('source', e.target.value));
     this.bindDragAndDrop(document.getElementById('vaultRoot'));
 
     await this.loadDocuments();
@@ -129,7 +132,6 @@ export class DocumentsModule {
       this.assets = [...studio, ...task].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
       this.refreshFolderFilter();
-      await this.loadThumbs();
       this.renderDocs();
     } catch (err) {
       console.warn('Docs error:', err);
@@ -137,16 +139,18 @@ export class DocumentsModule {
     }
   }
 
-  /** Short-lived signed URLs for image thumbnails (batched per bucket). */
-  async loadThumbs() {
+  /** Short-lived signed URLs for the images on this page only (batched per bucket). True if any were added. */
+  async loadThumbs(rows) {
     const supabase = getSupabase();
-    const wanted = this.assets.filter(a => IMAGE_EXT.includes(extOf(a.file_name)) && !this.thumbs[a.storage_path] && a.file_size < 8 * MB);
+    const wanted = rows.filter(a => IMAGE_EXT.includes(extOf(a.file_name)) && !this.thumbs[a.storage_path] && a.file_size < 8 * MB);
+    let added = false;
     for (const bucket of [CONFIG.STORAGE_BUCKETS.STUDIO_ASSETS, CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS]) {
-      const paths = wanted.filter(a => a.bucket === bucket).slice(0, 60).map(a => a.storage_path);
+      const paths = wanted.filter(a => a.bucket === bucket).map(a => a.storage_path);
       if (!paths.length) continue;
       const { data } = await supabase.storage.from(bucket).createSignedUrls(paths, 3600);
-      (data || []).forEach(r => { if (r.signedUrl && r.path) this.thumbs[r.path] = r.signedUrl; });
+      (data || []).forEach(r => { if (r.signedUrl && r.path) { this.thumbs[r.path] = r.signedUrl; added = true; } });
     }
+    return added;
   }
 
   refreshFolderFilter() {
@@ -179,6 +183,12 @@ export class DocumentsModule {
     if (!container) return;
 
     const list = this.filtered();
+    const shown = pageSlice(list, this.page || 1, PAGE_SIZE.cards);
+    this.page = shown.page;
+    mountPager(document.getElementById('docsPager'), {
+      page: shown.page, total: shown.total, size: PAGE_SIZE.cards, label: 'files', top: container,
+      onPage: (n) => { this.page = n; this.renderDocs(); }
+    });
     if (list.length === 0) {
       container.innerHTML = `
         <div class="empty-state" style="grid-column: 1 / -1;">
@@ -192,7 +202,7 @@ export class DocumentsModule {
     const me = this.app.currentUser.id;
     const isAdmin = Permissions.isAdmin();
 
-    container.innerHTML = list.map(a => {
+    container.innerHTML = shown.rows.map(a => {
       const group = groupOf(a.file_name);
       const thumb = this.thumbs[a.storage_path];
       const canManage = a.uploaded_by === me || isAdmin;
@@ -247,6 +257,12 @@ export class DocumentsModule {
       if (a && IMAGE_EXT.includes(extOf(a.file_name))) this.preview(a);
     }));
     if (window.lucide) window.lucide.createIcons();
+
+    // Thumbnails arrive after the page is on screen. Only repaint if this is still the page showing.
+    const page = shown.page;
+    this.loadThumbs(shown.rows).then((added) => {
+      if (added && page === this.page && document.getElementById('docsGrid')) this.renderDocs();
+    }).catch((err) => console.warn('Thumbnails:', err));
   }
 
   async signedUrl(asset, opts) {

@@ -11,10 +11,12 @@ import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatCurrency } from '../../utils/helpers.js';
 import { Money } from '../../services/money.js';
 import { formatLeadStageBadge } from '../../utils/formatters.js';
+import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
 export class CrmModule {
   constructor(app) {
     this.app = app;
+    this.clientPage = 1;
     this.clients = [];
     this.departments = [];
     this.fType = 'all';
@@ -94,6 +96,7 @@ export class CrmModule {
               </table>
             </div>
           </div>
+          <div id="clientsPager"></div>
         </div>
       </div>
     `;
@@ -101,8 +104,8 @@ export class CrmModule {
     document.getElementById('btnCreateClient')?.addEventListener('click', () => this.openClientModal());
     document.getElementById('btnCreateLead')?.addEventListener('click', () => this.openLeadModal());
 
-    document.getElementById('clientTypeFilter')?.addEventListener('change', (e) => { this.fType = e.target.value; this.renderClientsTable(); });
-    document.getElementById('clientDeptFilter')?.addEventListener('change', (e) => { this.fDept = e.target.value; this.renderClientsTable(); });
+    document.getElementById('clientTypeFilter')?.addEventListener('change', (e) => { this.fType = e.target.value; this.clientPage = 1; this.renderClientsTable(); });
+    document.getElementById('clientDeptFilter')?.addEventListener('change', (e) => { this.fDept = e.target.value; this.clientPage = 1; this.renderClientsTable(); });
 
     await this.loadCrmData();
     Realtime.watch(['leads', 'clients', 'client_departments'], () => this.loadCrmData()); // live updates for everyone
@@ -311,12 +314,19 @@ export class CrmModule {
     const totalEl = document.getElementById('clientRetainerTotal');
     if (totalEl) totalEl.textContent = Money.canSee() && retainerTotal ? `Regular clients bring ${formatCurrency(retainerTotal)} / month` : '';
 
+    const shown = pageSlice(displayClients, this.clientPage, PAGE_SIZE.table);
+    this.clientPage = shown.page;
+    mountPager(document.getElementById('clientsPager'), {
+      page: shown.page, total: shown.total, size: PAGE_SIZE.table, label: 'clients', top: tbody.closest('.card'),
+      onPage: (n) => { this.clientPage = n; this.renderClientsTable(); }
+    });
+
     if (displayClients.length === 0) {
       tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">${this.clients.length ? 'No clients match these filters.' : 'No client accounts yet.'}</td></tr>`;
       return;
     }
 
-    tbody.innerHTML = displayClients.map(c => `
+    tbody.innerHTML = shown.rows.map(c => `
       <tr>
         <td>
           <div class="font-bold text-white">${escapeHTML(c.company_name)}</div>

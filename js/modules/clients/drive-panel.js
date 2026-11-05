@@ -9,6 +9,7 @@ import { Api } from '../../services/api.js';
 import { Toast } from '../../services/toast-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
+import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
 const CHUNK_RETRIES = 5;
 const TOKEN_MARGIN_SECONDS = 60;
@@ -75,6 +76,7 @@ export class DrivePanel {
       this.folderId = null;
       this.error = null;
       this.selected.clear();
+      this.page = 1;
       this.load();
     }
     this.paint();
@@ -99,11 +101,14 @@ export class DrivePanel {
   async loadFolder(folderId) {
     const clientId = this.clientId;
     try {
-      const query = folderId ? `action=list&folder=${folderId}` : 'action=list';
+      if (folderId !== this.folderId) { this.selected.clear(); this.page = 1; }
+      // Drive sends one page at a time. An older Drive that ignores page and size sends the whole folder,
+      // and the panel then cuts it into pages itself.
+      const query = `action=list${folderId ? `&folder=${folderId}` : ''}&size=${PAGE_SIZE.drive}&page=${this.page || 1}`;
       const [listing, view] = await Promise.all([this.call(clientId, 'read', query), this.token(clientId, 'view')]);
       if (clientId !== this.clientId) return;
       this.view = view;
-      if (folderId !== this.folderId) this.selected.clear();
+      if (listing.total != null) this.page = listing.page; // Drive moved us to the last page if ours was past the end
       this.listing = listing;
       this.folderId = folderId;
       this.error = null;
@@ -209,19 +214,26 @@ export class DrivePanel {
     if (!l.folders.length && !l.files.length) {
       return `<div class="ch-drive-trail">${trail}</div><p class="text-xs text-muted">This folder is empty.</p>`;
     }
+    // Folders first, then files. Drive already sent just this page; a file keeps its place within it,
+    // so the preview's next and previous work on the page you're looking at.
+    let cards = [...l.folders.map((f) => this.folderCardHTML(f)), ...l.files.map((f, i) => this.fileCardHTML(f, i))];
+    if (l.total == null) { // an older Drive that sent everything: cut the page here
+      const items = [...l.folders.map((f) => () => this.folderCardHTML(f)), ...l.files.map((f, i) => () => this.fileCardHTML(f, i))];
+      const shown = pageSlice(items, this.page || 1, PAGE_SIZE.drive);
+      this.page = shown.page;
+      cards = shown.rows.map((html) => html());
+    }
     return `<div class="ch-drive-trail">${trail}</div>
       <div class="ch-drive-tools">${this.toolsHTML()}</div>
-      <div class="ch-drive-grid">
-        ${l.folders.map((f) => this.folderCardHTML(f)).join('')}
-        ${l.files.map((f, i) => this.fileCardHTML(f, i)).join('')}
-      </div>`;
+      <div class="ch-drive-grid">${cards.join('')}</div>
+      <div class="ch-drive-pager"></div>`;
   }
 
   toolsHTML() {
     const l = this.listing, count = this.selected.size;
     const total = l.files.length + l.folders.length;
     const manage = this.status?.canUpload;
-    const allLabel = count === total ? 'Clear selection' : 'Select all';
+    const allLabel = count === total ? "Clear selection" : (this.listing.total > total ? "Select all on this page" : "Select all");
     if (!count) return `<button type="button" class="btn btn-secondary btn-sm" data-tool="all"><i data-lucide="check-square"></i> ${allLabel}</button>`;
     return `<b class="text-xs">${count} selected</b>
       <button type="button" class="btn btn-secondary btn-sm" data-tool="all"><i data-lucide="check-square"></i> ${allLabel}</button>
@@ -301,6 +313,17 @@ export class DrivePanel {
     }));
     this.bindTools();
     this.bindDrop();
+    if (this.listing) {
+      mountPager(el.querySelector('.ch-drive-pager'), {
+        page: this.page || 1, total: this.listing.total ?? this.listing.files.length + this.listing.folders.length, size: PAGE_SIZE.drive,
+        label: 'items', top: el,
+        onPage: (n) => {
+          this.page = n;
+          if (this.listing.total == null) this.paint();
+          else { this.selected.clear(); return this.loadFolder(this.folderId); }
+        }
+      });
+    }
   }
 
   bindTools() {
