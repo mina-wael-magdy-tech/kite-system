@@ -397,16 +397,18 @@ export class DrivePanel {
   /** The view token may have run out while scrolling a long folder: try once with a fresh one, then show an icon. */
   async thumbFailed(img) {
     const clientId = this.clientId, fileId = Number(img.dataset.thumb);
-    if (!img.dataset.retried) {
-      img.dataset.retried = '1';
+    // Drive builds a thumbnail the first time it is asked for, and a page of new images can overwhelm it for
+    // a moment. So a failed thumbnail is asked for again, twice, after a pause that grows, before the icon stays.
+    const tries = Number(img.dataset.retried || 0);
+    if (tries < 2) {
+      img.dataset.retried = String(tries + 1);
       try {
         const view = await this.token(clientId, 'view');
-        const url = this.fileUrl(view, 'thumb', fileId);
-        if (url !== img.src) { // same address means the token wasn't the problem
-          this.view = view;
-          img.src = url;
-          return;
-        }
+        await new Promise((resolve) => setTimeout(resolve, 1200 * (tries + 1) + Math.random() * 800));
+        if (clientId !== this.clientId || !img.isConnected) return;
+        this.view = view;
+        img.src = `${this.fileUrl(view, 'thumb', fileId)}&retry=${tries + 1}`; // a new address, so the browser asks again
+        return;
       } catch { /* falls through to the icon */ }
     }
     const file = this.listing?.files.find((f) => f.id === fileId);
