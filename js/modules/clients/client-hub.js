@@ -16,6 +16,7 @@ import { formDialog } from '../../ui/dialogs.js';
 import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency, debounce } from '../../utils/helpers.js';
 import { DrivePanel } from './drive-panel.js';
+import { Permissions } from '../../permissions/permission-service.js';
 
 const DONE = new Set(['completed', 'approved']);
 const CLOSED = new Set(['completed', 'approved', 'cancelled']);
@@ -80,7 +81,7 @@ export class ClientHubModule {
             <h1 class="font-display font-bold text-xl">Clients</h1>
             <p class="text-xs text-muted" style="margin-top:2px;">Open a client to see their tasks, timeline, calendar, deliverables, departments and files in one place.</p>
           </div>
-          <a href="#crm" class="btn btn-secondary btn-sm"><i data-lucide="building"></i> Manage clients &amp; deals</a>
+          <a href="#crm" class="btn btn-secondary btn-sm"><i data-lucide="pencil"></i> Add or edit clients</a>
         </div>
         <div class="glass-panel" style="padding:var(--space-3);display:flex;flex-wrap:wrap;gap:var(--space-2-5);align-items:center;">
           <div style="position:relative;min-width:220px;flex:1;">
@@ -255,6 +256,7 @@ export class ClientHubModule {
             </div>
           </div>
           <div class="ch-actions">
+            ${Permissions.isManager() ? `<a class="btn btn-secondary btn-sm" href="#crm?edit=${c.id}"><i data-lucide="pencil"></i> Edit client</a>` : ''}
             <button type="button" class="btn btn-primary btn-sm" id="chNewProject"><i data-lucide="folder-plus"></i> New project</button>
             <a class="btn btn-secondary btn-sm" href="#campaigns"><i data-lucide="layout-template"></i> Content plans</a>
           </div>

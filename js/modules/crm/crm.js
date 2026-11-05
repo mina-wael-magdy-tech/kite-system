@@ -22,7 +22,7 @@ export class CrmModule {
     this.leads = [];
   }
 
-  async render(container) {
+  async render(container, query) {
     container.innerHTML = `
       <div class="page-container animate-fade-in">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-4);">
@@ -106,6 +106,13 @@ export class CrmModule {
 
     await this.loadCrmData();
     Realtime.watch(['leads', 'clients', 'client_departments'], () => this.loadCrmData()); // live updates for everyone
+
+    // A client's own page links here with ?edit=<id> to open the edit form.
+    const editId = new URLSearchParams(query || '').get('edit');
+    if (editId && Permissions.isManager()) {
+      history.replaceState(null, '', '#crm');
+      this.openClientEditDialog(editId);
+    }
   }
 
   async loadCrmData() {
