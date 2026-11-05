@@ -31,10 +31,71 @@ function drive_resolve_path(string $driveRoot, ?string $filePath, ?string $filen
 }
 
 /**
+ * Sends a small JPEG of a photo, making it once and keeping it in $cacheDir. Returns false when this file
+ * can't be shrunk (not a photo, or too large to open), so the caller can send the original instead.
+ */
+function drive_send_thumbnail(string $path, int $fileId, string $cacheDir): bool
+{
+    $maxSide = 480;
+    $maxPixels = 50000000;
+    if (!extension_loaded('gd')) {
+        return false;
+    }
+    $cached = sprintf('%s/%d-%d.jpg', $cacheDir, $fileId, filemtime($path));
+
+    if (!is_file($cached)) {
+        $info = @getimagesize($path);
+        if (!$info || $info[0] < 1 || $info[1] < 1 || $info[0] * $info[1] > $maxPixels) {
+            return false;
+        }
+        $image = match ($info[2]) {
+            IMAGETYPE_JPEG => @imagecreatefromjpeg($path),
+            IMAGETYPE_PNG => @imagecreatefrompng($path),
+            IMAGETYPE_WEBP => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false,
+            IMAGETYPE_GIF => @imagecreatefromgif($path),
+            default => false,
+        };
+        if (!$image) {
+            return false;
+        }
+        // Phone photos are often stored sideways, with a note saying which way up they go.
+        if ($info[2] === IMAGETYPE_JPEG && function_exists('exif_read_data')) {
+            $turn = [3 => 180, 6 => -90, 8 => 90][@exif_read_data($path)['Orientation'] ?? 0] ?? 0;
+            if ($turn) {
+                $image = imagerotate($image, $turn, 0) ?: $image;
+            }
+        }
+        $w = imagesx($image);
+        $h = imagesy($image);
+        $scale = min(1, $maxSide / max($w, $h));
+        $tw = max(1, (int) round($w * $scale));
+        $th = max(1, (int) round($h * $scale));
+        $thumb = imagecreatetruecolor($tw, $th);
+        imagefill($thumb, 0, 0, imagecolorallocate($thumb, 255, 255, 255)); // JPEG has no transparency
+        imagecopyresampled($thumb, $image, 0, 0, 0, 0, $tw, $th, $w, $h);
+        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0755, true) && !is_dir($cacheDir)) {
+            return false;
+        }
+        $temp = $cached . '.' . bin2hex(random_bytes(4));
+        if (!imagejpeg($thumb, $temp, 78) || !rename($temp, $cached)) {
+            @unlink($temp);
+            return false;
+        }
+    }
+
+    header('Content-Type: image/jpeg');
+    header('Content-Length: ' . filesize($cached));
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: private, max-age=600');
+    readfile($cached);
+    return true;
+}
+
+/**
  * Streams a file with resume and video seeking support. Files that a browser could run as a page
  * (HTML, SVG, ...) are only ever sent as downloads and with scripts disabled.
  */
-function drive_send_file(string $path, string $displayName, ?string $fileType, bool $forceDownload): void
+function drive_send_file(string $path, string $displayName, ?string $fileType, bool $forceDownload, bool $allowSvg = false): void
 {
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close(); // a long video must not block the user's other pages
@@ -45,7 +106,9 @@ function drive_send_file(string $path, string $displayName, ?string $fileType, b
     }
 
     $safeInline = (bool) preg_match('#^(image/(png|jpe?g|gif|webp|avif|bmp)|application/pdf|video/[\w.+-]+|audio/[\w.+-]+)$#i', (string) $fileType);
-    $inline = $safeInline && !$forceDownload;
+    // An SVG can hold scripts: it's only shown with the sandbox header below, which stops them running.
+    $isSvg = $allowSvg && strtolower((string) $fileType) === 'image/svg+xml';
+    $inline = ($safeInline || $isSvg) && !$forceDownload;
     $asciiName = preg_replace('/[^A-Za-z0-9._-]+/', '_', $displayName) ?: 'download';
 
     $size = filesize($path);
@@ -74,8 +137,8 @@ function drive_send_file(string $path, string $displayName, ?string $fileType, b
     header('Content-Length: ' . ($end - $start + 1));
     header('Accept-Ranges: bytes');
     header('X-Content-Type-Options: nosniff');
-    if (!$inline) {
-        header('Content-Security-Policy: sandbox'); // only here: on inline files it stops Chrome's PDF viewer
+    if (!$inline || $isSvg) {
+        header('Content-Security-Policy: sandbox'); // not on other inline files: it stops Chrome's PDF viewer
     }
     header('Cache-Control: private, no-store');
     if ($partial) {

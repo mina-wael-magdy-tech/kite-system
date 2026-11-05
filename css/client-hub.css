@@ -181,3 +181,63 @@ a.ch-ev:hover { filter: brightness(.9); }
 .ch-drive-upload em { font-style: normal; color: var(--text-muted); }
 .ch-drive-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--border-subtle); overflow: hidden; }
 .ch-drive-bar i { display: block; height: 100%; background: #7bcbe3; transition: width .2s; }
+
+/* Kite Drive: file cards with thumbnails */
+.ch-drive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
+.ch-drive-card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 12px); overflow: hidden; background: var(--bg-card); transition: border-color .15s, transform .15s; }
+.ch-drive-card:hover { border-color: #7bcbe3; transform: translateY(-2px); }
+.ch-drive-thumb { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 0; background: var(--bg-card-inset); cursor: pointer; overflow: hidden; }
+.ch-drive-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ch-drive-icon { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--text-muted); }
+.ch-drive-icon svg { width: 32px; height: 32px; }
+.ch-drive-icon small { font-size: var(--text-2xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.ch-drive-info { display: flex; align-items: center; gap: 4px; padding: var(--space-2); min-width: 0; }
+.ch-drive-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 0; border: 0; background: none; color: inherit; text-align: left; font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.ch-drive-name b, .ch-drive-name em { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-drive-name em { font-style: normal; font-size: var(--text-2xs); color: var(--text-muted); }
+.ch-drive-dl { flex: none; display: flex; padding: 6px; border: 0; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; }
+.ch-drive-dl:hover { background: var(--bg-card-inset); color: inherit; }
+.ch-drive-dl svg { width: 16px; height: 16px; }
+
+/* Kite Drive: preview window */
+.drive-lb { position: fixed; inset: 0; z-index: 9400; display: flex; flex-direction: column; background: rgba(10, 14, 20, .97); color: #fff; outline: none; }
+.drive-lb [hidden] { display: none !important; }
+.drive-lb-bar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); }
+.drive-lb-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.drive-lb-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.drive-lb-title span { font-size: var(--text-2xs); color: rgba(255, 255, 255, .65); }
+.drive-lb-btn, .drive-lb-nav { display: flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .12); color: #fff; cursor: pointer; }
+.drive-lb-btn:hover, .drive-lb-nav:hover { background: rgba(255, 255, 255, .24); }
+.drive-lb-btn svg { width: 18px; height: 18px; }
+.drive-lb-nav svg { width: 24px; height: 24px; }
+.drive-lb-body { flex: 1; min-height: 0; display: flex; align-items: center; gap: var(--space-3); padding: 0 var(--space-4) var(--space-4); }
+.drive-lb-stage { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; justify-content: center; }
+.drive-lb-stage img, .drive-lb-stage video { max-width: 100%; max-height: 100%; object-fit: contain; }
+.drive-lb-stage iframe { width: 100%; height: 100%; border: 0; border-radius: 8px; background: #fff; }
+.drive-lb-stage audio { width: min(520px, 100%); }
+.drive-lb-note { color: rgba(255, 255, 255, .7); font-size: var(--text-sm); }
+.drive-lb-none { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); text-align: center; font-size: var(--text-sm); }
+.drive-lb-none .ch-drive-icon { color: rgba(255, 255, 255, .8); }
+@media (max-width: 640px) {
+  .ch-drive-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .drive-lb-body { position: relative; padding: 0 var(--space-2) var(--space-2); }
+  .drive-lb-nav { position: absolute; top: 50%; z-index: 1; transform: translateY(-50%); }
+  .drive-lb-nav[data-lb="prev"] { left: var(--space-2); }
+  .drive-lb-nav[data-lb="next"] { right: var(--space-2); }
+}
+
+/* Kite Drive: file management */
+.ch-drive { position: relative; }
+.ch-drive-logo { width: 24px; height: 24px; border-radius: 6px; object-fit: contain; background: #fff; }
+.ch-drive-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.ch-drive-card { position: relative; }
+.ch-drive-card.is-selected { border-color: var(--kite-red-500); box-shadow: 0 0 0 1px var(--kite-red-500); }
+.ch-drive-check { position: absolute; top: 8px; left: 8px; z-index: 1; display: flex; padding: 5px; border-radius: 6px; background: rgba(255, 255, 255, .92); box-shadow: 0 1px 3px rgba(0, 0, 0, .2); cursor: pointer; }
+.ch-drive-check input { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: var(--kite-red-500); }
+.ch-drive-folder svg { width: 44px; height: 44px; color: #fbba48; }
+.ch-drive-drop { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--kite-red-500); border-radius: inherit; background: var(--tint-red-soft); font-weight: 700; pointer-events: none; }
+.ch-drive-drop[hidden] { display: none; }
+.drive-lb-text { width: 100%; height: 100%; margin: 0; padding: var(--space-4); overflow: auto; border-radius: 8px; background: #0b0f14; color: #e6edf3; font-size: var(--text-xs); line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.drive-lb-font { width: 100%; max-height: 100%; overflow: auto; padding: var(--space-6); border-radius: 8px; background: #fff; color: #111; font-size: 24px; }
+.drive-lb-font p { margin: 0 0 var(--space-4); }
+.drive-lb-font .big { font-size: 56px; line-height: 1.2; }

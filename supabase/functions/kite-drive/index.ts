@@ -4,9 +4,10 @@
 // short-lived token that the browser sends to Drive's API. Files never pass through here.
 //
 //   status       is this client linked, and what may the caller do?
-//   token        a token for one client: read, write (upload) or download (one file)
+//   token        a token for one client: read, write (upload), view (previews) or download (one file)
 //   link.options the Drive clients available to link
 //   link.set     link this client to a Drive client
+//   link.create  create a new Drive account for this client and link it
 //   link.remove  remove the link (no files are touched)
 //
 // Who: anyone who can see the client can browse and download; only admins can upload or change links.
@@ -16,13 +17,13 @@
 
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
 import { adminClient, audit, Caller, getCaller, requireStaff, userClient } from "../_shared/auth.ts";
-import { oneOf, uuid } from "../_shared/validate.ts";
+import { email, oneOf, text, uuid } from "../_shared/validate.ts";
 
-const ACTIONS = ["status", "token", "link.options", "link.set", "link.remove"] as const;
-const SCOPES = ["read", "write", "download"] as const;
+const ACTIONS = ["status", "token", "link.options", "link.set", "link.create", "link.remove"] as const;
+const SCOPES = ["read", "write", "download", "view"] as const;
 type Scope = (typeof SCOPES)[number] | "admin";
 
-const TOKEN_SECONDS: Record<Scope, number> = { admin: 300, read: 600, write: 1800, download: 120 };
+const TOKEN_SECONDS: Record<Scope, number> = { admin: 300, read: 600, write: 1800, download: 120, view: 600 };
 
 function driveConfig(): { url: string; secret: string } {
   const url = (Deno.env.get("KITE_DRIVE_URL") ?? "").replace(/\/+$/, "");
@@ -136,9 +137,30 @@ serveJson(async (req) => {
     return json(req, { success: true });
   }
 
-  const driveUserId = positiveInt(body.driveUserId, "driveUserId");
-  const match = (await driveClients(caller)).find((c) => c.id === driveUserId);
-  if (!match) throw new HttpError(404, "That Kite Drive account no longer exists");
+  let match: { id: number; name: string } | undefined;
+  if (action === "link.create") {
+    if (link) throw new HttpError(409, "This client is already linked to Kite Drive");
+    const account = {
+      name: text(body.name, "Name", 1, 120),
+      email: email(body.email),
+      password: text(body.password, "Password", 8, 128),
+    };
+    const { url, secret } = driveConfig();
+    const { token } = await signToken(secret, caller.id, "admin", null);
+    const res = await fetch(`${url}/api/index.php?action=create_client`, {
+      method: "POST",
+      headers: { "X-Drive-Token": token, "Content-Type": "application/json" },
+      body: JSON.stringify(account),
+    });
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) throw new HttpError(res.status === 409 || res.status === 400 ? res.status : 502, created.error ?? "Kite Drive refused the request");
+    match = { id: created.id, name: created.name };
+  } else {
+    const wanted = positiveInt(body.driveUserId, "driveUserId");
+    match = (await driveClients(caller)).find((c) => c.id === wanted);
+    if (!match) throw new HttpError(404, "That Kite Drive account no longer exists");
+  }
+  const driveUserId = match.id;
   const { error } = await admin.from("client_drive_links").upsert({
     client_id: clientId, drive_user_id: driveUserId, drive_name: match.name, linked_by: caller.id, linked_at: new Date().toISOString(),
   });

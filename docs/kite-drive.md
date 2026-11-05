@@ -10,12 +10,17 @@ Kite Drive is the PHP site on Hostinger where clients log in to get their files.
 
 | Action | Who |
 | --- | --- |
-| Browse and download | Staff who can see the client (the normal department rules) |
-| Upload | Admins (Super Admin, Owner, CEO, General Manager) |
-| Link or unlink a client | Admins |
-| Delete files | Nobody from here: it stays in Drive's admin panel |
+| Browse, preview and download, including a selection as a ZIP | Staff who can see the client (the normal department rules) |
+| New folder, upload (files, folders, unpacked ZIP, drag and drop), move, rename, delete, client logo | Admins (Super Admin, Owner, CEO, General Manager) |
+| Link, unlink or create a Drive account | Admins |
+
+These stay in Drive's own admin panel: deleting a whole client account, and Drive's own admin users and their permissions. Staff access in the Kite System comes from its own roles.
 
 Uploads go in chunks of up to 8 MB (less if the server's `post_max_size` is lower) and carry on after a dropped connection. The limit is 5 GB per file, set in `api/config.php`, and Hostinger's disk space still applies. Unfinished uploads are removed after two days.
+
+Previews cover images, PDF, video, audio, text and code, and fonts. Photos get a small thumbnail, made once and kept in `api/_thumbs/`. Formats a browser can't show, such as PSD, AI and Office files, still download. Uploaded web pages show as plain text and never run.
+
+Deletes are permanent. Every change, with the staff member's ID, is recorded in `api/_log/actions.log`, which can't be reached from the web.
 
 ## Setting it up
 
