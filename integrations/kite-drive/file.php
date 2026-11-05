@@ -29,7 +29,8 @@ if (!isLoggedIn()) {
 $urlPath = rawurldecode((string) parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH));
 $requested = str_starts_with($urlPath, '/uploads/') ? substr($urlPath, strlen('/uploads/')) : (string) ($_GET['p'] ?? '');
 $requested = str_replace('\\', '/', $requested);
-if ($requested === '' || str_contains($requested, '..') || str_contains($requested, "\0")) {
+// Only a whole ".." segment climbs folders: real names such as "Final..pdf" must still open.
+if ($requested === '' || in_array('..', explode('/', $requested), true) || str_contains($requested, "\0")) {
     deny(404, 'File not found');
 }
 $dbPath = 'uploads/' . ltrim($requested, '/');
