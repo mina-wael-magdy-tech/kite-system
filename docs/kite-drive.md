@@ -38,10 +38,12 @@ Drive works exactly as before after this step.
 ### 3. Supabase
 
 ```
-supabase db push
+supabase db query --linked -f supabase/migrations/019_kite_drive_links.sql
 supabase secrets set KITE_DRIVE_URL="https://our-kites.kiteagency-eg.com" KITE_DRIVE_API_SECRET="<the secret>"
-supabase functions deploy kite-drive
+supabase functions deploy kite-drive --use-api
 ```
+
+**Don't use `supabase db push` on the live project.** Its migration history is empty, so it would try to run every migration again.
 
 ### 4. Kite System
 Deploy the front end as usual. It adds Drive to the allowed connections in `vercel.json`, `.htaccess` and `index.html`.

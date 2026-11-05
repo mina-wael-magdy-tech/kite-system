@@ -53,6 +53,10 @@ verify_jwt = true
 [functions.setup-admin]
 verify_jwt = true
 
+# Files stay on Hostinger; this only checks the caller and signs short-lived tokens.
+[functions.kite-drive]
+verify_jwt = true
+
 [functions.due-reminders]
 # Scheduled daily; protected by the CRON_SECRET header as well as the gateway JWT check.
 verify_jwt = true
