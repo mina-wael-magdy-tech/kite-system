@@ -897,6 +897,81 @@ switch ($action) {
         log_action($claims, 'create_client', ['id' => $newId, 'name' => $name]);
         ok(['id' => $newId, 'name' => $name]);
 
+    case 'client_account':
+        require_scope($claims, ['admin']);
+        $accountId = int_or_null($_GET['id'] ?? null);
+        $row = $accountId === null ? false : $pdo->prepare("SELECT id, name, email FROM users WHERE id = ? AND role = 'client'");
+        if ($row) {
+            $row->execute([$accountId]);
+            $row = $row->fetch();
+        }
+        if (!$row) {
+            fail(404, 'Account not found');
+        }
+        ok(['id' => (int) $row['id'], 'name' => $row['name'], 'email' => $row['email']]);
+
+    case 'update_client':
+        // Change a client's Drive login: name, email and/or password. Only the fields sent are changed.
+        // The password is stored hashed, so it can be set here but never read back.
+        require_scope($claims, ['admin']);
+        require_post($method);
+        $body = json_body();
+        $accountId = int_or_null($body['id'] ?? null);
+        $current = $accountId === null ? false : $pdo->prepare("SELECT id, name, email FROM users WHERE id = ? AND role = 'client'");
+        if ($current) {
+            $current->execute([$accountId]);
+            $current = $current->fetch();
+        }
+        if (!$current) {
+            fail(404, 'Account not found');
+        }
+        $sets = [];
+        $values = [];
+        $changed = [];
+        if (array_key_exists('name', $body) && trim((string) $body['name']) !== '') {
+            $name = trim((string) $body['name']);
+            if (mb_strlen($name) > 120) {
+                fail(400, 'The name is too long');
+            }
+            $sets[] = 'name = ?';
+            $values[] = $name;
+            $changed[] = 'name';
+        }
+        if (array_key_exists('email', $body) && trim((string) $body['email']) !== '') {
+            $email = strtolower(trim((string) $body['email']));
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 254) {
+                fail(400, 'Enter a valid email');
+            }
+            if ($email !== strtolower((string) $current['email'])) {
+                $taken = $pdo->prepare('SELECT 1 FROM users WHERE email = ? AND id <> ?');
+                $taken->execute([$email, $accountId]);
+                if ($taken->fetchColumn()) {
+                    fail(409, 'Another Kite Drive account already uses this email');
+                }
+                $sets[] = 'email = ?';
+                $values[] = $email;
+                $changed[] = 'email';
+            }
+        }
+        if (array_key_exists('password', $body) && (string) $body['password'] !== '') {
+            $password = (string) $body['password'];
+            if (strlen($password) < 8 || strlen($password) > 128) {
+                fail(400, 'The password must be 8 to 128 characters');
+            }
+            $sets[] = 'password = ?';
+            $values[] = password_hash($password, PASSWORD_DEFAULT);
+            $changed[] = 'password';
+        }
+        if ($sets) {
+            $values[] = $accountId;
+            $pdo->prepare('UPDATE users SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($values);
+            log_action($claims, 'update_client', ['id' => $accountId, 'changed' => $changed]); // never the password itself
+        }
+        $after = $pdo->prepare('SELECT name, email FROM users WHERE id = ?');
+        $after->execute([$accountId]);
+        $now = $after->fetch();
+        ok(['id' => $accountId, 'name' => $now['name'], 'email' => $now['email'], 'changed' => $changed]);
+
     case 'upload_init':
         require_scope($claims, ['write']);
         if ($method !== 'POST') {

@@ -19,7 +19,7 @@ import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
 import { adminClient, audit, Caller, getCaller, requireStaff, userClient } from "../_shared/auth.ts";
 import { email, oneOf, text, uuid } from "../_shared/validate.ts";
 
-const ACTIONS = ["status", "token", "link.options", "link.set", "link.create", "link.remove"] as const;
+const ACTIONS = ["status", "token", "link.options", "link.set", "link.create", "link.remove", "link.account", "link.update"] as const;
 const SCOPES = ["read", "write", "download", "view"] as const;
 type Scope = (typeof SCOPES)[number] | "admin";
 
@@ -129,6 +129,42 @@ serveJson(async (req) => {
 
   // ---- changing a link -------------------------------------------------------
   if (!isDriveAdmin(caller)) throw new HttpError(403, "Only admins can link Kite Drive accounts");
+
+  // The client's Drive login: read it (never the password, Drive only keeps a hash), or change email / name / password.
+  if (action === "link.account" || action === "link.update") {
+    if (!link) throw new HttpError(409, "This client isn't linked to Kite Drive");
+    const { url, secret } = driveConfig();
+    const { token } = await signToken(secret, caller.id, "admin", null);
+    const headers = { "X-Drive-Token": token, "Content-Type": "application/json" };
+    let res: Response;
+    try {
+      res = action === "link.account"
+        ? await fetch(`${url}/api/index.php?action=client_account&id=${link.drive_user_id}`, { headers })
+        : await fetch(`${url}/api/index.php?action=update_client`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            id: link.drive_user_id,
+            ...(typeof body.name === "string" && body.name.trim() ? { name: text(body.name, "Name", 1, 120) } : {}),
+            ...(typeof body.email === "string" && body.email.trim() ? { email: email(body.email) } : {}),
+            ...(typeof body.password === "string" && body.password ? { password: text(body.password, "Password", 8, 128) } : {}),
+          }),
+        });
+    } catch (err) {
+      console.error("Kite Drive unreachable:", err);
+      throw new HttpError(502, "Couldn't reach Kite Drive");
+    }
+    const out = await res.json().catch(() => ({}));
+    if (res.status === 404 && out.error === "Unknown action") throw new HttpError(502, "Kite Drive needs its latest update before accounts can be edited");
+    if (!res.ok) throw new HttpError([400, 404, 409].includes(res.status) ? res.status : 502, out.error ?? "Kite Drive refused the request");
+    if (action === "link.account") return json(req, { success: true, name: out.name, email: out.email });
+    if (typeof out.name === "string" && out.name !== link.drive_name) {
+      await admin.from("client_drive_links").update({ drive_name: out.name }).eq("client_id", clientId);
+    }
+    // what changed, never the new password
+    await audit(admin, { userId: caller.id, action: "kite_drive.account_update", entityType: "client", entityId: clientId, newData: { drive_user_id: link.drive_user_id, changed: out.changed ?? [] } }, req);
+    return json(req, { success: true, name: out.name, email: out.email, changed: out.changed ?? [] });
+  }
 
   if (action === "link.remove") {
     const { error } = await admin.from("client_drive_links").delete().eq("client_id", clientId);

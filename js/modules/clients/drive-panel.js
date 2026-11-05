@@ -186,6 +186,7 @@ export class DrivePanel {
       <label class="btn btn-secondary btn-sm" style="cursor:pointer;"><i data-lucide="image-plus"></i> Logo<input data-drive="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden /></label>` : '';
     const actions = `${manage}
       ${s.driveUrl ? `<a class="btn btn-secondary btn-sm" href="${escapeHTML(s.driveUrl)}" target="_blank" rel="noopener noreferrer"><i data-lucide="external-link"></i> Open</a>` : ''}
+      ${s.canLink ? '<button type="button" class="btn btn-secondary btn-sm" data-drive="account"><i data-lucide="key-round"></i> Login details</button>' : ''}
       ${s.canLink ? '<button type="button" class="btn btn-secondary btn-sm" data-drive="unlink"><i data-lucide="unlink"></i> Unlink</button>' : ''}`;
     return `${this.headHTML(actions)}${this.uploadsHTML()}${this.error ? `<p class="text-xs text-muted">${escapeHTML(this.error)}</p>` : ''}${this.listingHTML()}
       ${s.canUpload ? '<div class="ch-drive-drop" hidden>Drop files or folders to upload here</div>' : ''}`;
@@ -294,6 +295,7 @@ export class DrivePanel {
     on('link', () => this.link());
     on('create', () => this.createAccount());
     on('unlink', () => this.unlink());
+    on('account', () => this.editAccount());
     on('mkdir', () => this.newFolder());
     picked('upload', (files) => this.uploadAll(files.map((file) => ({ file, parts: [] }))));
     picked('upload-folder', (files) => this.uploadAll(files.map((file) => ({ file, parts: (file.webkitRelativePath || '').split('/').slice(0, -1) }))));
@@ -767,6 +769,39 @@ export class DrivePanel {
         this.folderId = null;
         this.listing = null;
         await this.load();
+      }
+    });
+  }
+
+  /** The client's login to Kite Drive: see the email, change it, or set a new password. */
+  async editAccount() {
+    const clientId = this.clientId;
+    let account;
+    try {
+      account = await Api.kiteDrive('link.account', { clientId });
+    } catch (err) {
+      Toast.error(err.message, 'Could not open the login details');
+      return;
+    }
+    const site = this.status?.driveUrl;
+    formDialog({
+      title: 'Kite Drive login',
+      subtitle: `${site ? `The client logs in at ${site}. ` : ''}A password can be set but never shown, because Drive keeps only a scrambled copy. Leave it empty to keep the current one. Send the client their new details yourself: nothing is emailed.`,
+      submitLabel: 'Save login',
+      fields: [
+        { name: 'name', label: 'Name shown in Drive', value: account.name || '', maxlength: 120 },
+        { name: 'email', label: 'Login email', type: 'email', value: account.email || '', required: true, maxlength: 254 },
+        { name: 'password', label: 'New password', type: 'password', minlength: 8, maxlength: 128, hint: 'At least 8 characters. Empty means no change.' }
+      ],
+      onSubmit: async (values) => {
+        const changes = {};
+        if (values.name && values.name !== account.name) changes.name = values.name;
+        if (values.email && values.email.toLowerCase() !== String(account.email).toLowerCase()) changes.email = values.email;
+        if (values.password) changes.password = values.password;
+        if (!Object.keys(changes).length) throw new Error('Nothing changed');
+        const saved = await Api.kiteDrive('link.update', { clientId, ...changes });
+        Toast.success(saved.changed?.includes('password') ? 'Login saved. Share the new password with the client.' : 'Login saved');
+        if (clientId === this.clientId) { this.status = { ...this.status, driveName: saved.name || this.status.driveName }; this.paint(); }
       }
     });
   }
