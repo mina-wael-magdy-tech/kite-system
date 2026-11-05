@@ -15,6 +15,7 @@ import { Realtime } from '../../services/realtime-service.js';
 import { formDialog } from '../../ui/dialogs.js';
 import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency, debounce } from '../../utils/helpers.js';
+import { DrivePanel } from './drive-panel.js';
 
 const DONE = new Set(['completed', 'approved']);
 const CLOSED = new Set(['completed', 'approved', 'cancelled']);
@@ -57,6 +58,7 @@ export class ClientHubModule {
     this.tab = 'overview';
     this.data = null;            // everything about the opened client
     this.calMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    this.drive = new DrivePanel();
   }
 
   async render(container, query) {
@@ -467,7 +469,8 @@ export class ClientHubModule {
       ...attachments.map(a => ({ bucket: CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS, path: a.storage_path, name: a.file_name, size: a.file_size, at: a.created_at, from: 'Task: ' + (taskName.get(a.task_id) || '') }))
     ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
     this._files = rows;
-    return `<div class="ch-row" style="margin-bottom:var(--space-2);"><span class="text-xs text-muted">${rows.length} file${rows.length === 1 ? '' : 's'} — library uploads for this client and files attached to its tasks.</span>
+    return `<div id="chDrive" style="margin-bottom:var(--space-4);"></div>
+      <div class="ch-row" style="margin-bottom:var(--space-2);"><span class="text-xs text-muted">${rows.length} file${rows.length === 1 ? '' : 's'} — library uploads for this client and files attached to its tasks.</span>
       <label class="btn btn-primary btn-sm" style="cursor:pointer;"><i data-lucide="upload"></i> Upload files<input id="chUpload" type="file" multiple hidden /></label></div>
       ${rows.length ? `<div class="ch-files">${rows.map((f, i) => `<button type="button" class="ch-file" data-file="${i}">
         <i data-lucide="file"></i><span class="ch-ellipsis"><b>${escapeHTML(f.name)}</b><em>${escapeHTML(f.from)} · ${sizeText(f.size || 0)} · ${formatDate(f.at)}</em></span><i data-lucide="download"></i></button>`).join('')}</div>`
@@ -476,6 +479,8 @@ export class ClientHubModule {
 
   // ---------------------------------------------------------------- shared wiring
   bindTab(body) {
+    const driveEl = body.querySelector('#chDrive');
+    if (driveEl) this.drive.mount(driveEl, this.clientId);
     body.querySelectorAll('[data-open-task]').forEach(el => el.addEventListener('click', () => { location.hash = `#tasks?q=${encodeURIComponent(el.dataset.openTask)}`; }));
     body.querySelector('#chPrev')?.addEventListener('click', () => { this.calMonth = new Date(this.calMonth.getFullYear(), this.calMonth.getMonth() - 1, 1); this.paintTab(); });
     body.querySelector('#chNext')?.addEventListener('click', () => { this.calMonth = new Date(this.calMonth.getFullYear(), this.calMonth.getMonth() + 1, 1); this.paintTab(); });

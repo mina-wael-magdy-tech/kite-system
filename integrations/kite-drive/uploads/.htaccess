@@ -1,0 +1,9 @@
+# Every file request goes through file.php, which checks the login.
+Options -Indexes
+RewriteEngine On
+RewriteRule ^(.*)$ /file.php?p=$1 [L,B,QSA]
+
+# Never run anything stored here, even if the rewrite above stopped working.
+<FilesMatch "(?i)\.(php\d?|phtml|pht|phar|phps|cgi|pl|py|sh|asp|aspx|jsp|shtml)(\.|$)">
+  Require all denied
+</FilesMatch>

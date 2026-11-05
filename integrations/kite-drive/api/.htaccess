@@ -1,0 +1,8 @@
+# Only index.php can be reached from the web.
+Options -Indexes
+<FilesMatch ".*">
+  Require all denied
+</FilesMatch>
+<FilesMatch "^(index\.php)?$">
+  Require all granted
+</FilesMatch>

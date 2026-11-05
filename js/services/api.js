@@ -81,6 +81,9 @@ export const Api = {
   leaveSubmitted: (leaveId) => Api.workflow('leave.submitted', { leaveId }),
   expenseSubmitted: (expenseId) => Api.workflow('expense.submitted', { expenseId }),
 
+  // Kite Drive (client files stored on Hostinger)
+  kiteDrive: (action, params = {}) => invoke('kite-drive', { action, ...params }),
+
   // content plans (feed calendars shared with clients)
   contentPlan: (action, params = {}) => invoke('content-plan', { action, ...params }),
   getPlanShare: (planId) => Api.contentPlan('share.get', { planId }),

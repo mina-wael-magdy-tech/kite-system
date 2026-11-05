@@ -168,3 +168,16 @@ a.ch-ev:hover { filter: brightness(.9); }
   .ch-tabs { width: 100%; }
   .ch-tab { padding: 8px 12px; }
 }
+
+/* Kite Drive section of the Files tab */
+.ch-drive-head { justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.ch-drive-head h3 { display: flex; align-items: center; gap: 6px; }
+.ch-drive-head h3 svg { width: 16px; height: 16px; }
+.ch-drive-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ch-drive-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: var(--space-3) 0; font-size: var(--text-xs); }
+.ch-drive-crumb { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-decoration: underline; }
+.ch-drive-uploads { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+.ch-drive-upload { display: grid; grid-template-columns: 1fr auto; gap: 4px var(--space-2); font-size: var(--text-xs); }
+.ch-drive-upload em { font-style: normal; color: var(--text-muted); }
+.ch-drive-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--border-subtle); overflow: hidden; }
+.ch-drive-bar i { display: block; height: 100%; background: #7bcbe3; transition: width .2s; }
