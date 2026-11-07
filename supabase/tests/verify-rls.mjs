@@ -515,6 +515,15 @@ check('the backup schema is not reachable from the API roles', denied(r3), JSON.
   check('F-03 a retry after the invoice became paid returns the first payment (no "paid invoice" error)', !rep2.error && rep2.rows[0].id === rep.rows[0].id, JSON.stringify(rep2));
   r3 = await fq(`UPDATE public.invoice_payments SET request_id = NULL WHERE id=$1`, [rep.rows[0].id]);
   check('F-03 the request id of a payment cannot be edited', !!r3.error, JSON.stringify(r3));
+  // R-2: ANY difference from the original request is a conflict
+  const rq = (amt, on, method, ref, notes, inv = A.id) => fq(`SELECT public.fin_payment_add($1, $2, $3, ${on}, $4, $5, $6, $7) id`, [U.admin, inv, amt, method, ref, notes, 'dddddddd-0000-4000-8000-000000000003']);
+  for (const [label, args] of [['amount', [199, 'current_date', 'cash', null, null]], ['date', [200, "current_date - 1", 'cash', null, null]], ['method', [200, 'current_date', 'cheque', null, null]],
+                               ['reference', [200, 'current_date', 'cash', 'TX-9', null]], ['notes', [200, 'current_date', 'cash', null, 'changed']], ['invoice', [200, 'current_date', 'cash', null, null, B.id]]]) {
+    const z = await rq(...args);
+    check('R-2 a request id reused with a different ' + label + ' is rejected', !!z.error && /different payment/.test(z.error), JSON.stringify(z));
+  }
+  { const z = await rq(200, 'current_date', 'cash', '', ''); check('R-2 empty-string reference/notes equal NULL (same request), still the original payment', !z.error && z.rows[0].id === rep.rows[0].id, JSON.stringify(z)); }
+  check('R-2 none of the rejected attempts changed anything (paid 1000)', num((await st(A.id)).amount_paid) === 1000);
 
   // F-01 (single-connection part): reversing keeps figures and status in step
   await db.query(`SELECT public.fin_payment_reverse($1, $2, 'bounced')`, [U.admin, rep.rows[0].id]);
@@ -523,6 +532,13 @@ check('the backup schema is not reachable from the API roles', denied(r3), JSON.
   r3 = await fq(`SELECT count(*)::int c FROM public.fin_reconcile_invoices() WHERE invoice_id = $1`, [A.id]);
   check('F-01 reconcile reports nothing for it', r3.rows[0].c === 0, JSON.stringify(r3));
   r3 = await fq(`SELECT public.fin_payment_reverse($1, $2, 'again')`, [U.admin, rep.rows[0].id]);
+  { const z = await rq(200, 'current_date', 'cash', null, null);
+    check('R-3 replaying the id of a REVERSED payment is an explicit error, not a success', !!z.error && /has since been reversed/.test(z.error) && !z.rows, JSON.stringify(z));
+    check('R-3 ... and records nothing new (paid still 800)', num((await st(A.id)).amount_paid) === 800 && num((await fq(`SELECT count(*) c FROM public.invoice_payments WHERE invoice_id=$1`, [A.id])).rows[0].c) === 3);
+    const z2 = await rq(150, 'current_date', 'cash', null, null);
+    check('R-3 a reversed id replayed with different details is the conflict error (R-2 first)', !!z2.error && /different payment/.test(z2.error), JSON.stringify(z2));
+    const fresh = await pay(A.id, 200, 'dddddddd-0000-4000-8000-000000000004');
+    check('R-3 a NEW request id records the replacement payment normally', !fresh.error && num((await st(A.id)).amount_paid) === 1000, JSON.stringify(fresh)); }
   check('F-01 a payment cannot be reversed twice', !!r3.error && /already reversed/.test(r3.error), JSON.stringify(r3));
   r3 = await fq(`SELECT public.fin_payment_reverse($1, 'eeeeeeee-0000-4000-8000-000000000009', 'x')`, [U.admin]);
   check('F-01 reversing an unknown payment is refused', !!r3.error && /not found/.test(r3.error), JSON.stringify(r3));

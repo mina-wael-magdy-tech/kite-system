@@ -319,6 +319,49 @@ try {
     ok((await leg.query("SELECT count(*)::int c FROM pg_proc WHERE proname='fin_payment_add'")).rows[0].c >= 1 && (await leg.query("SELECT count(*)::int c FROM pg_constraint WHERE conrelid='public.invoices'::regclass AND conname LIKE 'invoices\\_%\\_chk'")).rows[0].c === 6, '028 can be applied again after a rollback');
     { const rr = (await leg.query('SELECT invoice_number, problem FROM public.fin_reconcile_invoices()')).rows; ok(rr.length === 3 && rr.every((x) => /^OLD-/.test(x.invoice_number) && /without a client/.test(x.problem)), 'and reconcile reports only the three legacy invoices that never had a client (information, nothing blocked)', JSON.stringify(rr)); }
   }
+
+  section('10. R-1: 028 -> re-run 017 -> re-apply 028 restores every protected function (and R-2 / R-3 on a real server)');
+  {
+    // R-2 / R-3 on real PostgreSQL
+    const inv = await F.invoice(fc); const REQ = uuid(900);
+    const full = (c, amt, method, ref, notes, req) => c.query(`SELECT public.fin_payment_add($1,$2,$3,current_date,$4,$5,$6,$7::uuid) id`, [U, inv, amt, method, ref, notes, req]).then((r) => r.rows[0].id);
+    const first = await full(fin, 300, 'bank_transfer', 'REF-1', 'note', REQ);
+    ok(await full(fin, 300, 'bank_transfer', 'REF-1', 'note', REQ) === first, 'R-2: an identical replay returns the original payment');
+    for (const [label, args] of [['method', [300, 'cash', 'REF-1', 'note']], ['reference', [300, 'bank_transfer', 'REF-2', 'note']], ['notes', [300, 'bank_transfer', 'REF-1', 'other']], ['amount', [301, 'bank_transfer', 'REF-1', 'note']]]) {
+      let e = ''; try { await full(fin, ...args, REQ); } catch (x) { e = x.message; }
+      ok(/different payment/.test(e), 'R-2: reuse with a different ' + label + ' is rejected', e);
+    }
+    await reverse(fin, first);
+    let e3 = ''; try { await full(fin, 300, 'bank_transfer', 'REF-1', 'note', REQ); } catch (x) { e3 = x.message; }
+    ok(/has since been reversed/.test(e3), 'R-3: replaying the id of a reversed payment is an explicit error', e3);
+    ok((await F.state(inv)).paid === 0 && (await fin.query('SELECT count(*)::int c FROM public.invoice_payments WHERE invoice_id=$1', [inv])).rows[0].c === 1, 'R-3: nothing new was recorded');
+
+    // R-1
+    const names = ['fin_recalc_invoice', 'fin_payment_reverse', 'fin_payment_add', 'fin_invoice_issue', 'fin_invoice_save', 'fin_retainer_generate', 'fin_invoice_guard', 'fin_payment_guard'];
+    const defs = async () => JSON.stringify((await fin.query(`SELECT p.oid::regprocedure::text sig, pg_get_functiondef(p.oid) d FROM pg_proc p WHERE p.pronamespace='public'::regnamespace AND p.proname = ANY($1) ORDER BY 1`, [names])).rows);
+    const nPay = async () => (await fin.query("SELECT count(*)::int c FROM pg_proc WHERE proname='fin_payment_add' AND pronamespace='public'::regnamespace")).rows[0].c;
+    const data = async () => JSON.stringify((await fin.query(`SELECT (SELECT json_agg(i ORDER BY id) FROM public.invoices i) inv, (SELECT json_agg(p ORDER BY id) FROM public.invoice_payments p) pay,
+      (SELECT json_agg(t ORDER BY id) FROM public.invoice_items t) itm, (SELECT json_agg(r ORDER BY id) FROM public.retainer_plans r) plans`)).rows[0]);
+    const good = await defs(); const data0 = await data();
+    ok(await nPay() === 1 && JSON.parse(good).length === names.length, 'baseline: after 028 there is exactly one fin_payment_add and all 8 protected functions exist', String(await nPay()));
+    await fin.query(sql('migrations/017_finance_invoicing.sql'));
+    const down = await defs();
+    ok(down !== good && await nPay() === 2, 'a re-run of 017 DOES replace the protected functions and re-creates the 7-argument overload (the risk is real)');
+    ok(!/FOR UPDATE/.test(JSON.parse(down).find((r) => r.sig.startsWith('fin_recalc_invoice')).d), 'while downgraded, fin_recalc_invoice no longer takes the invoice lock');
+    let amb = ''; try { await pay(fin, inv, 1); } catch (x) { amb = x.message; }
+    ok(/not unique/.test(amb), 'while both overloads exist a 7-argument call fails closed ("function is not unique"), it does not run the old body', amb);
+    ok(await data() === data0, 're-running 017 changed no invoice, line, payment or plan');
+    await fin.query(sql('migrations/028_finance_integrity.sql'));
+    ok(await defs() === good, 're-applying 028 restores ALL protected function definitions byte-for-byte');
+    ok(await nPay() === 1, '... and removes the 7-argument overload again (exactly one fin_payment_add)');
+    ok((await fin.query("SELECT pg_get_function_identity_arguments(oid) a FROM pg_proc WHERE proname='fin_payment_add' AND pronamespace='public'::regnamespace")).rows[0].a.endsWith('p_request uuid'), '... and it is the 8-argument idempotent one');
+    ok(await data() === data0, '... without changing any historical row');
+    ok((await fin.query("SELECT count(*)::int c FROM pg_constraint WHERE conrelid='public.invoices'::regclass AND conname LIKE 'invoices\_%\_chk' AND convalidated")).rows[0].c === 6, '... and all six CHECKs are still validated');
+    ok(await pay(fin, inv, 100, uuid(901)) === await pay(fin, inv, 100, uuid(901)), 'idempotency works again after the restore');
+    ok((await fin.query('SELECT count(*)::int c FROM public.fin_reconcile_invoices()')).rows[0].c === 0, 'reconcile is clean after the restore');
+    for (const [fn, who] of [['fin_payment_add(uuid,uuid,numeric,date,text,text,text,uuid)', 'authenticated'], ['fin_payment_add(uuid,uuid,numeric,date,text,text,text,uuid)', 'anon']])
+      ok((await fin.query(`SELECT has_function_privilege('${who}', '${fn}', 'EXECUTE') x`)).rows[0].x === false, `${fn} is not executable by ${who} after the restore`);
+  }
 } catch (e) { failed++; console.log('SCRIPT ERROR', e); }
 finally {
   for (const c of conns) { try { await c.end(); } catch { /* already closed */ } }

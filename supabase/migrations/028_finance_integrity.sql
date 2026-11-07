@@ -5,7 +5,9 @@
 --         fin_recalc_invoice itself takes the invoice lock, then computes the totals AND the status in ONE UPDATE.
 --         (Before: reversing a payment while another payment/reversal was running wrote a stale amount_paid.)
 --   F-03  invoice_payments.request_id (client-supplied UUID) + a unique index. fin_payment_add takes it as an optional
---         last argument; repeating a request returns the SAME payment instead of recording a second one.
+--         last argument; repeating an IDENTICAL request returns the SAME payment instead of recording a second one; a request id reused with any
+--         different invoice / amount / date / method / reference / notes is rejected; replaying the id of a payment that was
+--         reversed since raises an explicit 'has since been reversed' error (never a success).
 --   F-04  An invoice cannot be issued without a client (function check + a guard on the draft -> issued transition).
 --   F-05  CHECK constraints on invoice amounts / balance / status, and status-transition rules in fin_invoice_guard.
 --         The CHECKs are added NOT VALID (enforced for every new write) and are VALIDATED only if the existing data
@@ -19,6 +21,12 @@
 --
 -- Nothing is deleted or rewritten: no historical row is updated by this migration.
 -- Safe to run more than once. Run AFTER 017 (and 022). Applied manually; never `db push` on live.
+--
+-- IMPORTANT: if 017_finance_invoicing.sql is EVER re-run after this migration (it is idempotent, but it re-creates the
+-- ORIGINAL bodies of eight functions and the original 7-argument fin_payment_add, silently undoing F-01, F-03, F-04,
+-- F-13 and F-14), RE-APPLY 028 immediately afterwards. 028 is idempotent: it drops the old overload and restores every
+-- function. Verify with:  SELECT count(*) FROM pg_proc WHERE proname = 'fin_payment_add';   -- must be 1
+-- (tested: supabase/tests/verify-finance-concurrency.mjs, section 10).
 --
 -- ROLLBACK (no data is lost; request_id values stay in their column):
 --   DROP TRIGGER IF EXISTS fin_paid_sum_invoice ON public.invoices;
@@ -122,8 +130,15 @@ BEGIN
   IF p_request IS NOT NULL THEN                       -- a repeated request returns the payment it already created
     SELECT * INTO ex FROM public.invoice_payments WHERE request_id = p_request;
     IF FOUND THEN
-      IF ex.invoice_id <> p_invoice OR ex.amount IS DISTINCT FROM v_amount OR ex.paid_on IS DISTINCT FROM p_paid_on THEN
+      -- the request must be IDENTICAL to the one that created the payment (invoice, amount, date, method, reference, notes)
+      IF ex.invoice_id <> p_invoice OR ex.amount IS DISTINCT FROM v_amount OR ex.paid_on IS DISTINCT FROM p_paid_on
+         OR ex.method IS DISTINCT FROM coalesce(nullif(p_method, ''), 'bank_transfer')
+         OR ex.reference IS DISTINCT FROM nullif(p_reference, '') OR ex.notes IS DISTINCT FROM nullif(p_notes, '') THEN
         RAISE EXCEPTION 'This request id was already used for a different payment';
+      END IF;
+      -- an identical replay of a payment that was reversed since is NOT a success: say so, never report it as an active payment
+      IF ex.reversed_at IS NOT NULL THEN
+        RAISE EXCEPTION 'This payment was already recorded and has since been reversed (%). Record a new payment with a new request id.', to_char(ex.reversed_at, 'YYYY-MM-DD');
       END IF;
       RETURN ex.id;
     END IF;
