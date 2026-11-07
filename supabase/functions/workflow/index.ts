@@ -473,7 +473,11 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
 
   if (Object.keys(patch).length) {
     const { error } = await admin.from("profiles").update(patch).eq("id", userId);
-    if (error) throw error;
+    if (error) {
+      // the database guard (migration 023) refused: a concurrent request just removed the other active super_admin
+      if (/last_super_admin/.test(error.message)) throw new HttpError(409, "Cannot remove, disable or delete the last active super administrator");
+      throw error;
+    }
     if (deptIds) {
       await admin.from("user_departments").delete().eq("user_id", userId);
       if (deptIds.length) {

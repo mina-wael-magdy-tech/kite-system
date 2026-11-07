@@ -16,6 +16,8 @@ import { CONFIG } from '../../config.js';
 import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
 const DEFAULT_FOLDERS = ['General', 'Branding', 'Logos', 'Social Media', 'Video & Motion', 'Print & BTL', 'Web', 'Client Files', 'Contracts', 'Guidelines'];
+// Contracts are confidential Finance material (executive-only in the database, migration 024); other staff are not offered the folder.
+const defaultFolders = () => DEFAULT_FOLDERS.filter(f => Permissions.isOwner() || !/^contract/i.test(f));
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'];
 const TYPE_GROUPS = {
   image: IMAGE_EXT,
@@ -305,7 +307,7 @@ export class DocumentsModule {
 
   editAsset(asset) {
     if (!asset) return;
-    const folders = [...new Set([...DEFAULT_FOLDERS, ...this.assets.filter(a => a.source === 'asset').map(a => a.folder)])];
+    const folders = [...new Set([...defaultFolders(), ...this.assets.filter(a => a.source === 'asset').map(a => a.folder)])];
     formDialog({
       title: 'Edit file details',
       subtitle: asset.file_name,
@@ -390,7 +392,7 @@ export class DocumentsModule {
     this.projects = projectRows || [];
     this.departments = deptRows || [];
     const tasks = taskRows || [];
-    const folders = [...new Set([...DEFAULT_FOLDERS, ...this.assets.filter(a => a.source === 'asset').map(a => a.folder)])];
+    const folders = [...new Set([...defaultFolders(), ...this.assets.filter(a => a.source === 'asset').map(a => a.folder)])];
     const myDept = this.app.currentProfile?.department_id || '';
 
     this.pending = [];

@@ -35,6 +35,8 @@ serveJson(async (req) => {
     const { error: delErr } = await admin.auth.admin.deleteUser(targetId);
     if (delErr) {
       console.error("delete employee failed:", delErr);
+      // refused by the database guard (migration 023)? Say so instead of the generic "linked records" message.
+      await assertNotLastActiveSuperAdmin(admin, targetId);
       throw new HttpError(409, "Could not delete: this employee has linked records (tasks, expenses...). Set their status to Inactive instead.");
     }
     await audit(admin, { userId: caller.id, action: "EMPLOYEE_DELETED", entityType: "profiles", entityId: targetId, oldData: { email: target.email } }, req);

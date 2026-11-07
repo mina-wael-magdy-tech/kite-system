@@ -81,6 +81,7 @@ The access model was tested by running all migrations against PostgreSQL and att
 ## Role tiers and Finance confidentiality (policy approved 2026-11-07, migrations 020-022)
 - **Executive tier = super_admin, owner, ceo** (one equal tier). Only they may view Finance data anywhere and only they may grant `finance_manager` / `accountant`. Being in the Finance department grants nothing.
 - Employee management (`invite-employee`, `workflow employee.update`) is open to executives, general_manager and hr_manager. A caller may grant a role / modify / disable / delete an account only at or below their own tier (general_manager 2, finance roles 3, hr_manager 4, everyone else 5); executives manage each other.
-- The last **active** super_admin can never be demoted, disabled or deleted. Role replacement is atomic (`replace_user_role()`).
+- The last **active** super_admin can never be demoted, disabled or deleted, enforced by database triggers (migration 023, serialized with an advisory lock, tested on real PostgreSQL by `supabase/tests/verify-concurrency.mjs`). Role replacement is atomic (`replace_user_role()`).
+- Library files in a **Contracts** folder (or flagged `assets.finance_confidential`) are executive-only, including their Storage objects (migration 024).
 - Single source in code: `supabase/functions/_shared/auth.ts` (`EXECUTIVE_ROLES`, `ROLE_TIER`). In SQL: `auth_is_finance()` (= executive) and `auth_is_owner()`; in the UI: `js/services/money.js`. `supabase/tests/verify-roles.mjs` fails if they drift apart.
 - Open gaps and decisions: `docs/system-architecture-audit/phase-0/FINANCE_ACCESS_AUDIT.md`.

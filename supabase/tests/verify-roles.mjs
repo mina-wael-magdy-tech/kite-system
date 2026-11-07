@@ -4,7 +4,7 @@
 // Part A  runs the REAL Edge Function code (invite-employee, workflow, accept-invitation, _shared/auth.ts) under
 //         Node: esbuild bundles the TypeScript, Deno.serve is captured, and the service-role client is an
 //         in-memory fake (it does NOT test Postgres; Part B does).
-// Part B  applies all migrations (001-022) to an in-process Postgres (PGlite, Supabase-style stubs) and tests
+// Part B  applies all migrations (001-025) to an in-process Postgres (PGlite, Supabase-style stubs) and tests
 //         replace_user_role() and migration 021 with real SQL.
 // Usage: npm install && node verify-roles.mjs      (no network, no production access)
 import { build } from 'esbuild';
@@ -63,7 +63,7 @@ const ALL_ROLES = ['super_admin', 'owner', 'ceo', 'general_manager', 'finance_ma
 
 function makeDb() {
   const T = { profiles: [], roles: [], user_roles: [], departments: [], user_departments: [], invitations: [], audit_logs: [], notifications: [], push_subscriptions: [], expenses: [] };
-  const users = [], log = [], flags = { failInsert: null, failRpc: false, rpcMissing: false };
+  const users = [], log = [], flags = { failInsert: null, failRpc: false, rpcMissing: false, profileUpdateError: null, rpcError: null, onDeleteUser: null };
   let seq = 0;
   const uid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
   const attach = (table, row, cols) => (table === 'user_roles' && /roles(!inner)?\(/.test(cols || ''))
@@ -103,6 +103,7 @@ function makeDb() {
         return this.ret ? { data: this.one ? made[0] ?? null : made, error: null } : { data: null, error: null };
       }
       if (this.op === 'update') {
+        if (flags.profileUpdateError && this.table === 'profiles') return { data: null, error: { message: flags.profileUpdateError } };
         const hit = match(); for (const r of hit) Object.assign(tbl.find((x) => x.id === r.id), this.patch);
         log.push({ op: 'update', table: this.table });
         return this.ret ? { data: this.one ? hit[0] ?? null : hit, error: null } : { data: null, error: null };
@@ -115,6 +116,7 @@ function makeDb() {
   const rpc = async (name, a) => {
     log.push({ op: 'rpc', name });
     if (name !== 'replace_user_role') return { data: RPC_RESULTS[name] ?? null, error: null };
+    if (flags.rpcError) return { data: null, error: { message: flags.rpcError } };
     if (flags.rpcMissing) return { data: null, error: { message: 'Could not find the function public.replace_user_role' } };
     const role = T.roles.find((r) => r.id === a.p_role_id && r.is_active);
     if (!role) return { data: null, error: { message: 'unknown_role' } };
@@ -143,7 +145,7 @@ function makeDb() {
       getUser: async (token) => { const id = String(token).replace('tok:', ''); const u = users.find((x) => x.id === id); return u ? { data: { user: u }, error: null } : { data: { user: null }, error: { message: 'bad token' } }; },
       admin: {
       updateUserById: async (id, a) => { log.push({ op: 'ban', id, a }); return { error: null }; },
-      deleteUser: async (id) => { removeUser(id); log.push({ op: 'deleteUser', id }); return { error: null }; },
+      deleteUser: async (id) => { if (flags.onDeleteUser) { flags.onDeleteUser(id); return { error: { message: 'Database error deleting user' } }; } removeUser(id); log.push({ op: 'deleteUser', id }); return { error: null }; },
       inviteUserByEmail: async (email) => { const u = { id: uid(), email }; users.push(u); log.push({ op: 'invite', id: u.id }); return { data: { user: u }, error: null }; },
       listUsers: async () => ({ data: { users } }),
     } },
@@ -510,10 +512,28 @@ section('A14 consistency: database, Edge Functions and UI use the same executive
 }
 
 
+section('A15 race losers are reported as 409 (database guard from migration 023)');
+{
+  let db = world(); db.flags.profileUpdateError = 'last_super_admin';
+  let r = await call(workflow, db.P.caller_owner, { action: 'employee.update', userId: db.P.target_super_admin, employmentStatus: 'inactive' });
+  ok(r.status === 409 && /last active super administrator/.test(r.body?.error ?? '') && db.status(db.P.target_super_admin) === 'active', 'status change refused by the database guard -> 409 with the right message', JSON.stringify(r));
+  db = world(); db.flags.rpcError = 'last_super_admin';
+  r = await call(workflow, db.P.caller_owner, { action: 'employee.update', userId: db.P.target_super_admin, roleId: db.roleId('employee') });
+  ok(r.status === 409 && db.rolesOf(db.P.target_super_admin).join() === 'super_admin', 'role replace refused by the database guard -> 409, role intact', JSON.stringify(r));
+  db = world();
+  db.flags.onDeleteUser = () => { for (const k of ['caller_super_admin', 'spare_sa']) db.T.profiles.find((p) => p.id === db.P[k]).employment_status = 'suspended'; }; // the other super admins vanish mid-request
+  r = await call(invite, db.P.caller_owner, { action: 'delete', userId: db.P.target_super_admin });
+  ok(r.status === 409 && /last active super administrator/.test(r.body?.error ?? '') && db.status(db.P.target_super_admin) === 'active', 'delete refused by the database guard -> 409 with the right message (not the generic linked-records text)', JSON.stringify(r));
+  db = world(); db.flags.onDeleteUser = () => {};
+  r = await call(invite, db.P.caller_owner, { action: 'delete', userId: db.P.victim });
+  ok(r.status === 409 && /linked records/.test(r.body?.error ?? ''), 'an ordinary delete failure keeps the original linked-records message', JSON.stringify(r));
+}
+
+
 // =====================================================================================================
 // Part B: real SQL (all migrations 001-021)
 // =====================================================================================================
-section('B migrations 001-022 on in-process Postgres');
+section('B migrations 001-025 on in-process Postgres');
 const db = new PGlite();
 await db.exec(`
 CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
@@ -531,7 +551,7 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (f.startsWith('020') || f.startsWith('021') || f.startsWith('022')) continue;
+  if (['020', '021', '022', '023', '024', '025'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }
@@ -776,6 +796,139 @@ ok((await auditCount('fm')) === 0 && (await auditCount('emp')) === 0 && (await a
 const pol = (await db.query(`SELECT c.relname, p.polcmd FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid WHERE c.relname IN ('invoices','invoice_payments','retainer_plans','client_billing','expenses') AND p.polcmd IN ('r','*') AND pg_get_expr(p.polqual,p.polrelid) !~* 'auth_is_(finance|owner)\\(\\)'`)).rows;
 ok(pol.length === 0, 'every SELECT policy on the realtime-published finance tables is executive-only', JSON.stringify(pol));
 ok((await as('authenticated', 'own', `SELECT count(*)::int c FROM public.vendors`)).rows[0].c >= 1, 'owner still reads vendors after the migration');
+
+section('B4 confidential Finance files in the document library and Storage (migration 024)');
+{
+  const ins = async (name, folder, vis, by, extra = '') => (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ($1,$1,10,'PDF',$2,$3,$4,$5) RETURNING id`, [name, `${U[by]}/${name}.pdf`, folder, vis, U[by]])).rows[0].id;
+  const A = {};
+  A.contract = await ins('contract-studio', 'Contracts', 'studio', 'emp');       // studio-wide by default, uploaded by an employee
+  A.contractPrivate = await ins('contract-private', 'Contracts', 'private', 'hr'); // private to its uploader (admins still saw it)
+  A.plain = await ins('brand-guide', 'Branding', 'studio', 'emp');
+  A.legal = await ins('retainer-terms', 'Legal', 'studio', 'emp');                // not a Contracts folder: needs an explicit flag
+  for (const k of Object.keys(A)) await db.query(`INSERT INTO storage.objects(bucket_id,name,owner_id) SELECT 'studio-assets', storage_path, uploaded_by::text FROM public.assets WHERE id=$1`, [A[k]]);
+  const seen = async (u) => (await as('authenticated', u, `SELECT name FROM public.assets ORDER BY name`)).rows?.map((r) => r.name).join(',');
+  const objs = async (u) => (await as('authenticated', u, `SELECT name FROM storage.objects WHERE bucket_id='studio-assets' ORDER BY name`)).rows?.map((r) => r.name.split('/')[1]).join(',');
+  // FINDING (pre-existing, migration 007): the policy compares `a.storage_path = name`, and inside that subquery `name`
+  // is assets.name (the display name), not the object's name, so as written it matches no object for ANYONE.
+  ok((await objs('own')) === '' && (await objs('sa2')) === '', 'finding: the 007 studio_assets_read policy as written matches no object for anyone, not even an owner (fails closed)');
+  // The checks below use the policy in its INTENDED form (qualified objects.name). TEST-ONLY override, not a migration.
+  await db.exec(`DROP POLICY "studio_assets_read" ON storage.objects; CREATE POLICY "studio_assets_read" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'studio-assets' AND EXISTS (SELECT 1 FROM public.assets a WHERE a.storage_path = objects.name));`);
+  ok((await seen('gm')).includes('contract-studio') && (await seen('gm')).includes('contract-private') && (await seen('emp')).includes('contract-studio'), 'precondition: before 024 a general_manager reads every contract (even private) and any employee reads the studio-wide one', await seen('gm'));
+  ok((await objs('fm')).includes('contract-studio.pdf'), 'precondition: before 024 the contract file object is readable by any staff member (finance_manager here)');
+
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/024_finance_confidential_assets.sql'), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/024_finance_confidential_assets.sql'), 'utf8')); // idempotent
+  const flag = async (id) => (await db.query(`SELECT finance_confidential f FROM public.assets WHERE id=$1`, [id])).rows[0].f;
+  ok((await flag(A.contract)) && (await flag(A.contractPrivate)) && !(await flag(A.plain)) && !(await flag(A.legal)), 'existing Contracts rows are flagged by the backfill; other folders are not (folder name only restricts)');
+  for (const u of ['sa2', 'own', 'own2', 'ceo', 'ceo2']) ok((await seen(u)) === 'brand-guide,contract-private,contract-studio,retainer-terms', `${u}: sees every file including the contracts`, await seen(u));
+  for (const [label, u] of [['general_manager', 'gm'], ['hr_manager', 'hr'], ['finance_manager (Finance dept)', 'fm'], ['accountant (Finance dept)', 'acc'], ['department_manager', 'dm'], ['employee/uploader', 'emp']]) {
+    const names = await seen(u);
+    ok(!names.includes('contract'), `${label}: no contract is listed`, names);
+    ok(!(await objs(u)).includes('contract'), `${label}: no contract file object is readable in Storage`, await objs(u));
+    ok((await as('authenticated', u, `SELECT * FROM public.assets WHERE id=$1`, [A.contract])).rows?.length === 0, `${label}: direct SELECT of the contract by id returns nothing`);
+  }
+  ok((await seen('emp')).includes('brand-guide') && (await seen('gm')).includes('brand-guide'), 'unflagged files keep their normal visibility');
+  for (const u of ['sa2', 'own', 'ceo']) ok((await objs(u)).includes('contract-studio.pdf') && (await objs(u)).includes('contract-private.pdf'), `${u}: contract file objects readable in Storage`);
+  ok((await as('anon', null, `SELECT * FROM public.assets`)).error !== undefined, 'anon has no access to assets');
+  // writes
+  const w1 = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('c2','c2',1,'PDF','${U.emp}/c2.pdf','Contracts','studio','${U.emp}')`);
+  ok(w1.error !== undefined, 'an employee cannot add a file to the Contracts folder (RLS)', w1.error);
+  const w2 = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('c3','c3',1,'PDF','${U.emp}/c3.pdf','contracts','studio','${U.emp}')`);
+  ok(w2.error !== undefined, 'the folder rule is case-insensitive');
+  ok((await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('ok1','ok1',1,'PDF','${U.emp}/ok1.pdf','Branding','studio','${U.emp}')`)).error === undefined, 'an employee can still add ordinary files');
+  ok((await as('authenticated', 'emp', `UPDATE public.assets SET folder='Contracts' WHERE name='ok1'`)).error !== undefined, 'an employee cannot move an ordinary file into Contracts');
+  ok((await as('authenticated', 'gm', `UPDATE public.assets SET finance_confidential=false WHERE id=$1`, [A.contract])).rows?.length === 0 || (await flag(A.contract)), 'a general_manager cannot see or unflag a contract');
+  ok((await flag(A.contract)) && (await as('authenticated', 'gm', `DELETE FROM public.assets WHERE id=$1`, [A.contract])).error === undefined && (await flag(A.contract)) !== undefined, 'a general_manager cannot delete a contract (row still there)');
+  ok((await db.query(`SELECT count(*)::int c FROM public.assets WHERE id=$1`, [A.contract])).rows[0].c === 1, 'the contract row survived the GM delete attempt');
+  // executives can flag any file and clear flags; non-executives cannot clear
+  ok((await as('authenticated', 'ceo', `UPDATE public.assets SET finance_confidential=true WHERE id=$1`, [A.legal])).error === undefined && (await flag(A.legal)), 'ceo can flag any file as confidential Finance');
+  ok(!(await seen('emp')).includes('retainer-terms') && !(await seen('gm')).includes('retainer-terms'), 'once flagged, the file disappears for employees and general_manager');
+  ok((await as('authenticated', 'own', `UPDATE public.assets SET finance_confidential=false, folder='Legal' WHERE id=$1`, [A.legal])).error === undefined && !(await flag(A.legal)) && (await seen('emp')).includes('retainer-terms'), 'an executive can clear the flag');
+  await as('authenticated', 'own', `UPDATE public.assets SET folder='Contracts' WHERE id=$1`, [A.legal]);
+  ok(await flag(A.legal), 'moving a file into Contracts re-flags it, and the flag cannot be cleared while it stays there');
+  await as('authenticated', 'own', `UPDATE public.assets SET finance_confidential=false WHERE id=$1`, [A.legal]);
+  ok(await flag(A.legal), 'folder rule wins over an attempt to clear the flag');
+  ok((await db.query(`SELECT count(*)::int c FROM storage.buckets WHERE name ILIKE '%financ%'`)).rows[0].c === 0, 'no separate finance bucket (confidential files live behind the assets flag)');
+}
+
+section('B5 redaction of existing financial notifications (migration 025)');
+{
+  const mk = async (user, type, title, content) => (await db.query(`INSERT INTO public.notifications(user_id,type,title,content,link,is_read,metadata) VALUES ($1,$2,$3,$4,'#finance',$5,'{"k":1}') RETURNING id`, [U[user], type, title, content, user === 'hr'])).rows[0].id;
+  const N = {};
+  const recipients = { sa2: 'super_admin', own: 'owner', ceo: 'ceo', gm: 'general_manager', fm: 'finance_manager', acc: 'accountant', hr: 'hr_manager', emp: 'employee' };
+  for (const u of Object.keys(recipients)) {
+    N['req_' + u] = await mk(u, 'expense_request', 'Expense claim to approve', 'Ahmed: Camera rental (EGP 1250.50)');
+    N['inv_' + u] = await mk(u, 'invoice_drafts', 'Retainer invoices ready to review', '7 draft invoices created for 2026-11. Review and send them.');
+    N['dec_' + u] = await mk(u, 'expense_decision', 'Expense approved', 'Camera rental');
+    N['oth_' + u] = await mk(u, 'task_assigned', 'New task', 'Deliver logo (budget EGP 900 discussed)');
+  }
+  const snapshot = async () => (await db.query(`SELECT id, user_id, type, title, link, is_read, metadata::text AS metadata, created_at::text AS created_at, content FROM public.notifications ORDER BY id`)).rows;
+  const before = await snapshot();
+  const exec = ['sa2', 'own', 'ceo'], non = ['gm', 'fm', 'acc', 'hr', 'emp'];
+  const readable = async (u) => (await as('authenticated', u, `SELECT content FROM public.notifications WHERE type IN ('expense_request','invoice_drafts')`)).rows.map((r) => r.content).join(' | ');
+  for (const u of ['gm', 'fm', 'acc']) ok(/EGP 1250/.test(await readable(u)) || /7 draft/.test(await readable(u)), `precondition: ${u} can read amounts / counts in their notifications before the redaction`);
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/025_redact_financial_notifications.sql'), 'utf8'));
+  const after = await snapshot();
+  ok(after.length === before.length, 'no notification was deleted', `${before.length} -> ${after.length}`);
+  const byId = new Map(before.map((r) => [r.id, r]));
+  let diffs = 0, contentChanged = 0;
+  for (const r of after) { const o = byId.get(r.id); for (const k of Object.keys(o)) if (k !== 'content' && o[k] !== r[k]) diffs++; if (o.content !== r.content) contentChanged++; }
+  ok(diffs === 0, 'ids, recipients, types, titles, links, read state, metadata and timestamps are all unchanged', 'diffs=' + diffs);
+  ok(contentChanged === non.length * 2, `exactly the ${non.length * 2} financial notifications of non-executives changed content`, 'changed=' + contentChanged);
+  for (const u of non) {
+    for (const t of ['req', 'inv']) { const row = after.find((r) => r.id === N[`${t}_${u}`]); ok(!/\d/.test(row.content) && /executives only/.test(row.content), `${u}: ${t === 'req' ? 'expense_request' : 'invoice_drafts'} redacted (no digits, no title, no names)`, row.content); }
+    ok(!/\d|Camera/.test(await readable(u)), `${u}: nothing financial is readable through their own notification feed`);
+    ok(after.find((r) => r.id === N['dec_' + u]).content === 'Camera rental' && after.find((r) => r.id === N['oth_' + u]).content.includes('EGP 900'), `${u}: unrelated notification types are untouched`);
+  }
+  for (const u of exec) for (const t of ['req', 'inv']) ok(after.find((r) => r.id === N[`${t}_${u}`]).content === byId.get(N[`${t}_${u}`]).content, `${u} (executive): original ${t} notification untouched`);
+  ok((await db.query(`SELECT count(*)::int c FROM finance_backup.notifications_pre025`)).rows[0].c === non.length * 2, 'the originals of the redacted rows are in finance_backup.notifications_pre025');
+  ok((await as('authenticated', 'own', `SELECT * FROM finance_backup.notifications_pre025`)).error !== undefined, 'the backup is unreachable through the API, even for an owner');
+  const mid = await snapshot();
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/025_redact_financial_notifications.sql'), 'utf8'));
+  ok(JSON.stringify(mid) === JSON.stringify(await snapshot()) && (await db.query(`SELECT count(*)::int c FROM finance_backup.notifications_pre025`)).rows[0].c === non.length * 2, 'running it again changes nothing (idempotent, backup keeps the first original)');
+  await db.exec(`UPDATE public.notifications n SET content = b.original_content FROM finance_backup.notifications_pre025 b WHERE b.id = n.id`);
+  ok(JSON.stringify(before) === JSON.stringify(await snapshot()), 'the documented rollback restores every row exactly');
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/025_redact_financial_notifications.sql'), 'utf8'));
+}
+
+section('B6 last active super_admin guard, database level (migration 023)');
+{
+  // make the fixtures clean: every earlier super_admin is suspended, then two fresh active ones
+  await db.exec(`UPDATE public.profiles SET employment_status='suspended' WHERE id IN (SELECT ur.user_id FROM public.user_roles ur JOIN public.roles r ON r.id=ur.role_id WHERE r.name='super_admin')`);
+  const mkSa = async (k, status = 'active', role = 'super_admin') => {
+    U[k] = nid(++n);
+    await db.query(`INSERT INTO auth.users(id,email) VALUES ($1,$2)`, [U[k], k + '@x.com']);
+    await db.query(`INSERT INTO public.profiles(id,full_name,email,employment_status) VALUES ($1,$2,$3,$4)`, [U[k], k, k + '@x.com', status]);
+    await db.query(`INSERT INTO public.user_roles(user_id,role_id) SELECT $1,id FROM public.roles WHERE name=$2`, [U[k], role]);
+  };
+  await mkSa('g1'); await mkSa('g2');
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/023_last_super_admin_guard.sql'), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/023_last_super_admin_guard.sql'), 'utf8')); // idempotent
+  const active = async () => (await db.query(`SELECT count(*)::int c FROM public.user_roles ur JOIN public.roles r ON r.id=ur.role_id AND r.name='super_admin' AND r.is_active JOIN public.profiles p ON p.id=ur.user_id AND p.employment_status='active'`)).rows[0].c;
+  const attempt = async (sql, params = []) => { try { await db.query(sql, params); return 'ok'; } catch (e) { return e.message; } };
+  ok((await active()) === 2, 'fixture: two active super_admins');
+  ok((await attempt(`UPDATE public.profiles SET employment_status='suspended' WHERE id=$1`, [U.g1])) === 'ok' && (await active()) === 1, 'suspending one of two is allowed');
+  const refused = async (sql, params, what) => { const r = await attempt(sql, params); ok(/last_super_admin/.test(r) && (await active()) === 1, `${what}: refused, one active super_admin remains`, r); };
+  await refused(`UPDATE public.profiles SET employment_status='suspended' WHERE id=$1`, [U.g2], 'suspend the last one');
+  await refused(`UPDATE public.profiles SET employment_status='inactive' WHERE id=$1`, [U.g2], 'deactivate the last one');
+  await refused(`DELETE FROM public.profiles WHERE id=$1`, [U.g2], 'delete the last one (profile)');
+  await refused(`DELETE FROM auth.users WHERE id=$1`, [U.g2], 'delete the last one (auth user, cascades)');
+  await refused(`SELECT public.replace_user_role($1,(SELECT id FROM public.roles WHERE name='employee'),$1)`, [U.g2], 'demote the last one (replace_user_role)');
+  await refused(`DELETE FROM public.user_roles WHERE user_id=$1`, [U.g2], 'remove the last one\'s role row');
+  await refused(`UPDATE public.user_roles SET role_id=(SELECT id FROM public.roles WHERE name='employee') WHERE user_id=$1`, [U.g2], 're-point the last one\'s role row');
+  await refused(`UPDATE public.roles SET is_active=false WHERE name='super_admin'`, [], 'deactivate the super_admin role');
+  await refused(`DELETE FROM public.roles WHERE name='super_admin'`, [], 'delete the super_admin role');
+  ok((await attempt(`SELECT public.replace_user_role($1,(SELECT id FROM public.roles WHERE name='super_admin'),$1)`, [U.g2])) === 'ok' && (await active()) === 1, 're-assigning super_admin to the last one is fine (same row)');
+  ok((await attempt(`UPDATE public.user_roles SET assigned_by=NULL WHERE user_id=$1`, [U.g2])) === 'ok', 'harmless updates are not blocked');
+  ok((await attempt(`UPDATE public.profiles SET employment_status='suspended' WHERE id=$1`, [U.g1])) === 'ok', 'an already-inactive super_admin can be updated freely');
+  ok((await attempt(`DELETE FROM public.profiles WHERE id=$1`, [U.g1])) === 'ok' && (await active()) === 1, 'and removed');
+  await mkSa('g3', 'active', 'employee');
+  ok((await attempt(`UPDATE public.profiles SET employment_status='suspended' WHERE id=$1`, [U.g3])) === 'ok' && (await attempt(`DELETE FROM auth.users WHERE id=$1`, [U.g3])) === 'ok', 'ordinary employees are unaffected');
+  await mkSa('g4');
+  ok((await attempt(`UPDATE public.profiles SET employment_status='suspended' WHERE id=$1`, [U.g2])) === 'ok' && (await active()) === 1, 'with another active super_admin the first can go');
+  ok((await attempt(`DELETE FROM public.profiles WHERE id=$1`, [U.g4])).includes('last_super_admin'), 'and the new last one is protected');
+  ok((await as('authenticated', 'own', `SELECT public.guard_last_super_admin()`)).error !== undefined, 'the guard function is not callable through the API');
+}
 
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\n${passed} passed, ${failed} failed`);

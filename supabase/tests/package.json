@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "test": "node verify-rls.mjs && node verify-roles.mjs",
-    "test:roles": "node verify-roles.mjs"
+    "test:roles": "node verify-roles.mjs",
+    "test:concurrency": "node verify-concurrency.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.14"
