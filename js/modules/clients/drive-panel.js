@@ -62,7 +62,24 @@ export class DrivePanel {
     this.error = null;
     this.selected = new Set(); // "file:12", "folder:3"
     this.uploads = [];       // { id, name, done, total, failed }
-    this.tokens = new Map(); // "clientId:scope" -> { token, apiUrl, expiresAt }
+    this.tokens = new Map(); // "clientId:scope[:fileId]" -> { token, apiUrl, expiresAt }
+    this.blobs = new Map();  // "clientId:action:id" -> blob: address of a thumbnail / logo fetched with the token in a HEADER (never in an address)
+    this.thumbQueue = [];
+    this.thumbActive = 0;
+  }
+
+  /** Releases every blob: address (they hold the image bytes in memory until revoked). */
+  clearBlobs() {
+    for (const url of this.blobs.values()) URL.revokeObjectURL(url);
+    this.blobs.clear();
+    this.thumbQueue = [];
+  }
+
+  /** Module contract: the hub calls this when the user leaves. Closes the lightbox (its document / window listeners) and forgets the tokens. */
+  dispose() {
+    this.closePreview();
+    this.tokens.clear();
+    this.clearBlobs();
   }
 
   /** The hub repaints its tabs on live updates, so this re-attaches without losing the folder or uploads. */
@@ -70,6 +87,7 @@ export class DrivePanel {
     this.el = el;
     if (clientId !== this.clientId) {
       this.clientId = clientId;
+      this.clearBlobs();
       this.status = null;
       this.listing = null;
       this.view = null;
@@ -131,6 +149,54 @@ export class DrivePanel {
     return fresh;
   }
 
+  /** A view token locked to ONE file: the only kind that may travel in an address (video / audio / PDF / open in a new tab). */
+  async fileToken(clientId, fileId) {
+    const key = `${clientId}:view:${fileId}`;
+    const cached = this.tokens.get(key);
+    if (cached && cached.expiresAt - TOKEN_MARGIN_SECONDS > Date.now() / 1000) return cached;
+    const fresh = await Api.kiteDrive('token', { clientId, scope: 'view', fileId });
+    this.tokens.set(key, fresh);
+    return fresh;
+  }
+
+  /** Reads bytes with the token in the X-Drive-Token header, so no address ever carries it (logs, history, referrers). */
+  async fetchBytes(clientId, query) {
+    const { token, apiUrl } = await this.token(clientId, 'view');
+    const res = await fetch(`${apiUrl}?${query}`, { headers: { 'X-Drive-Token': token } });
+    if (!res.ok) { const err = new Error(`Kite Drive error (${res.status})`); err.status = res.status; throw err; }
+    return res;
+  }
+
+  /** blob: address of a thumbnail or logo, cached; fetched with the header token. */
+  async blobFor(clientId, action, fileId = '') {
+    const key = `${clientId}:${action}:${fileId}`;
+    if (this.blobs.has(key)) return this.blobs.get(key);
+    const res = await this.fetchBytes(clientId, `action=${action}${fileId ? `&id=${fileId}` : ''}`);
+    const url = URL.createObjectURL(await res.blob());
+    if (clientId !== this.clientId) { URL.revokeObjectURL(url); throw new Error('client changed'); }
+    this.blobs.set(key, url);
+    return url;
+  }
+
+  /** Thumbnails load a few at a time (Drive builds each one on first request), each through the header-token fetch. */
+  loadThumbs(root) {
+    const clientId = this.clientId;
+    for (const img of root.querySelectorAll('img[data-thumb]:not([src])')) this.thumbQueue.push({ img, clientId });
+    this.pumpThumbs();
+  }
+
+  pumpThumbs() {
+    while (this.thumbActive < 4 && this.thumbQueue.length) {
+      const { img, clientId } = this.thumbQueue.shift();
+      if (!img.isConnected || clientId !== this.clientId) continue;
+      this.thumbActive++;
+      this.blobFor(clientId, 'thumb', img.dataset.thumb)
+        .then((url) => { if (img.isConnected) img.src = url; })
+        .catch(() => { if (img.isConnected && clientId === this.clientId) this.thumbFailed(img); })
+        .finally(() => { this.thumbActive--; this.pumpThumbs(); });
+    }
+  }
+
   async call(clientId, scope, query, init = {}) {
     const { token, apiUrl } = await this.token(clientId, scope);
     const res = await fetch(`${apiUrl}?${query}`, { ...init, headers: { ...(init.headers || {}), 'X-Drive-Token': token } });
@@ -161,7 +227,7 @@ export class DrivePanel {
   headHTML(actions = '') {
     const name = this.status?.driveName;
     const logo = this.listing?.hasLogo && this.view
-      ? `<img class="ch-drive-logo" src="${escapeHTML(`${this.view.apiUrl}?action=logo&token=${encodeURIComponent(this.view.token)}`)}" alt="" />` : '<i data-lucide="hard-drive"></i>';
+      ? '<img class="ch-drive-logo" data-logo alt="" />' : '<i data-lucide="hard-drive"></i>';
     return `<div class="ch-row ch-drive-head">
       <h3>${logo} Kite Drive${name ? ` <span class="text-xs text-muted">· ${escapeHTML(name)}</span>` : ''}</h3>
       <div class="ch-drive-actions">${actions}</div></div>`;
@@ -259,6 +325,7 @@ export class DrivePanel {
     </article>`;
   }
 
+  /** An address carrying a token. Only for a file-bound view token (media / PDF / new tab) or a single-use zip token. */
   fileUrl(view, action, fileId) {
     return `${view.apiUrl}?action=${action}&id=${fileId}&token=${encodeURIComponent(view.token)}`;
   }
@@ -267,7 +334,7 @@ export class DrivePanel {
     const kind = kindOf(f), key = `file:${f.id}`;
     const name = escapeHTML(f.name);
     const preview = kind === 'image' && this.view
-      ? `<img data-thumb="${f.id}" src="${escapeHTML(this.fileUrl(this.view, 'thumb', f.id))}" alt="" loading="lazy" decoding="async" />`
+      ? `<img data-thumb="${f.id}" alt="" decoding="async" />`
       : this.fileIconHTML(f, kind);
     return `<article class="ch-drive-card${this.selected.has(key) ? ' is-selected' : ''}" data-card="${key}">
       ${this.checkHTML(key, name)}
@@ -307,6 +374,9 @@ export class DrivePanel {
     el.querySelectorAll('[data-drive-file]').forEach((b) => b.addEventListener('click', () => this.download(Number(b.dataset.driveFile))));
     el.querySelectorAll('[data-drive-open]').forEach((b) => b.addEventListener('click', () => this.openFile(Number(b.dataset.driveOpen))));
     el.querySelectorAll('img[data-thumb]').forEach((img) => img.addEventListener('error', () => this.thumbFailed(img)));
+    this.loadThumbs(el);
+    const logoImg = el.querySelector('img[data-logo]');
+    if (logoImg) this.blobFor(this.clientId, 'logo').then((url) => { if (logoImg.isConnected) logoImg.src = url; }).catch(() => logoImg.remove());
     el.querySelectorAll('[data-select]').forEach((box) => box.addEventListener('change', () => {
       if (box.checked) this.selected.add(box.dataset.select);
       else this.selected.delete(box.dataset.select);
@@ -405,11 +475,10 @@ export class DrivePanel {
     if (tries < 2) {
       img.dataset.retried = String(tries + 1);
       try {
-        const view = await this.token(clientId, 'view');
+        await this.token(clientId, 'view');
         await new Promise((resolve) => setTimeout(resolve, 1200 * (tries + 1) + Math.random() * 800));
         if (clientId !== this.clientId || !img.isConnected) return;
-        this.view = view;
-        img.src = `${this.fileUrl(view, 'thumb', fileId)}&retry=${tries + 1}`; // a new address, so the browser asks again
+        img.src = await this.blobFor(clientId, 'thumb', fileId);
         return;
       } catch { /* falls through to the icon */ }
     }
@@ -521,15 +590,16 @@ export class DrivePanel {
 
     let url;
     try {
-      url = this.fileUrl(await this.token(lb.clientId, 'view'), 'view', file.id);
+      // text and fonts are read through a header-token fetch; media, PDFs and "open in a new tab" need an address, so they get a token locked to this one file
+      url = (kind === 'text' || kind === 'font') ? null : this.fileUrl(await this.fileToken(lb.clientId, file.id), 'view', file.id);
     } catch (err) {
       noPreview(err.message);
       return;
     }
     if (!current()) return; // moved on while waiting
 
-    if (kind === 'text') { await this.showText(url, file, stage, current, noPreview); return; }
-    if (kind === 'font') { await this.showFont(url, file, lb, stage, current, noPreview); return; }
+    if (kind === 'text') { await this.showText(file, stage, current, noPreview); return; }
+    if (kind === 'font') { await this.showFont(file, lb, stage, current, noPreview); return; }
 
     lb.part('tab').href = url;
     const safe = escapeHTML(url), label = escapeHTML(file.name);
@@ -543,11 +613,10 @@ export class DrivePanel {
   }
 
   /** Shown as plain text, never run: an uploaded web page can't do anything from here. */
-  async showText(url, file, stage, current, noPreview) {
+  async showText(file, stage, current, noPreview) {
     if (file.size > TEXT_PREVIEW_BYTES) { noPreview('This file is too large to preview. You can still download it.'); return; }
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error();
+      const res = await this.fetchBytes(this.lb?.clientId ?? this.clientId, `action=view&id=${file.id}`);
       const text = await res.text();
       if (!current()) return;
       const pre = document.createElement('pre');
@@ -559,11 +628,10 @@ export class DrivePanel {
     }
   }
 
-  async showFont(url, file, lb, stage, current, noPreview) {
+  async showFont(file, lb, stage, current, noPreview) {
     if (file.size > FONT_PREVIEW_BYTES) { noPreview('This font is too large to preview. You can still download it.'); return; }
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error();
+      const res = await this.fetchBytes(this.lb?.clientId ?? this.clientId, `action=view&id=${file.id}`);
       const face = new FontFace(`drive-preview-${file.id}`, await res.arrayBuffer());
       await face.load();
       if (!current()) return;
@@ -583,11 +651,15 @@ export class DrivePanel {
     const lb = this.lb;
     if (!lb) return;
     this.lb = null;
-    this.stopMedia(lb.part('stage'));
-    this.clearPreviewFont(lb);
+    // the listeners go FIRST: nothing below may leave them behind if it throws
     document.removeEventListener('keydown', lb.onKey);
     window.removeEventListener('hashchange', lb.onHash);
-    lb.box.remove();
+    try {
+      this.stopMedia(lb.part('stage'));
+      this.clearPreviewFont(lb);
+    } finally {
+      lb.box.remove();
+    }
     if (lb.returnFocus?.isConnected) lb.returnFocus.focus();
   }
 
@@ -612,7 +684,8 @@ export class DrivePanel {
     try {
       Toast.success('Preparing your ZIP. Large selections can take a minute.', 'Download');
       const { zipId } = await this.postJson(clientId, 'view', 'zip_prepare', { items });
-      const view = await this.token(clientId, 'view');
+      // an address that carries a token must be single-use: a fresh token (never the cached one) that Drive burns on first use
+      const view = await Api.kiteDrive('token', { clientId, scope: 'view' });
       const a = document.createElement('a');
       a.href = this.fileUrl(view, 'zip', zipId);
       a.download = 'Kite Drive files.zip';

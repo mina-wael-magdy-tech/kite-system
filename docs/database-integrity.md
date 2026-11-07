@@ -8,7 +8,7 @@ never `db push` on live (the live migration history is empty).
 
 ```
 017  ->  022  ->  023 ... 027  ->  028 finance integrity  ->  029 history protection  ->  030 HR  ->  031 approvals + expenses
-                                                         ->  032 atomic operations   ->  033 hygiene (last)
+                                                         ->  032 atomic operations   ->  033 hygiene  ->  034 invitation activation (Phase 4)
 ```
 
 Every file is idempotent. **If 017 is ever re-run, re-apply 028 and then 033** (017 re-creates the original bodies of the finance
@@ -28,6 +28,7 @@ the constraint `NOT VALID` (still enforced for every new write) or skips the ind
 | 030 | Attendance: server clock for check-in / check-out, studio date, computed hours, one close, no re-open, check-out after check-in. Leave: DB-counted days, end >= start, no overlap (race-safe), balances (below). |
 | 031 | Content plan: approval and its evidence row are one transaction; approval is invalidated by any change to approved content (audited); a visual / feedback row must belong to the post's own plan. Expenses: draft -> submitted -> approved / rejected, approved -> paid; atomic decisions; currency default EGP; `budgets.spent` is derived. |
 | 032 | Department links change in one transaction, one primary per person. A record and its money figure are saved together; a figure follows its record. Kite Drive links are created through an intent (crash-safe, retry adopts). Atomic reaction toggle and channel membership; one reminder per person per day; broadcasts recognised by request id; one pending invitation per e-mail. |
+| 034 | Employee activation is one atomic function (`accept_invitation`), bound to the account (`invitations.user_id`), single-use, expiring (`invitations_expire_pending()`); the stored token is a hash and is not readable by signed-in users. Rollback in the file header. |
 | 033 | Finance uses the studio's business date. `audit_logs` append-only; TRUNCATE blocked on audit and finance tables. A supporting index for every foreign key. `app.migrating` works only for a database operator. |
 
 ## Business rules that were defined (defaults chosen from existing behaviour)

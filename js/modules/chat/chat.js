@@ -60,6 +60,7 @@ export class ChatModule {
   }
 
   async render(container, query = '') {
+    this.disposed = false;
     this.teardownRealtime();
     this.stopAudio();
     this.cancelRecording();
@@ -200,6 +201,7 @@ export class ChatModule {
       if (f) { e.preventDefault(); this.sendFile(f); }
     });
     // close the emoji popover when clicking elsewhere
+    if (this.disposed) return;
     this.onDocClick = (e) => { if (!e.target.closest('.slk-emoji-pop, [data-react-add]')) document.querySelectorAll('.slk-emoji-pop').forEach(p => p.remove()); };
     document.addEventListener('click', this.onDocClick);
   }
@@ -322,7 +324,7 @@ export class ChatModule {
 
   subscribeRealtime() {
     const supabase = getSupabase();
-    if (!supabase) return;
+    if (!supabase || this.disposed) return;   // a render that finished after the user left must not open a channel
     this.teardownRealtime();
 
     this.realtimeSub = supabase
@@ -362,7 +364,7 @@ export class ChatModule {
     this.typers = new Map();
     this.renderTyping();
     const supabase = getSupabase();
-    if (!supabase || !convId) return;
+    if (!supabase || !convId || this.disposed) return;
     if (this.typingBlockConv !== convId) { this.typingRetries = 0; this.typingBlockedUntil = 0; clearTimeout(this.typingRetryTimer); }   // other conversation: start fresh
     if (Date.now() < (this.typingBlockedUntil || 0)) return;   // waiting out a retry delay (the 4 s refresh must not skip it)
     const ch = supabase.channel(`typing:${convId}`, { config: { private: true, broadcast: { self: false } } });
@@ -445,6 +447,16 @@ export class ChatModule {
     el.querySelector('.slk-typing-text').textContent = text;
     el.hidden = false;
     this.typingTimer = setTimeout(() => this.renderTyping(), 1500);   // drop people who went quiet
+  }
+
+  /** Module contract: the router calls this when the user leaves Chat (channels, timers, the document listener, audio, recording). */
+  dispose() {
+    this.teardownRealtime();
+    this.stopAudio();
+    this.cancelRecording();
+    clearTimeout(this.typingRetryTimer); this.typingRetryTimer = null;
+    clearTimeout(this.listTimer); this.listTimer = null;
+    this.disposed = true;
   }
 
   teardownRealtime() {

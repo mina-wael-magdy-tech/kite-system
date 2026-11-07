@@ -7,7 +7,10 @@
     "test:roles": "node verify-roles.mjs",
     "test:concurrency": "node verify-concurrency.mjs",
     "test:finance-concurrency": "node verify-finance-concurrency.mjs",
-    "test:integrity": "node verify-integrity.mjs"
+    "test:integrity": "node verify-integrity.mjs",
+    "test:drive": "node verify-drive.mjs",
+    "test:frontend": "node verify-frontend.mjs",
+    "test:phase4": "node verify-frontend.mjs && node verify-drive.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.14"

@@ -113,3 +113,10 @@ business records with history cannot be deleted (deactivate / archive); files ar
 time is the server's; leave and expenses follow enforced rules; approvals and their evidence are atomic and invalidated by changes; department,
 money-figure, Kite Drive, reaction, membership, reminder, broadcast and invitation changes cannot half-happen or double-happen; audit logs are
 append-only; Finance uses the studio's business date. The executive-only Finance policy and every Phase 1, 2 and 3.A protection are unchanged.
+
+## Phase 4: Drive tokens, router lifecycle, employee activation (migration 034)
+
+* **Drive tokens** carry a unique id; an address-carried token is single-use (download, ZIP) or locked to one file (preview), thumbnails and the logo use the `X-Drive-Token` header, and the signing secret never leaves the Edge Function. Policy switch: `url_tokens` (`legacy` / `strict`) in Drive's `config.php`.
+* **Activation**: `accept_invitation()` (service role only) activates the account and consumes the invitation in one transaction; a bound invitation is never matched to another account by e-mail; an expired or revoked invitation never activates; the stored token is a hash.
+* **Frontend**: pages are disposed on navigation (module contract + `Scope`), so a page that was left holds no realtime channel, listener or timer.
+Details, release order and rollback: [phase4-release.md](phase4-release.md).

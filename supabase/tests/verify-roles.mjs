@@ -39,7 +39,7 @@ const stubPlugin = {
   },
 };
 let captured = null;
-const ENV = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service', SUPABASE_ANON_KEY: 'test-anon', APP_URL: 'https://app.example.test', CRON_SECRET: 'c'.repeat(40) };
+const ENV = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service', SUPABASE_ANON_KEY: 'test-anon', APP_URL: 'https://app.example.test', CRON_SECRET: 'c'.repeat(40), KITE_DRIVE_URL: 'https://drive.example.test', KITE_DRIVE_API_SECRET: 'd'.repeat(40) };
 const RPC_RESULTS = { fin_retainer_generate: 3, fin_mark_overdue: 0 };
 globalThis.Deno = { env: { get: (k) => ENV[k] }, serve: (h) => { captured = h; } };
 
@@ -54,6 +54,7 @@ async function load(rel) {
 const invite = await load('invite-employee/index.ts');
 const workflow = await load('workflow/index.ts');
 const accept = await load('accept-invitation/index.ts');
+const kitedrive = await load('kite-drive/index.ts');
 const chat = await load('chat/index.ts');
 const authMod = (await load('_shared/auth.ts')).mod;
 const httpMod = (await load('_shared/http.ts')).mod;
@@ -64,7 +65,7 @@ const ALL_ROLES = ['super_admin', 'owner', 'ceo', 'general_manager', 'finance_ma
   'department_manager', 'team_leader', 'project_manager', 'employee', 'client'];
 
 function makeDb() {
-  const T = { profiles: [], roles: [], user_roles: [], departments: [], user_departments: [], invitations: [], audit_logs: [], notifications: [], push_subscriptions: [], expenses: [], messages: [], conversations: [], message_reactions: [] };
+  const T = { profiles: [], roles: [], user_roles: [], departments: [], user_departments: [], invitations: [], audit_logs: [], notifications: [], push_subscriptions: [], expenses: [], messages: [], conversations: [], message_reactions: [], clients: [], client_drive_links: [] };
   const users = [], log = [], flags = { failInsert: null, failInsertCode: null, rpcErrors: null, failRpc: false, rpcMissing: false, profileUpdateError: null, rpcError: null, onDeleteUser: null };
   let seq = 0;
   const uid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
@@ -118,6 +119,16 @@ function makeDb() {
   const rpc = async (name, a) => {
     log.push({ op: 'rpc', name, args: a });
     if (flags.rpcErrors?.[name]) return { data: null, error: { message: flags.rpcErrors[name] } };
+    if (name === 'accept_invitation') {   // emulates migration 034 (the real SQL is tested in verify-integrity.mjs, section 16)
+      const p = T.profiles.find((x) => x.id === a.p_user);
+      if (!p || p.employment_status !== 'onboarding') return { data: 'not_onboarding', error: null };
+      const inv = T.invitations.filter((i) => i.status === 'pending' && (i.user_id === p.id || (!i.user_id && String(i.email).toLowerCase() === p.email.toLowerCase())))
+        .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)))[0];
+      if (!inv) return { data: 'no_invitation', error: null };
+      if (new Date(inv.expires_at).getTime() < Date.now()) { inv.status = 'expired'; return { data: 'expired', error: null }; }
+      p.employment_status = 'active'; inv.status = 'accepted'; inv.accepted_at = new Date().toISOString();
+      return { data: 'accepted', error: null };
+    }
     if (name !== 'replace_user_role') return { data: RPC_RESULTS[name] ?? null, error: null };
     if (flags.rpcError) return { data: null, error: { message: flags.rpcError } };
     if (flags.rpcMissing) return { data: null, error: { message: 'Could not find the function public.replace_user_role' } };
@@ -1047,6 +1058,141 @@ section('A19 JSON limits count BYTES (multi-byte UTF-8) and a misleading Content
 }
 
 // =====================================================================================================
+// A22  Phase 4: employee activation (ARC-03), Kite Drive token transport and dual-write recovery (SEC-02, DAT-01)
+// =====================================================================================================
+section('A22 activation: accept-invitation is one atomic database decision with explicit refusals');
+{
+  const setup = (inv = {}) => {
+    const db = world(); const u = db.addUser('activating', 'employee', 'onboarding');
+    db.T.invitations.push({ id: db.uid(), email: 'activating@x.test', status: 'pending', user_id: u, expires_at: new Date(Date.now() + 86400000).toISOString(), created_at: new Date().toISOString(), ...inv });
+    return { db, u };
+  };
+  let { db, u } = setup();
+  let r = await call(accept, u, {});
+  ok(r.status === 200 && db.status(u) === 'active' && db.T.invitations.find((i) => i.user_id === u).status === 'accepted', 'accepting activates the profile and marks the invitation, through the one rpc');
+  ok(db.log.some((l) => l.op === 'rpc' && l.name === 'accept_invitation' && l.args.p_user === u) && !db.log.some((l) => l.op === 'update' && l.table === 'profiles'), 'the function does not update profiles / invitations itself any more');
+  r = await call(accept, u, {});
+  ok(r.status === 409, 'replay: a second call is refused (409)', JSON.stringify(r));
+  ({ db, u } = setup({ expires_at: new Date(Date.now() - 1000).toISOString() }));
+  r = await call(accept, u, {});
+  ok(r.status === 410 && db.status(u) === 'onboarding', 'an expired invitation answers 410 and activates nothing');
+  ({ db, u } = setup({ status: 'revoked' }));
+  r = await call(accept, u, {});
+  ok(r.status === 409 && db.status(u) === 'onboarding', 'a revoked invitation answers 409 and activates nothing');
+  ({ db, u } = setup({ user_id: 'someone-else', email: 'activating@x.test' }));
+  r = await call(accept, u, {});
+  ok(r.status === 409 && db.status(u) === 'onboarding', 'an invitation bound to another account is not used for this one, even with the same e-mail');
+  db = world(); const act = db.addUser('already', 'employee', 'active');
+  r = await call(accept, act, {});
+  ok(r.status === 409, 'an active account cannot "accept" (409)');
+  db = world(); const sus = db.addUser('susp', 'employee', 'suspended'); db.T.invitations.push({ id: db.uid(), email: 'susp@x.test', status: 'pending', user_id: sus, expires_at: new Date(Date.now() + 86400000).toISOString(), created_at: new Date().toISOString() });
+  r = await call(accept, sus, {});
+  ok(r.status === 409 && db.status(sus) === 'suspended', 'a suspended account cannot be re-activated through an old invitation');
+  ({ db, u } = setup()); db.flags.rpcErrors = { accept_invitation: 'injected database failure' };
+  r = await call(accept, u, {});
+  ok(r.status >= 500 && db.status(u) === 'onboarding', 'a database failure activates nothing and is not reported as success', JSON.stringify(r));
+}
+
+section('A22 activation: invite-employee stores a hashed token and binds the invitation to the account');
+{
+  const db = world();
+  const r = await call(invite, db.P.caller_hr_manager, { email: 'bound@x.test', fullName: 'Bound Person', roleId: db.roleId('employee') });
+  const inv = db.T.invitations.find((i) => i.email === 'bound@x.test'); const prof = db.T.profiles.find((p) => p.email === 'bound@x.test');
+  ok(r.status === 200 && !!inv && !!prof, 'invitation created', JSON.stringify(r));
+  ok(/^sha256:[0-9a-f]{64}$/.test(inv.token), 'the stored token is a SHA-256 hash, not a usable secret', inv.token);
+  ok(inv.user_id === prof.id, 'the invitation is bound to the exact account that was created');
+  const r2 = await call(invite, db.P.caller_hr_manager, { email: 'bound2@x.test', fullName: 'Bound Two', roleId: db.roleId('employee') });
+  ok(db.T.invitations.find((i) => i.email === 'bound2@x.test').token !== inv.token, 'every invitation gets a different token');
+  const db2 = world(); db2.flags.failInsert = 'user_roles';
+  const r3 = await call(invite, db2.P.caller_hr_manager, { email: 'rb@x.test', fullName: 'Roll Back', roleId: db2.roleId('employee') });
+  ok(r3.status === 500 && !db2.T.invitations.some((i) => i.email === 'rb@x.test') && !db2.T.profiles.some((p) => p.email === 'rb@x.test'), 'a failure after the binding still removes the invitation, profile and auth user');
+  // re-invite: the earlier invitation is revoked and the new one is bound to the NEW account
+  const db3 = world(); const pend = db3.addUser('pend', 'employee', 'onboarding');
+  db3.T.invitations.push({ id: db3.uid(), email: 'pend@x.test', status: 'pending', user_id: pend, token: 'sha256:old', expires_at: new Date(Date.now() + 86400000).toISOString(), created_at: new Date().toISOString() });
+  const r4 = await call(invite, db3.P.caller_hr_manager, { email: 'pend@x.test', fullName: 'Pend Ing', roleId: db3.roleId('employee') });
+  const all = db3.T.invitations.filter((i) => i.email === 'pend@x.test'); const newP = db3.T.profiles.find((p) => p.email === 'pend@x.test');
+  ok(r4.status === 200 && all.filter((i) => i.status === 'pending').length === 1 && all.find((i) => i.status === 'pending').user_id === newP.id && all.some((i) => i.status === 'revoked'), 're-invite: old invitation revoked, the pending one is bound to the new account');
+}
+
+section('A22 Kite Drive tokens: unique id, file lock, header-only calls, deadlines');
+{
+  const calls = []; const real = globalThis.fetch;
+  const driveSrv = { clients: [], createStatus: 200, createThrows: false, listThrows: false };
+  globalThis.fetch = async (url, init = {}) => {
+    const u = new URL(url); const action = u.searchParams.get('action');
+    calls.push({ action, url: String(url), headers: init.headers || {}, signal: init.signal });
+    if (action === 'clients') { if (driveSrv.listThrows) throw new Error('network down'); return new Response(JSON.stringify({ clients: driveSrv.clients }), { status: 200 }); }
+    if (action === 'create_client') {
+      if (driveSrv.createThrows) { const b = JSON.parse(init.body); if (driveSrv.createThrows === 'after') driveSrv.clients.push({ id: 900, name: b.name, email: b.email }); throw new Error('socket hang up'); }
+      const b = JSON.parse(init.body);
+      if (driveSrv.createStatus !== 200) return new Response(JSON.stringify({ error: 'A Kite Drive account with this email already exists' }), { status: driveSrv.createStatus });
+      driveSrv.clients.push({ id: 901, name: b.name, email: b.email });
+      return new Response(JSON.stringify({ id: 901, name: b.name }), { status: 200 });
+    }
+    return new Response('{}', { status: 200 });
+  };
+  const withClient = () => { const db = world(); const cid = db.uid(); db.T.clients.push({ id: cid }); return { db, cid }; };
+  const decode = (t) => JSON.parse(Buffer.from(t.split('.')[0], 'base64url').toString());
+  try {
+    let { db, cid } = withClient();
+    db.T.client_drive_links.push({ client_id: cid, drive_user_id: 7, drive_name: 'Linked' });
+    const tok = async (b) => (await call(kitedrive, db.P.caller_super_admin, { action: 'token', clientId: cid, ...b })).body;
+    const t1 = await tok({ scope: 'read' }), t2 = await tok({ scope: 'read' });
+    ok(decode(t1.token).jti && decode(t1.token).jti !== decode(t2.token).jti && /^[0-9a-f-]{36}$/.test(decode(t1.token).jti), 'every token carries a unique jti');
+    const tv = await tok({ scope: 'view', fileId: 42 });
+    ok(decode(tv.token).fid === 42 && decode(tv.token).scope === 'view', 'a view token can be locked to one file (fid)');
+    const tv2 = await tok({ scope: 'view' });
+    ok(decode(tv2.token).fid === undefined, 'a view token without fileId stays client-wide (header use)');
+    const rBad = await call(kitedrive, db.P.caller_super_admin, { action: 'token', clientId: cid, scope: 'view', fileId: 'x' });
+    ok(rBad.status === 400, 'a malformed fileId is refused');
+    const td = await call(kitedrive, db.P.caller_super_admin, { action: 'token', clientId: cid, scope: 'download' });
+    ok(td.status === 400, 'a download token without a file is still refused');
+    ok(decode((await tok({ scope: 'download', fileId: 9 })).token).fid === 9 && decode(t1.token).exp - decode(t1.token).iat <= 3600, 'download tokens are file-locked and short-lived');
+    const emp = await call(kitedrive, db.P.caller_employee, { action: 'token', clientId: cid, scope: 'write' });
+    ok(emp.status === 403, 'authorization unchanged: an employee cannot get a write token');
+
+    // ---- link.create recovery
+    const create = (cid2, d) => call(kitedrive, db.P.caller_super_admin, { action: 'link.create', clientId: cid2, name: 'New Co', email: 'newco@x.test', password: 'password123', ...d });
+    const rpcs = (n) => db.log.filter((l) => l.op === 'rpc' && l.name === n).length;
+    const fresh = () => { const w = withClient(); db = w.db; RPC_RESULTS.drive_link_begin = [{ state: 'new', drive_user_id: null, drive_name: null }]; driveSrv.clients = []; driveSrv.createThrows = false; driveSrv.listThrows = false; driveSrv.createStatus = 200; calls.length = 0; return w.cid; };
+
+    let c = fresh(); let r = await create(c);
+    ok(r.status === 200 && rpcs('drive_link_remote_created') === 1 && rpcs('drive_link_complete') === 1 && rpcs('drive_link_abort') === 0, 'normal create: intent -> remote created -> complete, no abort');
+    ok(calls.every((x) => x.signal instanceof AbortSignal), 'EVERY call to Drive has a deadline (AbortSignal)');
+    ok(calls.every((x) => !/token=/.test(x.url) && typeof x.headers['X-Drive-Token'] === 'string'), 'the Edge Function calls Drive with the token in the header, never in the address');
+
+    c = fresh(); driveSrv.createThrows = 'after';       // the account WAS created, then the connection dropped
+    r = await create(c);
+    ok(r.status === 200 && rpcs('drive_link_abort') === 0 && rpcs('drive_link_complete') === 1, 'DAT-01: connection lost AFTER Drive created the account -> found by e-mail and linked, the intent is NOT discarded', JSON.stringify(r));
+    ok(db.log.find((l) => l.name === 'drive_link_remote_created')?.args.p_drive_user_id === 900, '... and the real Drive id is recorded');
+
+    c = fresh(); driveSrv.createThrows = 'before';      // Drive answered the lookup, the account is not there
+    r = await create(c);
+    ok(r.status === 502 && rpcs('drive_link_abort') === 1 && rpcs('drive_link_complete') === 0, 'connection lost, Drive reachable, account absent -> intent aborted so the admin can simply retry');
+
+    c = fresh(); driveSrv.createThrows = 'before'; driveSrv.listThrows = true;   // Drive cannot be asked at all
+    r = await create(c);
+    ok(r.status === 502 && rpcs('drive_link_abort') === 0 && rpcs('drive_link_complete') === 0 && /linked, not created twice/.test(r.body?.error ?? ''), 'DAT-01: outcome unknown and Drive unreachable -> the intent is KEPT (a retry looks the account up first)', JSON.stringify(r));
+
+    c = fresh(); driveSrv.createStatus = 409;
+    r = await create(c);
+    ok(r.status === 409 && rpcs('drive_link_abort') === 1, 'Drive refused (already exists): 409 and the intent is released');
+
+    c = fresh(); RPC_RESULTS.drive_link_begin = [{ state: 'busy', drive_user_id: null, drive_name: null }];
+    r = await create(c);
+    ok(r.status === 409 && !calls.some((x) => x.action === 'create_client'), 'another request is creating it: 409 and NO second account is requested');
+
+    c = fresh(); RPC_RESULTS.drive_link_begin = [{ state: 'adopt', drive_user_id: 555, drive_name: 'Earlier' }];
+    r = await create(c);
+    ok(r.status === 200 && !calls.some((x) => x.action === 'create_client') && db.log.find((l) => l.name === 'drive_link_complete').args.p_drive_user_id === 555, 'an account created earlier is adopted, never created again');
+
+    c = fresh(); db.flags.rpcErrors = { drive_link_complete: 'injected link failure' };
+    r = await create(c);
+    ok(r.status === 502 && /created but could not be linked/.test(r.body?.error ?? '') && rpcs('drive_link_abort') === 0, 'created on Drive but linking failed: reported clearly, intent kept for the retry');
+  } finally { globalThis.fetch = real; RPC_RESULTS.drive_link_begin = undefined; }
+}
+
+// =====================================================================================================
 // Part B: real SQL (all migrations 001-027)
 // =====================================================================================================
 section('B migrations 001-027 on in-process Postgres');
@@ -1067,7 +1213,7 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033', '034'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }
@@ -1249,7 +1395,7 @@ await db.exec(fs.readFileSync(path.join(SB, 'migrations/022_finance_executive_on
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/022_finance_executive_only.sql'), 'utf8')); // idempotent
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/028_finance_integrity.sql'), 'utf8'));
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/028_finance_integrity.sql'), 'utf8')); // idempotent
-for (const m of ['029_history_protection', '030_hr_integrity', '031_approvals_and_expenses', '032_atomic_operations', '033_database_hygiene']) {   // Phase 3.B-3.E, in order (details: verify-integrity.mjs)
+for (const m of ['029_history_protection', '030_hr_integrity', '031_approvals_and_expenses', '032_atomic_operations', '033_database_hygiene', '034_invitation_activation']) {   // Phase 3.B-3.E, in order (details: verify-integrity.mjs)
   await db.exec(fs.readFileSync(path.join(SB, `migrations/${m}.sql`), 'utf8'));
   await db.exec(fs.readFileSync(path.join(SB, `migrations/${m}.sql`), 'utf8')); // idempotent
 }

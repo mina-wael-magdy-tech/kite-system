@@ -8,7 +8,8 @@
  */
 declare(strict_types=1);
 
-const TOKEN_MAX_LIFETIME = 3600;
+require_once __DIR__ . '/lib.php';
+
 const DEFAULT_MAX_FILE_BYTES = 5368709120; // 5 GB
 const DEFAULT_CHUNK_BYTES = 8388608;       // 8 MB
 const STALE_UPLOAD_SECONDS = 172800;       // unfinished uploads are removed after 2 days
@@ -33,45 +34,6 @@ function ok(array $body): never
     header('Cache-Control: no-store');
     echo json_encode($body);
     exit;
-}
-
-function base64url_decode_strict(string $s): ?string
-{
-    if (!preg_match('/^[A-Za-z0-9_-]+$/', $s)) {
-        return null;
-    }
-    $decoded = base64_decode(strtr($s, '-_', '+/'), true);
-    return $decoded === false ? null : $decoded;
-}
-
-/** Returns the verified token payload, or stops the request. */
-function verify_token(string $token, string $secret): array
-{
-    $parts = explode('.', $token);
-    if (count($parts) !== 2) {
-        fail(401, 'Invalid token');
-    }
-    $signature = base64url_decode_strict($parts[1]);
-    if ($signature === null || !hash_equals(hash_hmac('sha256', $parts[0], $secret, true), $signature)) {
-        fail(401, 'Invalid token');
-    }
-    $json = base64url_decode_strict($parts[0]);
-    $claims = $json === null ? null : json_decode($json, true);
-    if (!is_array($claims) || ($claims['aud'] ?? null) !== 'kite-drive') {
-        fail(401, 'Invalid token');
-    }
-    $exp = $claims['exp'] ?? 0;
-    $iat = $claims['iat'] ?? 0;
-    if (!is_int($exp) || !is_int($iat) || $exp <= time() || $exp - $iat > TOKEN_MAX_LIFETIME) {
-        fail(401, 'Token expired');
-    }
-    if (!in_array($claims['scope'] ?? null, ['admin', 'read', 'write', 'download', 'view'], true)) {
-        fail(401, 'Invalid token');
-    }
-    if ($claims['scope'] !== 'admin' && (!is_int($claims['cid'] ?? null) || $claims['cid'] <= 0)) {
-        fail(401, 'Invalid token');
-    }
-    return $claims;
 }
 
 function require_scope(array $claims, array $scopes): void
@@ -238,14 +200,19 @@ function require_post(string $method): void
 /** Finds a folder by name under a parent, creating it if needed. Used for folder and ZIP uploads. */
 function ensure_folder(PDO $pdo, int $clientId, ?int $parentId, string $name): int
 {
+    static $seen = [];   // a ZIP with thousands of files in a few folders asked the database for the same folder every time
+    $key = $clientId . ':' . ($parentId ?? 0) . ':' . $name;
+    if (isset($seen[$key])) {
+        return $seen[$key];
+    }
     $find = $pdo->prepare('SELECT id FROM folders WHERE user_id = ? AND parent_id ' . ($parentId ? '= ?' : 'IS NULL') . ' AND name = ?');
     $find->execute($parentId ? [$clientId, $parentId, $name] : [$clientId, $name]);
     $id = $find->fetchColumn();
     if ($id) {
-        return (int) $id;
+        return $seen[$key] = (int) $id;
     }
     $pdo->prepare('INSERT INTO folders (user_id, parent_id, name) VALUES (?, ?, ?)')->execute([$clientId, $parentId, $name]);
-    return (int) $pdo->lastInsertId();
+    return $seen[$key] = (int) $pdo->lastInsertId();
 }
 
 /** Walks "A/B/C" under a parent. Empty, "." and ".." parts are ignored, so a path can't climb out. */
@@ -349,13 +316,16 @@ function extract_zip(PDO $pdo, string $driveRoot, array $config, int $clientId, 
         fail(422, 'This ZIP file could not be opened');
     }
     $limit = (int) ($config['max_file_bytes'] ?? DEFAULT_MAX_FILE_BYTES);
-    $total = 0;
+    $entries = [];
     for ($i = 0; $i < $zip->numFiles; $i++) {
-        $total += (int) ($zip->statIndex($i)['size'] ?? 0);
+        $st = $zip->statIndex($i) ?: [];
+        $entries[] = ['size' => (int) ($st['size'] ?? 0), 'comp_size' => (int) ($st['comp_size'] ?? 0)];
     }
-    if ($zip->numFiles > 5000 || $total > $limit * 2) {
+    $free = @disk_free_space($driveRoot);
+    $plan = zip_plan($entries, $limit, $free === false ? null : (float) $free);
+    if (!$plan['ok']) {
         $zip->close();
-        fail(413, 'This ZIP is too large to unpack. Upload it without unpacking.');
+        fail(413, $plan['reason']);
     }
     $tempDir = chunks_dir();
     $added = 0;
@@ -404,6 +374,8 @@ function extract_zip(PDO $pdo, string $driveRoot, array $config, int $clientId, 
 
 function remove_stale_uploads(): void
 {
+    drive_prune_dir(__DIR__ . '/_zips', 86400, 200);       // a ZIP nobody downloaded
+    drive_prune_dir(__DIR__ . '/_thumbs', 30 * 86400, 5000); // thumbnails are cheap to make again
     foreach (glob(chunks_dir() . '/*') ?: [] as $path) {
         if (filemtime($path) < time() - STALE_UPLOAD_SECONDS) {
             @unlink($path);
@@ -442,20 +414,28 @@ if ($method === 'OPTIONS') {
 }
 
 $action = (string) ($_GET['action'] ?? '');
-// Only these take the token in the URL, because an <img> or a browser navigation can't send a header.
-// Their tokens live for minutes and can only look at files, never list or change them.
-$token = in_array($action, ['download', 'view', 'thumb', 'zip', 'logo'], true)
-    ? (string) ($_GET['token'] ?? '')
-    : (string) ($_SERVER['HTTP_X_DRIVE_TOKEN'] ?? '');
+// The token goes in the X-Drive-Token header for every action (a fetch() can send it). A token in the address still works for an
+// <img>, <video> or a browser navigation that cannot send a header, but addresses end up in server access logs and browser
+// history, so config 'url_tokens' => 'strict' makes those tokens single-use (download, zip) or file-bound (view) and refuses the rest.
+[$token, $via] = drive_extract_token($_SERVER, $_GET, $action);
 if ($token === '') {
     fail(401, 'Missing token');
 }
+// Nothing here may end up in a cache, a referrer header or a log line: errors never echo the token.
+header('Referrer-Policy: no-referrer');
 $claims = verify_token($token, $secret);
+$urlPolicy = (($config['url_tokens'] ?? 'legacy') === 'strict') ? 'strict' : 'legacy';
 $clientId = $claims['cid'] ?? null;
 
 define('SECURE_ACCESS', true);
 require dirname(__DIR__) . '/db.php';
 $driveRoot = dirname(__DIR__);
+try {
+    drive_check_url_token($claims, $action, $via, in_array($action, ['view', 'thumb'], true) ? int_or_null($_GET['id'] ?? null) : null, $urlPolicy, $pdo);
+} catch (PDOException $e) {
+    error_log('Kite Drive token check failed: ' . $e->getMessage());   // fail closed; the message never contains the token
+    fail(503, 'Could not verify this link. Try again.');
+}
 
 // A token signed for a client that was since deleted from Drive must not write anything.
 if ($clientId !== null) {
@@ -584,8 +564,14 @@ switch ($action) {
         if (!$path) {
             fail(404, 'File is missing from the server');
         }
-        if ($action === 'thumb' && drive_send_thumbnail($path, $fileId, __DIR__ . '/_thumbs')) {
-            exit;
+        if ($action === 'thumb') {
+            if (drive_send_thumbnail($path, $fileId, __DIR__ . '/_thumbs')) {
+                exit;
+            }
+            // No thumbnail could be made: a grid must never download a big original per tile (the web app then shows an icon).
+            if (filesize($path) > 2097152) {
+                fail(404, 'No thumbnail');
+            }
         }
         // The real type from the file's content, not the one stored at upload.
         $realType = (new finfo(FILEINFO_MIME_TYPE))->file($path) ?: null;
@@ -886,14 +872,24 @@ switch ($action) {
         if ($name === '' || mb_strlen($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 8 || strlen($password) > 128) {
             fail(400, 'A name, a valid email and a password of at least 8 characters are required');
         }
-        $find = $pdo->prepare('SELECT 1 FROM users WHERE email = ?');
-        $find->execute([$email]);
-        if ($find->fetchColumn()) {
-            fail(409, 'A Kite Drive account with this email already exists');
+        // Check-then-insert is a race when two requests carry the same e-mail (a retry after a dropped response): the lock makes them take turns,
+        // so the second one sees the first one's account and answers 409 instead of creating a duplicate.
+        $lockName = 'kite_create_client:' . md5($email);
+        if (!drive_named_lock($pdo, $lockName)) {
+            fail(409, 'This account is being created right now. Try again in a moment.');
         }
-        $pdo->prepare("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'client')")
-            ->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
-        $newId = (int) $pdo->lastInsertId();
+        try {
+            $find = $pdo->prepare('SELECT 1 FROM users WHERE email = ?');
+            $find->execute([$email]);
+            if ($find->fetchColumn()) {
+                fail(409, 'A Kite Drive account with this email already exists');
+            }
+            $pdo->prepare("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'client')")
+                ->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
+            $newId = (int) $pdo->lastInsertId();
+        } finally {
+            drive_named_unlock($pdo, $lockName);
+        }
         log_action($claims, 'create_client', ['id' => $newId, 'name' => $name]);
         ok(['id' => $newId, 'name' => $name]);
 
@@ -1057,7 +1053,13 @@ switch ($action) {
         }
         $body = json_body();
         [$metaPath, $partPath] = upload_paths((string) ($body['uploadId'] ?? ''));
-        $meta = load_upload($metaPath, $claims);
+        // One finisher per upload: a retry that arrives while the first request is still unpacking must not unpack (or store) it twice.
+        $finishLock = drive_lock_try($metaPath);
+        if ($finishLock === null) {
+            fail(409, 'This upload is being finished. Try again in a moment.');
+        }
+        register_shutdown_function('drive_unlock', $finishLock, $metaPath);
+        $meta = load_upload($metaPath, $claims);   // read AFTER the lock: the winner may just have written the result
         if (isset($meta['result'])) {
             ok($meta['result']); // a retry after a dropped response
         }

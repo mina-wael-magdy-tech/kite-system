@@ -67,6 +67,10 @@ Open a client → **Files** → **Link to Kite Drive**. Upload a small file, che
 
 To undo this at any time, delete `uploads/.htaccess`.
 
+## Token transport (Phase 4)
+
+The browser sends the token in the `X-Drive-Token` header for every call (thumbnails and the logo are fetched that way and shown as blob addresses). Only three kinds of token may appear in a web address, because a `<video>`, a PDF frame or a download link cannot send a header: a view token locked to one file, and the single-use download / ZIP tokens. `url_tokens` in `api/config.php` is `legacy` (accept old address tokens, for a smooth release) or `strict` (enforce the rules above). Full release order and rollback: [phase4-release.md](phase4-release.md).
+
 ## Troubleshooting
 
 | What you see | Likely cause |

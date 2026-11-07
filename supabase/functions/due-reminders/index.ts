@@ -127,6 +127,13 @@ serveJson(async (req) => {
   // files whose database rows were deleted: remove them now, retry the ones that failed earlier (migration 029)
   const cleanup = await drainStorageCleanup(admin, 200);
 
-  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, publishNotified, today, tz, storageCleanup: cleanup } });
-  return json(req, { success: true, notified, publishNotified, today, storageCleanup: cleanup });
+  // invitations past their 7 days are marked expired (migration 034); a failure here must not stop the reminders
+  let invitationsExpired = 0;
+  try {
+    const { data } = await admin.rpc("invitations_expire_pending");
+    invitationsExpired = typeof data === "number" ? data : 0;
+  } catch (err) { console.error("invitation expiry sweep failed:", err); }
+
+  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, publishNotified, today, tz, storageCleanup: cleanup, invitationsExpired } });
+  return json(req, { success: true, notified, publishNotified, today, storageCleanup: cleanup, invitationsExpired });
 });

@@ -4,6 +4,8 @@
  */
 declare(strict_types=1);
 
+require_once __DIR__ . '/lib.php';
+
 /**
  * Finds a stored file on disk. Returns null unless it really is inside uploads/, so a bad database value
  * can never serve something else from the server.
@@ -48,6 +50,46 @@ function drive_send_thumbnail(string $path, int $fileId, string $cacheDir): bool
         if (!$info || $info[0] < 1 || $info[1] < 1 || $info[0] * $info[1] > $maxPixels) {
             return false;
         }
+        // A grid of photos asks for dozens of thumbnails at once: decode ONE at a time (the others wait, then find the cached file),
+        // and never open a photo that cannot fit in memory_limit (a memory fatal error is a blank 500 that cannot be caught).
+        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0755, true) && !is_dir($cacheDir)) {
+            return false;
+        }
+        $gate = @fopen($cacheDir . '/.gen.lock', 'c');
+        if ($gate !== false) {
+            flock($gate, LOCK_EX);
+            clearstatcache();
+        }
+        if (!is_file($cached)) {
+            $made = drive_make_thumbnail($path, $info, $cached, $cacheDir, $maxSide);
+            if ($gate !== false) {
+                flock($gate, LOCK_UN);
+                fclose($gate);
+            }
+            if (!$made) {
+                return false;
+            }
+        } elseif ($gate !== false) {
+            flock($gate, LOCK_UN);
+            fclose($gate);
+        }
+    }
+
+    header('Content-Type: image/jpeg');
+    header('Content-Length: ' . filesize($cached));
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: private, max-age=600');
+    readfile($cached);
+    return true;
+}
+
+/** Decodes the photo and writes the JPEG thumbnail to $cached. Returns false when it cannot (the caller then sends no thumbnail). */
+function drive_make_thumbnail(string $path, array $info, string $cached, string $cacheDir, int $maxSide): bool
+{
+    {
+        if (!drive_thumb_fits_memory((int) $info[0], (int) $info[1], drive_memory_limit_bytes(), memory_get_usage(true))) {
+            return false;
+        }
         $image = match ($info[2]) {
             IMAGETYPE_JPEG => @imagecreatefromjpeg($path),
             IMAGETYPE_PNG => @imagecreatefrompng($path),
@@ -73,21 +115,14 @@ function drive_send_thumbnail(string $path, int $fileId, string $cacheDir): bool
         $thumb = imagecreatetruecolor($tw, $th);
         imagefill($thumb, 0, 0, imagecolorallocate($thumb, 255, 255, 255)); // JPEG has no transparency
         imagecopyresampled($thumb, $image, 0, 0, 0, 0, $tw, $th, $w, $h);
-        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0755, true) && !is_dir($cacheDir)) {
-            return false;
-        }
         $temp = $cached . '.' . bin2hex(random_bytes(4));
         if (!imagejpeg($thumb, $temp, 78) || !rename($temp, $cached)) {
             @unlink($temp);
             return false;
         }
+        imagedestroy($image);
+        imagedestroy($thumb);
     }
-
-    header('Content-Type: image/jpeg');
-    header('Content-Length: ' . filesize($cached));
-    header('X-Content-Type-Options: nosniff');
-    header('Cache-Control: private, max-age=600');
-    readfile($cached);
     return true;
 }
 

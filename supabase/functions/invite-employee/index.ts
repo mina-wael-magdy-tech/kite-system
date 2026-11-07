@@ -96,7 +96,7 @@ serveJson(async (req) => {
   // Two simultaneous requests for the same address can no longer both go on to create / delete users.
   const { data: claimed, error: claimErr } = await admin.from("invitations").insert({
     email, full_name: fullName, role_id: roleId, department_id: departmentId,
-    job_title: jobTitle, invited_by: caller.id, token: crypto.randomUUID(), status: "pending",
+    job_title: jobTitle, invited_by: caller.id, token: await hashedToken(), status: "pending",
   }).select("id").single();
   if (claimErr || !claimed) {
     if (claimErr?.code === "23505") throw new HttpError(409, "An invitation for this e-mail address is already pending.");
@@ -126,6 +126,10 @@ serveJson(async (req) => {
       department_id: departmentId, employment_status: "onboarding",
     });
     if (profileErr) throw profileErr;
+
+    // bind the invitation to this exact account (migration 034): activation never matches it by e-mail again
+    const { error: bindErr } = await admin.from("invitations").update({ user_id: userId }).eq("id", claimedId);
+    if (bindErr) throw bindErr;
 
     const { error: roleErr } = await admin.from("user_roles").insert({ user_id: userId, role_id: roleId, assigned_by: caller.id });
     if (roleErr) throw roleErr;
@@ -161,4 +165,11 @@ async function removeInvitationsOf(admin: ReturnType<typeof adminClient>, email:
   const { data: rows } = await admin.from("invitations").select("id").eq("email", email);
   const ids = (rows ?? []).map((r: { id: string }) => r.id);
   if (ids.length) await admin.from("invitations").delete().in("id", ids);
+}
+
+/** The invitation row keeps only a hash of a random value. The real credential is the one-time link issued by Supabase Auth. */
+async function hashedToken(): Promise<string> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", raw));
+  return "sha256:" + [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

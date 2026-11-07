@@ -63,6 +63,11 @@ export class ClientHubModule {
     this.drive = new DrivePanel();
   }
 
+  /** Module contract: leaving the hub closes the Drive lightbox and drops its tokens. */
+  dispose() {
+    this.drive.dispose();
+  }
+
   async render(container, query) {
     this.root = container;
     const params = new URLSearchParams(query || '');

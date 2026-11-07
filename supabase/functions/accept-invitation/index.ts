@@ -13,29 +13,14 @@ serveJson(async (req) => {
     throw new HttpError(409, "No pending invitation for this account");
   }
 
-  const { data: invitation } = await admin.from("invitations")
-    .select("id, expires_at")
-    .eq("email", caller.email.toLowerCase())
-    .eq("status", "pending")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!invitation) throw new HttpError(409, "No pending invitation for this account");
-  if (new Date(invitation.expires_at).getTime() < Date.now()) {
-    await admin.from("invitations").update({ status: "expired" }).eq("id", invitation.id);
-    throw new HttpError(410, "This invitation has expired. Ask your administrator to invite you again.");
-  }
-
-  const { data: activated, error } = await admin.from("profiles")
-    .update({ employment_status: "active" })
-    .eq("id", caller.id).eq("employment_status", "onboarding")
-    .select("id").maybeSingle();
+  // One atomic database decision (migration 034): profile + invitation are locked, checked and updated together,
+  // so a double click, a replay or two devices can never activate twice or leave the invitation half-updated.
+  const { data: outcome, error } = await admin.rpc("accept_invitation", { p_user: caller.id });
   if (error) throw error;
-  if (!activated) throw new HttpError(409, "Account is already active");
+  if (outcome === "expired") throw new HttpError(410, "This invitation has expired. Ask your administrator to invite you again.");
+  if (outcome === "not_onboarding") throw new HttpError(409, "Account is already active");
+  if (outcome !== "accepted") throw new HttpError(409, "No pending invitation for this account");
 
-  await admin.from("invitations")
-    .update({ status: "accepted", accepted_at: new Date().toISOString() })
-    .eq("id", invitation.id);
   const { data: me } = await admin.from("profiles").select("full_name").eq("id", caller.id).maybeSingle();
   for (const userId of await userIdsWithRoles(admin, [...ADMIN_ROLES, "hr_manager"])) {
     if (userId === caller.id) continue;

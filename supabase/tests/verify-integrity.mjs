@@ -61,7 +61,7 @@ try {
   await db.query(STUBS);
 
   // ================================================================== 0. the complete chain
-  section('0. complete migration chain 001 -> 033 on real PostgreSQL (incl. 026, 027, 028), then 029-033 again (idempotent)');
+  section('0. complete migration chain 001 -> 034 on real PostgreSQL (incl. 026, 027, 028), then 029-034 again (idempotent)');
   const files = fs.readdirSync(path.join(SB, 'migrations')).filter((f) => /^\d{3}_.*\.sql$/.test(f)).sort();
   let chainOk = true;
   for (const f of files) {
@@ -69,8 +69,8 @@ try {
     if (r.error) { chainOk = false; console.log('FAIL migration', f, r.error.slice(0, 200)); failed++; }
     if (f.startsWith('005')) await db.query(sql('seed.sql'));
   }
-  ok(chainOk && files.length >= 33 && files.includes('033_database_hygiene.sql'), `all ${files.length} migrations apply in order`);
-  for (const f of files.filter((x) => /^0(29|30|31|32|33)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
+  ok(chainOk && files.length >= 34 && files.includes('034_invitation_activation.sql'), `all ${files.length} migrations apply in order`);
+  for (const f of files.filter((x) => /^0(29|30|31|32|33|34)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
   ok(notices.filter((m) => /NOT VALID|was NOT created/.test(m)).length === 0, 'a clean database raises no "NOT VALID / not created" notice', notices.filter((m) => /NOT VALID|NOT created/.test(m)).join(' | ').slice(0, 300));
 
   // fixtures ------------------------------------------------------------------------------------------------------------------
@@ -847,7 +847,7 @@ try {
     const tk = (await L.query("INSERT INTO public.tasks(title,created_by) VALUES ('old task',$1) RETURNING id", [own])).rows[0].id;
     await L.query("INSERT INTO public.task_attachments(task_id,file_name,file_size,file_type,storage_path,uploaded_by) VALUES ($1,'a',1,'x','legacy/path.png',$2)", [tk, own]);
 
-    const NEWCOLS = ['actor_id', 'actor_label', 'paid_at', 'paid_by', 'approved_at', 'dedupe_key', 'request_id', 'completed_at'];
+    const NEWCOLS = ['user_id', 'actor_id', 'actor_label', 'paid_at', 'paid_by', 'approved_at', 'dedupe_key', 'request_id', 'completed_at'];
     const TABLES = ['profiles', 'attendance_records', 'leave_requests', 'leave_types', 'expenses', 'expense_approvals', 'budgets', 'money_figures', 'user_departments', 'invitations', 'content_plans', 'content_posts', 'content_post_assets',
       'audit_logs', 'tasks', 'task_attachments', 'departments', 'user_roles'];
     const snap = async () => { const out = {}; for (const t of TABLES) out[t] = JSON.stringify((await L.query(`SELECT coalesce(json_agg(to_jsonb(x) - $1::text[] ORDER BY to_jsonb(x)::text), '[]') j FROM public.${t} x`, [NEWCOLS])).rows[0].j); return out; };
@@ -897,6 +897,94 @@ try {
     const cons2 = (await L.query("SELECT bool_and(convalidated) v FROM pg_constraint WHERE conname IN ('attendance_out_after_in','attendance_hours_nonneg','leave_end_after_start','expenses_currency_chk','content_post_assets_plan_post_fk','content_feedback_plan_post_fk')")).rows[0].v;
     const idx2 = (await L.query("SELECT count(*)::int c FROM pg_indexes WHERE indexname IN ('uq_user_primary_department','uq_invitation_pending_email','uq_expense_approval_once')")).rows[0].c;
     ok(cons2 === true && idx2 === 3, 'after the clean-up, re-running the migrations VALIDATES every constraint and creates all three unique indexes', JSON.stringify({ cons2, idx2 }));
+  }
+
+
+  // ================================================================== 16. Phase 4 ARC-03 employee activation
+  section('16. ARC-03 employee activation (migration 034): atomic, single-use, bound to the account, expiring');
+  {
+    const roleEmp = await roleId('employee');
+    let n = 0;
+    const mkInv = async ({ email, user = null, status = 'pending', expires = "now() + interval '7 days'", by = HR }) => (await db.query(
+      `INSERT INTO public.invitations(email, full_name, role_id, invited_by, token, status, expires_at, user_id) VALUES ($1,'Inv',$2,$3,$4,$5,${expires},$6) RETURNING id`,
+      [email, roleEmp, by, 'sha256:t' + (++n) + Math.random(), status, user])).rows[0].id;
+    const accept = (c, user) => c.query('SELECT public.accept_invitation($1) r', [user]).then((r) => r.rows[0].r);
+    const statusOf = async (u) => (await db.query('SELECT employment_status s FROM public.profiles WHERE id=$1', [u])).rows[0].s;
+    const invOf = async (id) => (await db.query('SELECT status, accepted_at FROM public.invitations WHERE id=$1', [id])).rows[0];
+    const rolesOf = async (u) => (await db.query('SELECT r.name FROM public.user_roles ur JOIN public.roles r ON r.id=ur.role_id WHERE ur.user_id=$1 ORDER BY 1', [u])).rows.map((x) => x.name).join();
+
+    const a = await mkUser('act_a', 'employee', 'onboarding'); const invA = await mkInv({ email: 'act_a@x.test', user: a });
+    ok(await accept(db, a) === 'accepted' && await statusOf(a) === 'active', 'activation: the profile becomes active');
+    const ia = await invOf(invA);
+    ok(ia.status === 'accepted' && ia.accepted_at !== null, 'activation: the invitation is marked accepted with a time, in the same transaction');
+    ok(await rolesOf(a) === 'employee', 'activation never touches the role');
+    ok(await accept(db, a) === 'not_onboarding', 'replay: a second activation of the same account is refused');
+    ok((await invOf(invA)).status === 'accepted', 'replay leaves the accepted invitation as it was');
+
+    const b = await mkUser('act_b', 'employee', 'onboarding'); const invB = await mkInv({ email: 'act_b@x.test', user: b, expires: "now() - interval '1 minute'" });
+    ok(await accept(db, b) === 'expired' && await statusOf(b) === 'onboarding', 'an expired invitation does not activate the account');
+    ok((await invOf(invB)).status === 'expired', '... and the expiry is RECORDED (not rolled back with a raised error)');
+    ok(await accept(db, b) === 'no_invitation', 'once expired, a retry finds no pending invitation');
+
+    const c = await mkUser('act_c', 'employee', 'onboarding');
+    ok(await accept(db, c) === 'no_invitation' && await statusOf(c) === 'onboarding', 'no invitation: nothing is activated');
+
+    const d = await mkUser('act_d', 'employee', 'onboarding'); const other = await mkUser('act_d_other', 'employee', 'onboarding');
+    const invBound = await mkInv({ email: 'act_d@x.test', user: other });   // bound to ANOTHER account but carrying d's address
+    ok(await accept(db, d) === 'no_invitation' && (await invOf(invBound)).status === 'pending', 'an invitation bound to one account is never matched to another by e-mail');
+    ok(await accept(db, other) === 'accepted', '... it activates only the account it was issued for');
+
+    const legacy = await mkUser('act_leg', 'employee', 'onboarding'); const invLeg = await mkInv({ email: 'ACT_LEG@x.test' });   // no user_id: a row from before 034
+    ok(await accept(db, legacy) === 'accepted' && (await invOf(invLeg)).status === 'accepted', 'legacy invitation without user_id still works (matched by e-mail, case-insensitive)');
+
+    for (const st of ['active', 'inactive', 'suspended']) {
+      const u = await mkUser('act_' + st, 'employee', st); const i = await mkInv({ email: `act_${st}@x.test`, user: u });
+      ok(await accept(db, u) === 'not_onboarding' && await statusOf(u) === st && (await invOf(i)).status === 'pending', `a ${st} account cannot be "activated" and its invitation is untouched`);
+    }
+
+    const s = await mkUser('act_sup', 'employee', 'onboarding');
+    const oldI = await mkInv({ email: 'act_sup_old@x.test', user: s }); await new Promise((r) => setTimeout(r, 15));
+    const newI = await mkInv({ email: 'act_sup@x.test', user: s });
+    ok(await accept(db, s) === 'accepted' && (await invOf(newI)).status === 'accepted' && (await invOf(oldI)).status === 'revoked', 'the newest invitation is used; an older pending one of the same account is superseded (revoked)');
+
+    // concurrency: ten devices activate the same account at once
+    const race = await mkUser('act_race', 'employee', 'onboarding'); const invRace = await mkInv({ email: 'act_race@x.test', user: race });
+    const cs = await Promise.all(Array.from({ length: 10 }, () => connect('kite')));
+    const out = await Promise.all(cs.map((cx) => accept(cx, race)));
+    await Promise.all(cs.map((cx) => cx.end()));
+    ok(out.filter((x) => x === 'accepted').length === 1 && out.filter((x) => x === 'not_onboarding').length === 9, 'CONCURRENCY: 10 simultaneous activations give exactly one "accepted"', out.join());
+    ok(await statusOf(race) === 'active' && (await invOf(invRace)).status === 'accepted' && await count("SELECT count(*)::int c FROM public.invitations WHERE user_id=$1 AND status='accepted'", [race]) === 1, '... one active profile, one accepted invitation');
+
+    // expiry and activation racing: the invitation expires between two requests
+    const exp = await mkUser('act_exp', 'employee', 'onboarding'); const invExp = await mkInv({ email: 'act_exp@x.test', user: exp, expires: "now() + interval '1 second'" });
+    await new Promise((r) => setTimeout(r, 1300));
+    ok(await accept(db, exp) === 'expired', 'an invitation that expired a moment ago is refused');
+
+    // who may call it
+    const self = await mkUser('act_self', 'employee', 'onboarding'); await mkInv({ email: 'act_self@x.test', user: self });
+    const viaUser = await asUser(self, 'SELECT public.accept_invitation($1)', [self]);
+    ok(!!viaUser.error && /permission denied/.test(viaUser.error) && await statusOf(self) === 'onboarding', 'a signed-in user cannot call accept_invitation themselves (only the Edge Function can)', viaUser.error);
+    const viaSweep = await asUser(HR, 'SELECT public.invitations_expire_pending()');
+    ok(!!viaSweep.error && /permission denied/.test(viaSweep.error), 'a signed-in user cannot run the expiry sweep');
+
+    // expiry sweep
+    const sw1 = await mkUser('act_sw1', 'employee', 'onboarding'); const sw2 = await mkUser('act_sw2', 'employee', 'onboarding');
+    const i1 = await mkInv({ email: 'act_sw1@x.test', user: sw1, expires: "now() - interval '2 days'" }); const i2 = await mkInv({ email: 'act_sw2@x.test', user: sw2 });
+    const swept = (await db.query('SELECT public.invitations_expire_pending() n')).rows[0].n;
+    ok(swept >= 1 && (await invOf(i1)).status === 'expired' && (await invOf(i2)).status === 'pending', 'the sweep marks past-due invitations expired and leaves current ones pending', String(swept));
+    ok((await db.query('SELECT public.invitations_expire_pending() n')).rows[0].n === 0, 'the sweep is idempotent');
+
+    // the stored token: not readable by signed-in users
+    const tokRead = await asUser(HR, 'SELECT token FROM public.invitations LIMIT 1');
+    ok(!!tokRead.error && /permission denied/.test(tokRead.error), 'HR / admins cannot read invitations.token (column privilege)', tokRead.error);
+    const starRead = await asUser(HR, 'SELECT * FROM public.invitations LIMIT 1');
+    ok(!!starRead.error && /permission denied/.test(starRead.error), 'SELECT * on invitations is refused too (the browser never uses it)', starRead.error);
+    const listRead = await asUser(HR, 'SELECT id, email, status, expires_at, user_id FROM public.invitations');
+    ok(!listRead.error && listRead.rows.length > 0, 'HR can still list the non-secret invitation columns (RLS unchanged)', listRead.error);
+    const empRead = await asUser(E1, 'SELECT id FROM public.invitations');
+    ok(!empRead.error && empRead.rows.length === 0, 'an ordinary employee still sees no invitation rows (RLS unchanged)');
+    const unique = await tryq(db, "SELECT count(*)::int c FROM public.invitations GROUP BY lower(email) HAVING count(*) FILTER (WHERE status='pending') > 1");
+    ok(!unique.error && unique.rows.length === 0, 'still at most one pending invitation per e-mail (migration 032 index intact)');
   }
 
 

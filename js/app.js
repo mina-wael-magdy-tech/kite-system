@@ -16,24 +16,8 @@ import { Money } from './services/money.js';
 import { infoDialog } from './ui/dialogs.js';
 import { getInitials, getAccentHex, escapeHTML, formatRelativeTime } from './utils/helpers.js';
 
-// Import All 14 Core Modules
-import { DashboardModule } from './modules/dashboard/dashboard.js';
-import { TasksModule } from './modules/tasks/tasks.js';
-import { ProjectsModule } from './modules/projects/projects.js';
-import { ClientHubModule } from './modules/clients/client-hub.js';
-import { CampaignsModule } from './modules/campaigns/campaigns.js';
-import { EmployeesModule } from './modules/employees/employees.js';
-import { DepartmentsModule } from './modules/departments/departments.js';
-import { HrModule } from './modules/hr/hr.js';
-import { BroadcastModule, canBroadcast } from './modules/broadcast/broadcast.js';
-import { CrmModule } from './modules/crm/crm.js';
-import { FinanceModule } from './modules/finance/finance.js';
-import { QrModule } from './modules/qr/qr-generator.js';
-import { DocumentsModule } from './modules/documents/documents.js';
-import { ChatModule } from './modules/chat/chat.js';
-import { ReportsModule } from './modules/reports/reports.js';
-import { AdminModule } from './modules/admin/admin.js';
-import { CalendarModule } from './modules/calendar/calendar.js';
+import { MODULES } from './modules/registry.js';
+import { canBroadcast } from './modules/broadcast/broadcast.js';
 
 class PulseStudioApp {
   constructor() {
@@ -149,107 +133,9 @@ class PulseStudioApp {
   }
 
   registerModules() {
-    AppRouter.register('dashboard', {
-      title: 'Executive Dashboard',
-      breadcrumbs: ['KITE', 'Executive Dashboard'],
-      render: (container, query) => new DashboardModule(this).render(container, query)
-    });
-
-    AppRouter.register('tasks', {
-      title: 'Task Management',
-      breadcrumbs: ['Agency Workspace', 'Tasks & Sprints'],
-      render: (container, query) => new TasksModule(this).render(container, query)
-    });
-
-    AppRouter.register('calendar', {
-      title: 'Calendar & Timeline',
-      breadcrumbs: ['Agency Workspace', 'Calendar & Timeline'],
-      render: (container, query) => new CalendarModule(this).render(container, query)
-    });
-
-    AppRouter.register('clients', {
-      title: 'Clients',
-      breadcrumbs: ['Agency Workspace', 'Clients'],
-      render: (container, query) => new ClientHubModule(this).render(container, query)
-    });
-
-    AppRouter.register('projects', {
-      title: 'Client Projects',
-      breadcrumbs: ['Agency Workspace', 'Projects & Milestones'],
-      render: (container, query) => new ProjectsModule(this).render(container, query)
-    });
-
-    AppRouter.register('campaigns', {
-      title: 'Studio Campaigns',
-      breadcrumbs: ['Agency Workspace', 'Cross-Dept Campaigns'],
-      render: (container, query) => new CampaignsModule(this).render(container, query)
-    });
-
-    AppRouter.register('employees', {
-      title: 'Employee Directory',
-      breadcrumbs: ['Studio Organization', 'People & Profiles'],
-      render: (container, query) => new EmployeesModule(this).render(container, query)
-    });
-
-    AppRouter.register('departments', {
-      title: 'Studio Departments',
-      breadcrumbs: ['Studio Organization', '5 Departments'],
-      render: (container, query) => new DepartmentsModule(this).render(container, query)
-    });
-
-    AppRouter.register('broadcast', {
-      title: 'Announcements',
-      breadcrumbs: ['System Control', 'Announcements'],
-      render: (container, query) => new BroadcastModule(this).render(container, query)
-    });
-
-    AppRouter.register('hr', {
-      title: 'HR & Attendance',
-      breadcrumbs: ['Studio Organization', 'Attendance & Leaves'],
-      render: (container, query) => new HrModule(this).render(container, query)
-    });
-
-    AppRouter.register('crm', {
-      title: 'CRM & Pipelines',
-      breadcrumbs: ['Client & Finance', 'Clients & Deals'],
-      render: (container, query) => new CrmModule(this).render(container, query)
-    });
-
-    AppRouter.register('finance', {
-      title: 'Finance & Budgets',
-      breadcrumbs: ['Client & Finance', 'Expenses & Invoices'],
-      render: (container, query) => new FinanceModule(this).render(container, query)
-    });
-
-    AppRouter.register('documents', {
-      title: 'Documents Vault',
-      breadcrumbs: ['Client & Finance', 'Digital Assets & Vault'],
-      render: (container, query) => new DocumentsModule(this).render(container, query)
-    });
-
-    AppRouter.register('chat', {
-      title: 'Role Chat & Handoffs',
-      breadcrumbs: ['Collaboration', 'Live Channels & DMs'],
-      render: (container, query) => new ChatModule(this).render(container, query)
-    });
-
-    AppRouter.register('qr', {
-      title: 'QR Code Generator',
-      breadcrumbs: ['Collaboration', 'QR Code Generator'],
-      render: (container, query) => new QrModule(this).render(container, query)
-    });
-
-    AppRouter.register('reports', {
-      title: 'Analytics & Reports',
-      breadcrumbs: ['Collaboration', 'Executive Analytics'],
-      render: (container, query) => new ReportsModule(this).render(container, query)
-    });
-
-    AppRouter.register('admin', {
-      title: 'Admin Control Center',
-      breadcrumbs: ['System Control', 'Master Admin Center'],
-      render: (container, query) => new AdminModule(this).render(container, query)
-    });
+    for (const m of MODULES) {
+      AppRouter.register(m.id, { title: m.title, breadcrumbs: m.breadcrumbs, create: () => m.create(this) });
+    }
   }
 
   setupEventListeners() {
