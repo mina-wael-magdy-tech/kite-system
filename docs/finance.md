@@ -3,14 +3,21 @@
 Built in steps. **Step 2 (clients & invoicing) is in.** Still to come: expenses (3), payroll (4), taxes & insurance (5), budgets & dashboard (6).
 
 ## Who can do what
-| Role | Invoices, clients, retainers, expenses | Void invoice / reverse payment / change settings | Payroll (later) |
-|---|---|---|---|
-| owner, CEO, super admin | ✔ | ✔ | ✔ |
-| finance manager | ✔ | ✔ | ✘ |
-| accountant | ✔ | ✘ (read-only settings) | ✘ |
-| everyone else | ✘ | ✘ | ✘ |
+**Finance is executive-only (policy approved 2026-11-07).** super_admin, owner and ceo are one equal tier and are the only roles
+that can view or act on Finance data: invoices, payments, retainers, expenses, budgets, vendors, settings, client billing,
+money figures, finance audit events and anything exported from them.
 
-Enforced in the database (row-level security + `auth_is_finance()`), not just on screen. Even finance users cannot write to the
+| Role | View / act on Finance data | Grant finance_manager / accountant |
+|---|---|---|
+| super_admin, owner, ceo | ✔ | ✔ |
+| finance_manager, accountant | ✘ (no access merely for being in the Finance department) | ✘ |
+| general_manager, HR, managers, employees, clients | ✘ | ✘ |
+
+Limited operational Finance actions for finance_manager / accountant (for example filing an expense claim, or issuing
+invoices without seeing totals) are **not enabled**; they need an approved, narrowly scoped permission first.
+
+Enforced in the database (row-level security + `auth_is_finance()`, which means "executive" since migration 022), in the Edge
+Functions (`finance`, `workflow` expense actions, `retainer-billing` notifications) and on screen, not just on screen. Even finance users cannot write to the
 finance tables directly: every write goes through the `finance` edge function, which calls `fin_*` SQL functions.
 
 ## Deploy (in this order)

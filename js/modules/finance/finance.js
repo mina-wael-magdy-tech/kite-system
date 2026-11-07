@@ -38,7 +38,7 @@ export class FinanceModule {
   async render(container, query = '') {
     if (!Money.canFinance()) {
       container.innerHTML = `<div class="page-container"><div class="empty-state"><div class="empty-state-icon"><i data-lucide="lock"></i></div>
-        <div class="empty-state-title">Finance team only</div><div class="empty-state-desc">Finance is available to the owner, the finance manager and the accountant.</div></div></div>`;
+        <div class="empty-state-title">Executives only</div><div class="empty-state-desc">Finance is available to the owner, the CEO and the super administrator.</div></div></div>`;
       return;
     }
     const wanted = new URLSearchParams(query || '').get('tab');

@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { activeRoleNames, adminClient, ADMIN_ROLES, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, Caller, getCaller, notify, replaceUserRole, requireStaff, userClient, userIdsWithRoles } from "../_shared/auth.ts";
+import { activeRoleNames, adminClient, ADMIN_ROLES, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, Caller, canManageEmployees, EXECUTIVE_ROLES, getCaller, isExecutive, notify, replaceUserRole, requireStaff, userClient, userIdsWithRoles } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 import { isAllowedPushEndpoint, pushConfigured, sendPush } from "../_shared/push.ts";
 
@@ -273,7 +273,8 @@ async function expenseDecide(req: Request, admin: SupabaseClient, caller: Caller
   const decision = v.oneOf(b.decision, ["approved", "rejected"] as const, "decision");
   const notes = v.optText(b.notes, "notes", 1000);
 
-  if (!(caller.isAdmin || caller.has("finance_manager"))) {
+  // Finance data is executive-only (super_admin, owner, ceo): only they may see and decide expense claims
+  if (!isExecutive(caller)) {
     throw new HttpError(403, "Finance privilege required");
   }
   const { data: exp } = await admin.from("expenses").select("id, title, status, submitted_by").eq("id", expenseId).maybeSingle();
@@ -413,7 +414,7 @@ async function taskDelete(req: Request, admin: SupabaseClient, caller: Caller, b
 const EMPLOYMENT_STATUSES = ["active", "inactive", "suspended"] as const;
 
 async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
-  if (!(caller.isAdmin || caller.has("hr_manager"))) throw new HttpError(403, "Admin or HR privilege required");
+  if (!canManageEmployees(caller)) throw new HttpError(403, "Admin or HR privilege required");
   const userId = v.uuid(b.userId, "userId");
   const isSelf = userId === caller.id;
 
@@ -594,7 +595,8 @@ async function expenseSubmitted(admin: SupabaseClient, caller: Caller, b: Record
   if (!ex || ex.submitted_by !== caller.id || ex.status !== "submitted") throw new HttpError(404, "Expense not found");
   if (Date.now() - new Date(ex.created_at).getTime() > 10 * 60_000) return { success: true, skipped: true };
   const who = await personName(admin, caller.id);
-  const approvers = new Set(await userIdsWithRoles(admin, [...ADMIN_ROLES, "finance_manager", "accountant"]));
+  // the claim carries an amount: only executives (who may view Finance data) are told
+  const approvers = new Set(await userIdsWithRoles(admin, EXECUTIVE_ROLES));
   approvers.delete(caller.id);
   for (const userId of approvers) {
     await notify(admin, {

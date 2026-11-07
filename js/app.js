@@ -142,7 +142,7 @@ class PulseStudioApp {
     if (adminNavGroup) adminNavGroup.style.display = isAdmin ? 'block' : 'none';
     const bcNav = document.getElementById('broadcastNavItem');
     if (bcNav) bcNav.style.display = canBroadcast() ? 'flex' : 'none';
-    // finance: owner / CEO, finance manager and accountant (payroll inside it stays owner-only)
+    // finance: executives only (super_admin, owner, ceo), the same set the database and Edge Functions enforce
     const finNav = document.getElementById('financeNavItem');
     if (finNav) finNav.style.display = Money.canFinance() ? 'flex' : 'none';
     if (menuAdminLink) menuAdminLink.style.display = isAdmin ? 'flex' : 'none';

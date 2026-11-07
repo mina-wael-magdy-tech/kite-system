@@ -2,7 +2,7 @@
  * KITE SYSTEM — Finance › Settings
  * Company details printed on invoices, default VAT and withholding rates, payment terms, invoice prefix and bank details.
  * Nothing is hardcoded: every rate here is editable. (Social insurance and income-tax brackets arrive with the Taxes step.)
- * Only the owner or finance manager can change them; the accountant can read them.
+ * Executives only (super_admin, owner, CEO) can see and change them.
  */
 
 import { Api } from '../../../services/api.js';
@@ -33,7 +33,7 @@ export class SettingsTab {
       ${FIELDS.map(([title, fs]) => `<div><div class="text-2xs font-bold text-dim uppercase" style="margin-bottom:6px">${title}</div><div class="fin-form">${fs.map(field).join('')}</div></div>`).join('')}
       <div><div class="text-2xs font-bold text-dim uppercase" style="margin-bottom:6px">Bank details (printed on every invoice)</div>
         <textarea id="st_bank_details" name="bank_details" rows="3" class="form-control" ${can ? '' : 'disabled'} placeholder="Bank, account name, IBAN, SWIFT">${escapeHTML(s.bank_details || '')}</textarea></div>
-      <div id="stNote" class="text-2xs text-muted">${can ? 'Changing a rate affects NEW invoices only. Issued invoices keep the rates they were created with.' : 'Only the owner or the finance manager can change these settings.'}</div>
+      <div id="stNote" class="text-2xs text-muted">${can ? 'Changing a rate affects NEW invoices only. Issued invoices keep the rates they were created with.' : 'Only the owner, CEO or super administrator can change these settings.'}</div>
       ${can ? '<div><button type="submit" class="btn btn-primary btn-sm">Save settings</button></div>' : ''}
     </form>`;
   }

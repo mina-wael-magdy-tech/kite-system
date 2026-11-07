@@ -20,8 +20,8 @@
 | `projects` + members/milestones | admin · PM · creator · member · department member | managers (create); admin/PM/creator (update) | — |
 | `campaigns` | staff | managers (create); admin/owner (update) | — |
 | CRM (`clients` read: staff; contacts, leads, opportunities, activities) | managers (leads also assignee/creator) | managers | — |
-| `expenses` | submitter · finance manager · admin · department manager | submit own (`draft`/`submitted` only) | `workflow`: `expense.decide` |
-| `invoices`, `vendors`, `budgets` | finance manager · admin (budgets also dept manager) | finance manager · admin | — |
+| `expenses`, `expense_approvals` | **executives only** (super_admin, owner, ceo) | staff may INSERT their own claim (`draft`/`submitted`); it cannot be read back | `workflow`: `expense.decide` (executives only) |
+| `invoices`, `invoice_items`, `invoice_payments`, `retainer_plans`, `client_billing`, `finance_settings`, `vendors`, `budgets`, `money_figures`, `finance_audit_log` | **executives only** (super_admin, owner, ceo); finance_manager and accountant have no access | none directly; writes go through the `finance` Edge Function (executives only) and `fin_*` SQL functions (service role) | `finance` |
 | `attendance_records` | self · HR · admin | self (check-in; check-out/hours/notes) | — |
 | `leave_requests` | self · HR · admin | submit own (`pending` only) | `workflow`: `leave.decide` |
 | `employee_documents` | self · HR · admin | HR · admin | — |
@@ -77,3 +77,10 @@ Devices subscribe through the server (never directly), only real push-service en
 
 ## 6. Verification
 The access model was tested by running all migrations against PostgreSQL and attacking them as anonymous, stranger, suspended, client-role, employee, HR, finance and admin users (79 scenarios: escalation, forgery, cross-user reads, storage paths). Re-run after any policy change; see `docs/production-checklist.md` §5.
+
+## Role tiers and Finance confidentiality (policy approved 2026-11-07, migrations 020-022)
+- **Executive tier = super_admin, owner, ceo** (one equal tier). Only they may view Finance data anywhere and only they may grant `finance_manager` / `accountant`. Being in the Finance department grants nothing.
+- Employee management (`invite-employee`, `workflow employee.update`) is open to executives, general_manager and hr_manager. A caller may grant a role / modify / disable / delete an account only at or below their own tier (general_manager 2, finance roles 3, hr_manager 4, everyone else 5); executives manage each other.
+- The last **active** super_admin can never be demoted, disabled or deleted. Role replacement is atomic (`replace_user_role()`).
+- Single source in code: `supabase/functions/_shared/auth.ts` (`EXECUTIVE_ROLES`, `ROLE_TIER`). In SQL: `auth_is_finance()` (= executive) and `auth_is_owner()`; in the UI: `js/services/money.js`. `supabase/tests/verify-roles.mjs` fails if they drift apart.
+- Open gaps and decisions: `docs/system-architecture-audit/phase-0/FINANCE_ACCESS_AUDIT.md`.

@@ -12,7 +12,7 @@
 //   (add `Authorization: Bearer <anon key>` as for the other scheduled function)
 
 import { HttpError, json, serveJson } from "../_shared/http.ts";
-import { adminClient, notify, userIdsWithRoles } from "../_shared/auth.ts";
+import { adminClient, EXECUTIVE_ROLES, notify, userIdsWithRoles } from "../_shared/auth.ts";
 
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
@@ -38,7 +38,7 @@ serveJson(async (req) => {
   if (e2) console.error("mark overdue failed:", e2.message);
 
   if ((created ?? 0) > 0) {
-    const people = await userIdsWithRoles(admin, ["finance_manager", "accountant", "owner", "super_admin"]);
+    const people = await userIdsWithRoles(admin, EXECUTIVE_ROLES); // Finance data is executive-only
     await Promise.all(people.map((userId) => notify(admin, {
       userId, type: "invoice_drafts",
       title: "Retainer invoices ready to review",

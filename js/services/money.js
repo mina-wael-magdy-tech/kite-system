@@ -8,13 +8,14 @@ import { getSupabase } from '../supabase-client.js';
 import { Permissions } from '../permissions/permission-service.js';
 
 export const OWNER_ROLES = ['owner', 'ceo', 'super_admin'];
-/** finance tier: the owner roles plus the finance manager and the accountant (invoices, expenses, taxes, reports) */
-export const FINANCE_ROLES = [...OWNER_ROLES, 'finance_manager', 'accountant'];
-/** can void invoices / reverse payments / change tax settings */
-export const FINANCE_SENIOR_ROLES = [...OWNER_ROLES, 'finance_manager'];
+/** Finance data is EXECUTIVE-ONLY (same set as the database function auth_is_finance() and the `finance` Edge Function).
+ *  finance_manager and accountant have no Finance access. */
+export const FINANCE_ROLES = [...OWNER_ROLES];
+/** can void invoices / reverse payments / change tax settings (executives only) */
+export const FINANCE_SENIOR_ROLES = [...OWNER_ROLES];
 
 export const Money = {
-  /** true for the finance tier (owner, CEO, finance manager, accountant) */
+  /** true for the executive tier (super_admin, owner, CEO): the only people who may see Finance */
   canFinance() { return FINANCE_ROLES.some(r => Permissions.hasRole(r)); },
   isSenior() { return FINANCE_SENIOR_ROLES.some(r => Permissions.hasRole(r)); },
 

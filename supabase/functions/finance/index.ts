@@ -13,24 +13,22 @@
 //   payment.reverse   owner / finance manager   { paymentId, reason }
 //   retainer.run      finance tier              { month: "YYYY-MM-01" }   (creates the month's draft retainer invoices)
 //
-// Finance tier = super_admin, owner, ceo, finance_manager, accountant. Payroll (later) is owner-only.
+// Finance access = executives only: super_admin, owner, ceo. (finance_manager and accountant have none.)
 
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { adminClient, Caller, getCaller } from "../_shared/auth.ts";
+import { adminClient, Caller, getCaller, isExecutive } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 
-const FINANCE_ROLES = ["super_admin", "owner", "ceo", "finance_manager", "accountant"];
-const SENIOR_ROLES = ["super_admin", "owner", "ceo", "finance_manager"];
-
-const canFinance = (c: Caller) => FINANCE_ROLES.some((r) => c.has(r));
-const canSenior = (c: Caller) => SENIOR_ROLES.some((r) => c.has(r));
+// Finance data and actions are EXECUTIVE-ONLY: super_admin, owner, ceo. finance_manager and accountant have no access.
+const canFinance = (c: Caller) => isExecutive(c);
+const canSenior = (c: Caller) => isExecutive(c);
 
 function requireFinance(c: Caller) {
-  if (!canFinance(c)) throw new HttpError(403, "Finance access is limited to the owner, finance manager and accountant");
+  if (!canFinance(c)) throw new HttpError(403, "Finance access is limited to the owner, CEO and super administrator");
 }
 function requireSenior(c: Caller) {
-  if (!canSenior(c)) throw new HttpError(403, "Only the owner or the finance manager can do this");
+  if (!canSenior(c)) throw new HttpError(403, "Only the owner, CEO or super administrator can do this");
 }
 
 serveJson(async (req) => {

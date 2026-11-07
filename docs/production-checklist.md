@@ -30,7 +30,7 @@ Tick every box before inviting the team. Items marked 🔴 are security-critical
 For each of: admin, department manager, employee A, employee B, HR, finance, suspended user.
 - [ ] Employee B cannot see employee A's tasks, expenses, leave, attendance, DMs
 - [ ] Employee cannot approve own task (`completed`), expense, or leave (server returns 403)
-- [ ] Finance/Admin can approve someone else's expense; the requester gets a notification; an audit row appears
+- [ ] An executive (super_admin/owner/ceo) can approve someone else's expense; the requester gets a notification; an audit row appears. finance_manager, accountant and general_manager get 403 and see no Finance data
 - [ ] HR can invite an employee but cannot grant `owner`/`general_manager`/`super_admin`
 - [ ] Invited user sets a password → lands in the app as **active**; invitation shows `accepted`
 - [ ] Suspending a profile (`employment_status = 'suspended'`) blocks that user immediately, even with an open session

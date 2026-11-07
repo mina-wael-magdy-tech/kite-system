@@ -3,20 +3,20 @@
 // the profile (status = onboarding), the role assignment and the invitation record.
 //
 // Privilege rules (enforced here, not in the browser; tier model lives in _shared/auth.ts):
-//   * caller must be an active admin (super_admin/owner/general_manager) or hr_manager
-//   * a caller may grant only roles at or below their own tier; only a super_admin grants super_admin
+//   * caller must be an active executive (super_admin/owner/ceo), general_manager or hr_manager
+//   * a caller may grant only roles at or below their own tier; executive roles and finance_manager/accountant: executives only
 //   * a caller may delete / re-invite only accounts at or below their own tier
 //   * the last active super_admin can never be deleted
 //   * if any step fails, everything created so far is rolled back
 
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { activeRoleNames, adminClient, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, getCaller } from "../_shared/auth.ts";
+import { activeRoleNames, adminClient, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, canManageEmployees, getCaller } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 
 serveJson(async (req) => {
   const admin = adminClient();
   const caller = await getCaller(req, admin);
-  if (!(caller.isAdmin || caller.has("hr_manager"))) {
+  if (!canManageEmployees(caller)) {
     throw new HttpError(403, "Admin or HR privilege required");
   }
 

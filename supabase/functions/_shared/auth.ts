@@ -80,21 +80,31 @@ export async function getCaller(req: Request, admin: SupabaseClient): Promise<Ca
 }
 
 // ---------------------------------------------------------------------------
-// Canonical role tiers (single source for account-management decisions).
-// Lower number = more powerful. `owner` and `ceo` are the same tier.
-//   0 super_admin | 1 owner, ceo | 2 general_manager | 3 finance_manager, accountant
-//   4 hr_manager  | 5 every other role (and a person with no role)
+// Canonical role tiers (single source for account-management and Finance decisions).
+//
+// EXECUTIVE tier (one equal tier): super_admin, owner, ceo.
+//   * the ONLY roles that may view Finance data anywhere (database, Edge Functions, UI, exports)
+//   * the ONLY roles that may grant finance_manager / accountant
+// Lower number = more powerful:
+//   0 executive (super_admin, owner, ceo) | 2 general_manager | 3 finance_manager, accountant
+//   4 hr_manager | 5 every other role (and a person with no role)
+// finance_manager / accountant carry NO Finance data access; belonging to the Finance department grants none.
+//
 // Rules (enforced server-side by invite-employee and workflow):
-//   * grant a role      -> the caller's tier must be <= the role's tier; super_admin only by a super_admin
-//   * modify / disable / delete an account -> the caller's tier must be <= the account's best tier;
-//     a super_admin account can only be managed by a super_admin
-//   * the last active super_admin can never be demoted, disabled or deleted
-// Gate for using these paths at all is unchanged: an active admin (super_admin/owner/general_manager) or hr_manager.
+//   * who may use the employee-management paths at all: executive, general_manager, hr_manager
+//   * grant a role      -> caller tier <= role tier; executive roles and finance roles: executives only
+//   * modify / disable / delete an account -> caller tier <= the account's best tier
+//     (executives manage each other, including super_admin; HR cannot touch ceo/finance/accountant)
+//   * the last active super_admin can never be demoted, disabled or deleted (any caller)
 // ---------------------------------------------------------------------------
+export const EXECUTIVE_ROLES = ["super_admin", "owner", "ceo"] as const;
+/** Roles only an executive may grant (they carry Finance-department standing or executive power). */
+export const EXECUTIVE_ONLY_GRANT = [...EXECUTIVE_ROLES, "finance_manager", "accountant"] as const;
+
 export const ROLE_TIER: Readonly<Record<string, number>> = {
   super_admin: 0,
-  owner: 1,
-  ceo: 1,
+  owner: 0,
+  ceo: 0,
   general_manager: 2,
   finance_manager: 3,
   accountant: 3,
@@ -102,6 +112,9 @@ export const ROLE_TIER: Readonly<Record<string, number>> = {
 };
 export const DEFAULT_ROLE_TIER = 5;
 const NO_TIER = 99; // inactive caller: powerless
+const MANAGEMENT_ROLES = [...EXECUTIVE_ROLES, "general_manager", "hr_manager"] as const;
+
+type Who = Pick<Caller, "status" | "roles">;
 
 export function roleTier(roleName: string): number {
   return ROLE_TIER[roleName] ?? DEFAULT_ROLE_TIER;
@@ -112,26 +125,30 @@ export function bestTier(roleNames: readonly string[]): number {
   return roleNames.length ? Math.min(...roleNames.map(roleTier)) : DEFAULT_ROLE_TIER;
 }
 
-export function callerTier(c: Pick<Caller, "status" | "roles">): number {
+export function callerTier(c: Who): number {
   return c.status === "active" ? bestTier(c.roles) : NO_TIER;
 }
 
-export function canGrantRole(c: Pick<Caller, "status" | "roles">, roleName: string): boolean {
-  const t = roleTier(roleName);
-  const mine = callerTier(c);
-  return t === 0 ? mine === 0 : mine <= t;
+/** Active executive (super_admin, owner or ceo). The only people who may view Finance data. */
+export function isExecutive(c: Who): boolean {
+  return c.status === "active" && c.roles.some((r) => (EXECUTIVE_ROLES as readonly string[]).includes(r));
 }
 
-export function canManageAccount(c: Pick<Caller, "status" | "roles">, targetRoleNames: readonly string[]): boolean {
-  const t = bestTier(targetRoleNames);
-  const mine = callerTier(c);
-  return t === 0 ? mine === 0 : mine <= t;
+/** May use invite-employee / employee.update at all: executive, general_manager or hr_manager. */
+export function canManageEmployees(c: Who): boolean {
+  return c.status === "active" && c.roles.some((r) => (MANAGEMENT_ROLES as readonly string[]).includes(r));
+}
+
+export function canGrantRole(c: Who, roleName: string): boolean {
+  if ((EXECUTIVE_ONLY_GRANT as readonly string[]).includes(roleName)) return isExecutive(c);
+  return callerTier(c) <= roleTier(roleName);
+}
+
+export function canManageAccount(c: Who, targetRoleNames: readonly string[]): boolean {
+  return callerTier(c) <= bestTier(targetRoleNames);
 }
 
 export function assertCanGrantRole(c: Caller, roleName: string): void {
-  if (roleTier(roleName) === 0 && !canGrantRole(c, roleName)) {
-    throw new HttpError(403, "Only a super administrator can grant super_admin");
-  }
   if (!canGrantRole(c, roleName)) throw new HttpError(403, "You are not allowed to grant this role");
 }
 
