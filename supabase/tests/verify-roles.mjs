@@ -65,7 +65,7 @@ const ALL_ROLES = ['super_admin', 'owner', 'ceo', 'general_manager', 'finance_ma
 
 function makeDb() {
   const T = { profiles: [], roles: [], user_roles: [], departments: [], user_departments: [], invitations: [], audit_logs: [], notifications: [], push_subscriptions: [], expenses: [], messages: [], conversations: [], message_reactions: [] };
-  const users = [], log = [], flags = { failInsert: null, failRpc: false, rpcMissing: false, profileUpdateError: null, rpcError: null, onDeleteUser: null };
+  const users = [], log = [], flags = { failInsert: null, failInsertCode: null, rpcErrors: null, failRpc: false, rpcMissing: false, profileUpdateError: null, rpcError: null, onDeleteUser: null };
   let seq = 0;
   const uid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
   const attach = (table, row, cols) => (table === 'user_roles' && /roles(!inner)?\(/.test(cols || ''))
@@ -95,7 +95,7 @@ function makeDb() {
         return { data: rows, count: rows.length, error: null };
       }
       if (this.op === 'insert') {
-        if (flags.failInsert === this.table) return { data: null, error: { message: 'injected insert failure on ' + this.table } };
+        if (flags.failInsert === this.table) return { data: null, error: { message: 'injected insert failure on ' + this.table, ...(flags.failInsertCode ? { code: flags.failInsertCode } : {}) } };
         const made = [];
         for (const r of this.rows) {
           if (this.table === 'user_roles' && tbl.some((x) => x.user_id === r.user_id && x.role_id === r.role_id)) return { data: null, error: { message: 'duplicate key uq_user_role' } };
@@ -116,7 +116,8 @@ function makeDb() {
     }
   }
   const rpc = async (name, a) => {
-    log.push({ op: 'rpc', name });
+    log.push({ op: 'rpc', name, args: a });
+    if (flags.rpcErrors?.[name]) return { data: null, error: { message: flags.rpcErrors[name] } };
     if (name !== 'replace_user_role') return { data: RPC_RESULTS[name] ?? null, error: null };
     if (flags.rpcError) return { data: null, error: { message: flags.rpcError } };
     if (flags.rpcMissing) return { data: null, error: { message: 'Could not find the function public.replace_user_role' } };
@@ -466,7 +467,8 @@ for (const role of FIN_DENIED) for (const action of FIN_ACTIONS) {
 section('A12 expense claims: deciding and notifications are executive-only');
 for (const role of EXEC) {
   const db = world(); const r = await call(workflow, db.P['caller_' + role], { action: 'expense.decide', expenseId: db.P.expense, decision: 'approved' });
-  ok(r.status === 200 && db.T.expenses[0].status === 'approved', `${role} can decide an expense claim`, JSON.stringify(r));
+  const call1 = db.log.find((l) => l.op === 'rpc' && l.name === 'expense_decide');
+  ok(r.status === 200 && !!call1 && call1.args.p_actor === db.P['caller_' + role] && call1.args.p_expense === db.P.expense && call1.args.p_decision === 'approved', `${role} can decide an expense claim (one atomic SQL call: expense_decide)`, JSON.stringify(r));
 }
 for (const role of FIN_DENIED) {
   const db = world(); const key = role === 'suspended_owner' ? role : 'caller_' + role;
@@ -480,6 +482,116 @@ for (const role of FIN_DENIED) {
   ok(r.status === 200 && got.length === execIds.size && got.every((id) => execIds.has(id)), 'the claim (it contains an amount) is announced to executives only', JSON.stringify({ r, n: got.length }));
   const leaked = db.T.notifications.filter((n) => /EGP\s*500/.test(n.content ?? '') && !execIds.has(n.user_id));
   ok(leaked.length === 0, 'no amount reaches general_manager, finance_manager, accountant, HR or anyone outside the executive tier');
+}
+
+section('A21 Phase 3: history protection, atomic department / expense / reaction calls, idempotent notifications (Edge Function behaviour)');
+{
+  // --- deleting an employee: history blocks it (migration 029), the database is asked, nothing is deleted
+  let db = world();
+  RPC_RESULTS.employee_history = [{ source: 'attendance', n: 3 }, { source: 'leave requests', n: 1 }];
+  let r = await call(invite, db.P.caller_owner, { action: 'delete', userId: db.P.victim });
+  ok(r.status === 409 && /attendance/.test(r.body.error) && /Inactive/.test(r.body.error) && db.status(db.P.victim) === 'active' && !db.log.some((l) => l.op === 'deleteUser'),
+    'deleting an employee WITH history is refused (409, names the history, suggests Inactive); no auth user is deleted', JSON.stringify(r));
+  delete RPC_RESULTS.employee_history;
+  db = world(); r = await call(invite, db.P.caller_owner, { action: 'delete', userId: db.P.victim });
+  ok(r.status === 200 && db.status(db.P.victim) === 'gone', 'an employee with NO history is still deleted as before');
+
+  // --- invitations: claim first, revoke by id (never delete by e-mail), clean up only our own claim
+  db = world(); const pend = db.addUser('pending_emp', 'employee', 'onboarding');
+  const oldInv = { id: db.uid(), email: 'pending_emp@x.test', status: 'pending', role_id: db.roleId('employee') }; db.T.invitations.push(oldInv);
+  r = await call(invite, db.P.caller_owner, { email: 'pending_emp@x.test', fullName: 'Pending Emp', roleId: db.roleId('employee') });
+  const fresh = db.T.invitations.filter((i) => i.id !== oldInv.id);
+  const insIdx = db.log.findIndex((l) => l.op === 'insert' && l.table === 'invitations'), invIdx = db.log.findIndex((l) => l.op === 'invite');
+  ok(r.status === 200 && db.T.invitations.find((i) => i.id === oldInv.id)?.status === 'revoked' && fresh.length === 1 && fresh[0].status === 'pending', 're-invite: the old pending invitation is REVOKED (kept as history, by id), one new pending invitation exists', JSON.stringify(r));
+  ok(insIdx >= 0 && invIdx > insIdx, 'the invitation is recorded (claimed) BEFORE the auth user is invited');
+  db = world(); db.flags.failInsert = 'invitations'; db.flags.failInsertCode = '23505';
+  r = await call(invite, db.P.caller_owner, { email: 'dup@x.test', fullName: 'Dup Person', roleId: db.roleId('employee') });
+  ok(r.status === 409 && /already pending/.test(r.body.error) && !db.users.some((u) => u.email === 'dup@x.test') && !db.log.some((l) => l.op === 'deleteUser'), 'a second request for an address that already has a pending invitation gets 409 and creates / deletes no user');
+  db = world(); db.flags.failInsert = 'user_roles';
+  r = await call(invite, db.P.caller_owner, { email: 'rb@x.test', fullName: 'Roll Back', roleId: db.roleId('employee') });
+  ok(r.status === 500 && !db.T.invitations.some((i) => i.email === 'rb@x.test') && !db.users.some((u) => u.email === 'rb@x.test'), 'a failure after the claim removes that request\'s own invitation, profile and auth user');
+  delete db.flags.failInsertCode;
+
+  // --- expenses: one atomic SQL call per transition, stable error codes become HTTP statuses
+  db = world();
+  for (const [msg, status] of [['expense_already_decided: Expense is already approved', 409], ['expense_forbidden: Finance privilege required', 403], ['expense_not_found: Expense not found', 404], ['expense_self_decision: You cannot decide on your own expense', 403], ['expense_bad_decision: x', 400]]) {
+    db.flags.rpcErrors = { expense_decide: msg };
+    r = await call(workflow, db.P.caller_owner, { action: 'expense.decide', expenseId: db.P.expense, decision: 'approved' });
+    ok(r.status === status && r.body.error === msg.split(': ')[1], `expense.decide: "${msg.split(':')[0]}" -> HTTP ${status}`, JSON.stringify(r));
+  }
+  ok(!db.log.some((l) => l.op === 'insert' && l.table === 'notifications'), 'a refused decision sends no notification');
+  db = world();
+  r = await call(workflow, db.P.caller_owner, { action: 'expense.pay', expenseId: db.P.expense });
+  const pay = db.log.find((l) => l.op === 'rpc' && l.name === 'expense_mark_paid');
+  ok(r.status === 200 && r.body.status === 'paid' && pay && pay.args.p_actor === db.P.caller_owner, 'an executive marks a claim paid (expense_mark_paid, atomic)');
+  for (const role of FIN_DENIED.filter((x) => x !== 'suspended_owner')) {
+    db = world(); r = await call(workflow, db.P['caller_' + role], { action: 'expense.pay', expenseId: db.P.expense });
+    ok(r.status === 403 && !db.log.some((l) => l.op === 'rpc' && l.name === 'expense_mark_paid'), `expense.pay refused for ${role}: executive-only, no SQL call`);
+  }
+  db = world(); r = await call(workflow, db.P.caller_employee, { action: 'expense.submit', expenseId: db.P.expense });
+  ok(r.status === 200 && db.log.some((l) => l.op === 'rpc' && l.name === 'expense_submit' && l.args.p_actor === db.P.caller_employee), 'expense.submit is the author\'s call (the actor is the caller, never a body field)');
+
+  // --- department changes are ONE SQL call
+  db = world(); const d1 = db.uid(), d2 = db.uid(); db.T.departments.push({ id: d1, name: 'A' }, { id: d2, name: 'B' });
+  r = await call(workflow, db.P.caller_owner, { action: 'employee.update', userId: db.P.victim, departmentIds: [d1, d2] });
+  const sud = db.log.find((l) => l.op === 'rpc' && l.name === 'set_user_departments');
+  ok(r.status === 200 && sud && sud.args.p_user === db.P.victim && sud.args.p_depts.join() === [d1, d2].join() && !db.log.some((l) => l.table === 'user_departments' && ['insert', 'delete'].includes(l.op)), 'employee.update with departmentIds = ONE set_user_departments call, no separate delete / insert', JSON.stringify(r));
+  db = world(); db.T.departments.push({ id: d1, name: 'A' });
+  r = await call(workflow, db.P.caller_owner, { action: 'employee.update', userId: db.P.victim, departmentId: d1 });
+  ok(r.status === 200 && db.log.some((l) => l.op === 'rpc' && l.name === 'set_primary_department' && l.args.p_dept === d1), 'employee.update with departmentId = set_primary_department');
+  db = world(); db.T.departments.push({ id: d1, name: 'A' }); db.flags.rpcErrors = { set_user_departments: 'Unknown department' };
+  r = await call(workflow, db.P.caller_owner, { action: 'employee.update', userId: db.P.victim, departmentIds: [d1] });
+  ok(r.status === 400, 'a refused department change is a clear 400');
+  db = world(); r = await call(workflow, db.P.caller_owner, { action: 'employee.update', userId: db.P.victim });
+  ok(r.status === 200 && r.body.unchanged === true, 'employee.update with nothing to change is still "unchanged"');
+
+  // --- storage clean-up worker (never throws, reports every file, groups by bucket)
+  const cleanup = (await load('_shared/storage-cleanup.ts')).mod;
+  const mkAdmin = ({ rows = [], claimError = null, removeError = null, throwOnRemove = false } = {}) => {
+    const reports = [], removed = [];
+    return { reports, removed, rpc: async (name, a) => name === 'storage_cleanup_claim' ? (claimError ? { data: null, error: { message: claimError } } : { data: rows, error: null }) : (reports.push(a), { data: null, error: null }),
+      storage: { from: (bucket) => ({ remove: async (paths) => { if (throwOnRemove) throw new Error('network down'); removed.push([bucket, ...paths]); return removeError ? { data: null, error: { message: removeError } } : { data: paths, error: null }; } }) } };
+  };
+  let a = mkAdmin({ rows: [{ id: 1, bucket: 'studio-assets', path: 'a' }, { id: 2, bucket: 'studio-assets', path: 'b' }, { id: 3, bucket: 'chat-media', path: 'c' }] });
+  let res = await cleanup.drainStorageCleanup(a, 50);
+  ok(res.claimed === 3 && res.removed === 3 && res.failed === 0 && a.removed.length === 2 && a.reports.every((x) => x.p_ok === true) && a.reports.length === 3, 'drain: claims 3, removes them in one call per bucket, reports each as done');
+  a = mkAdmin({ rows: [{ id: 1, bucket: 'studio-assets', path: 'a' }, { id: 3, bucket: 'chat-media', path: 'c' }], removeError: 'storage unavailable' });
+  res = await cleanup.drainStorageCleanup(a, 50);
+  ok(res.removed === 0 && res.failed === 2 && a.reports.every((x) => x.p_ok === false && x.p_error === 'storage unavailable'), 'drain: a failed removal is reported with its error (the file stays queued for a retry), never dropped');
+  a = mkAdmin({ rows: [{ id: 9, bucket: 'studio-assets', path: 'z' }], throwOnRemove: true });
+  res = await cleanup.drainStorageCleanup(a);
+  ok(res.failed === 1 && a.reports[0].p_ok === false && /network down/.test(a.reports[0].p_error), 'drain: a thrown network error is caught and reported as a failure');
+  res = await cleanup.drainStorageCleanup(mkAdmin({ claimError: 'boom' }));
+  ok(res.claimed === 0, 'drain: a failing claim returns an empty result and does not throw');
+  res = await cleanup.drainStorageCleanup({ rpc: () => { throw new Error('exploded'); } });
+  ok(res.claimed === 0, 'drain: even an exception inside the client is swallowed (a task delete must not fail because of clean-up)');
+
+  // --- notifications with a dedupe key
+  const notifyAdmin = (insertError) => { const calls = []; return { calls, from: (t) => ({ insert: async (row) => { calls.push([t, row]); return { error: t === 'notifications' ? insertError : null }; }, select: () => ({ eq: () => ({ then: (f) => f({ data: [], error: null }) }) }) }) }; };
+  let na = notifyAdmin(null);
+  ok(await authMod.notify(na, { userId: 'u', type: 'due_digest', title: 't', content: 'c', dedupeKey: 'due_digest:2031-01-01' }) === true && na.calls[0][1].dedupe_key === 'due_digest:2031-01-01', 'notify with dedupeKey stores the key and returns true');
+  na = notifyAdmin({ code: '23505', message: 'duplicate key' });
+  ok(await authMod.notify(na, { userId: 'u', type: 'due_digest', title: 't', content: 'c', dedupeKey: 'due_digest:2031-01-01' }) === false && na.calls.length === 1, 'a duplicate (23505) means "already sent": returns false, no push attempt, no error');
+  na = notifyAdmin({ code: '23505', message: 'duplicate key' });
+  ok(await authMod.notify(na, { userId: 'u', type: 'x', title: 't', content: 'c' }) === false, 'a 23505 WITHOUT a dedupe key is a real error (not swallowed as a duplicate): false');
+  na = notifyAdmin(null);
+  await authMod.notify(na, { userId: 'u', type: 'x', title: 't', content: 'c' });
+  ok(!('dedupe_key' in na.calls[0][1]), 'notify without a key sends no dedupe_key column (compatible with a database that has not run migration 032)');
+
+  // --- static guarantees of the rewritten functions
+  const src = (f) => fs.readFileSync(path.join(SB, 'functions', f), 'utf8');
+  const chatSrc = src('chat/index.ts'), wfSrc = src('workflow/index.ts'), kdSrc = src('kite-drive/index.ts'), bcSrc = src('broadcast/index.ts'), cpSrc = src('client-preview/index.ts'), drSrc = src('due-reminders/index.ts');
+  ok(/rpc\("chat_reaction_toggle"/.test(chatSrc) && !/from\("message_reactions"\)\s*\.(insert|delete)/.test(chatSrc), 'chat: reactions toggle through ONE atomic SQL call (no select-then-insert)');
+  ok(/rpc\("chat_set_members"/.test(chatSrc) && !/from\("conversation_members"\)\s*\.(insert|delete)\(toAdd|\.in\("user_id", toRemove\)/.test(chatSrc), 'chat: channel members are replaced by ONE SQL transaction');
+  ok(!/storage\.from\("chat-media"\)\.remove/.test(chatSrc) && /drainStorageCleanup/.test(chatSrc), 'chat: a deleted message\'s media is removed from the queue AFTER the row is gone');
+  const td = wfSrc.slice(wfSrc.indexOf('async function taskDelete'), wfSrc.indexOf('// ---------------------------------------------------------------- employee.update'));
+  ok(td.indexOf('.from("tasks").delete()') > 0 && td.indexOf('.from("tasks").delete()') < td.indexOf('drainStorageCleanup') && !/storage\.from\("task-attachments"\)\.remove/.test(td), 'workflow task.delete: the database row is deleted BEFORE any file is touched (the old code removed files first)');
+  ok(/record_has_history/.test(td) && /409/.test(td), '... and "has history" is a clear 409, not a 500');
+  ok(!/from\("user_departments"\)\s*\.(delete|insert|upsert)/.test(wfSrc), 'workflow: no separate user_departments delete / insert remains');
+  ok(/drive_link_begin/.test(kdSrc) && /drive_link_complete/.test(kdSrc) && !/from\("client_drive_links"\)\.upsert/.test(kdSrc), 'kite-drive: link creation records an intent first and completes link + intent together (no blind upsert)');
+  ok(bcSrc.indexOf('.from("broadcasts").insert') > 0 && bcSrc.indexOf('.from("broadcasts").insert') < bcSrc.indexOf('notify(admin'), 'broadcast: the send is claimed (recorded) BEFORE anyone is notified');
+  ok(/content_plan_client_feedback/.test(cpSrc) && !/from\("content_plans"\)\.update/.test(cpSrc) && !/from\("content_feedback"\)\.insert/.test(cpSrc), 'client-preview: approval + evidence are ONE SQL call (no separate update / insert)');
+  ok(/dedupeKey: `due_digest:/.test(drSrc) && /dedupeKey: `publish_reminder:/.test(drSrc) && /drainStorageCleanup/.test(drSrc), 'due-reminders: one digest per person per day is enforced by a dedupe key; the daily job also drains the storage queue');
 }
 
 section('A13 retainer-billing (cron): recipients');
@@ -955,7 +1067,7 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025', '026', '027', '028'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }
@@ -1137,6 +1249,10 @@ await db.exec(fs.readFileSync(path.join(SB, 'migrations/022_finance_executive_on
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/022_finance_executive_only.sql'), 'utf8')); // idempotent
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/028_finance_integrity.sql'), 'utf8'));
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/028_finance_integrity.sql'), 'utf8')); // idempotent
+for (const m of ['029_history_protection', '030_hr_integrity', '031_approvals_and_expenses', '032_atomic_operations', '033_database_hygiene']) {   // Phase 3.B-3.E, in order (details: verify-integrity.mjs)
+  await db.exec(fs.readFileSync(path.join(SB, `migrations/${m}.sql`), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(SB, `migrations/${m}.sql`), 'utf8')); // idempotent
+}
 
 const EXEC_USERS = [['super_admin', 'sa2'], ['owner', 'own'], ['owner', 'own2'], ['ceo', 'ceo'], ['ceo', 'ceo2']];
 const DENIED_USERS = [['general_manager', 'gm'], ['hr_manager', 'hr'], ['finance_manager (Finance dept)', 'fm'], ['accountant (Finance dept)', 'acc'], ['department_manager', 'dm'], ['employee', 'emp'], ['client', 'cli']];

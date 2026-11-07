@@ -83,37 +83,39 @@ serveJson(async (req) => {
     .eq("plan_id", plan.id).gte("created_at", since);
   if ((count ?? 0) >= MAX_FEEDBACK_PER_HOUR) throw new HttpError(429, "Too many notes in a short time. Please try again in a little while.");
 
-  let row: Record<string, unknown>;
   let alertTitle: string;
   let alertText: string;
   let postPublisher: string | null = null;
+  let kind: string; let message: string | null; let slideNo = 1; let postId: string | null = null; let slideTitle: string | null = null;
 
   if (action === "approve_all") {
-    row = { plan_id: plan.id, author_name: author, kind: "approve_all", message: optText(body.message, "message", 1000) };
-    await admin.from("content_plans").update({ status: "approved" }).eq("id", plan.id);
+    kind = "approve_all"; message = optText(body.message, "message", 1000);
     alertTitle = "Client approved the plan";
     alertText = `${author} approved "${plan.title}".`;
   } else {
-    const kind = oneOf(body.kind, KINDS, "kind");
-    const message = kind === "approve" ? optText(body.message, "message", 1000) : text(body.message, "Your note", 2, 1000);
-    const slideNo = Math.min(Math.max(Math.floor(Number(body.slideNo) || 0), 1), 500);
-    let postId: string | null = null;
-    let slideTitle: string | null = null;
+    kind = oneOf(body.kind, KINDS, "kind");
+    message = kind === "approve" ? optText(body.message, "message", 1000) : text(body.message, "Your note", 2, 1000);
+    slideNo = Math.min(Math.max(Math.floor(Number(body.slideNo) || 0), 1), 500);
     if (body.postId) {
       const { data: p } = await admin.from("content_posts").select("id, title, publisher_id")
         .eq("id", uuid(body.postId, "postId")).eq("plan_id", plan.id).maybeSingle();
       if (!p) throw new HttpError(400, "That page does not belong to this plan");
       postId = p.id; slideTitle = p.title; postPublisher = p.publisher_id;
     }
-    row = { plan_id: plan.id, post_id: postId, slide_no: slideNo, slide_title: slideTitle, author_name: author, kind, message };
-    if (kind === "change") await admin.from("content_plans").update({ status: "changes_requested" }).eq("id", plan.id);
     const where = `page ${slideNo}${slideTitle ? ` (${slideTitle})` : ""}`;
     alertTitle = kind === "change" ? "Client asked for an edit" : kind === "approve" ? "Client approved a page" : "New client note";
     alertText = `${author} on ${where} of "${plan.title}"${message ? `: ${message.slice(0, 140)}` : ""}`;
   }
 
-  const { error } = await admin.from("content_feedback").insert(row);
-  if (error) throw error;
+  // The evidence row and the plan's status change are ONE database transaction (migration 031): either both happen or neither.
+  const { error } = await admin.rpc("content_plan_client_feedback", {
+    p_plan: plan.id, p_kind: kind, p_author: author, p_message: message, p_post: postId, p_slide_no: slideNo,
+  });
+  if (error) {
+    if (/plan_not_open/.test(error.message)) throw new HttpError(409, "This plan is not open for review yet.");
+    if (/post_not_in_plan/.test(error.message)) throw new HttpError(400, "That page does not belong to this plan");
+    throw error;
+  }
 
   // alert: whoever made the plan, the person publishing that post, and the administrators
   const recipients = new Set<string>(await userIdsWithRoles(admin, ADMIN_ROLES));

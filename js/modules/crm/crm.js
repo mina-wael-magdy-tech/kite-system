@@ -275,12 +275,10 @@ export class CrmModule {
         { name: 'notes', label: 'Notes', type: 'textarea', value: l.notes || '', rows: 3 }
       ],
       onSubmit: async (v) => {
-        const { data, error } = await getSupabase().from('leads')
-          .update({ title: v.title, stage: v.stage, client_id: v.client_id, expected_close_date: v.expected_close_date, notes: v.notes })
-          .eq('id', id).select('id');
+        const { data, error } = await Money.updateWithFigure('leads', id,
+          { title: v.title, stage: v.stage, client_id: v.client_id, expected_close_date: v.expected_close_date, notes: v.notes }, v.value);
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error('You do not have permission to edit this deal.');
-        await Money.save('lead_value', id, v.value, this.app.currentUser.id);
         Toast.success('Deal updated', 'Saved');
         await this.loadCrmData();
       }
@@ -380,14 +378,12 @@ export class CrmModule {
       ],
       onSubmit: async (v) => {
         const budget = Money.canSee() ? this.checkBudget(v.client_type, v.monthly_budget) : null;
-        const { data, error } = await getSupabase().from('clients')
-          .update({ company_name: v.company_name, name: v.name || v.company_name, industry: v.industry, email: v.email, phone: v.phone, status: v.status,
-                    client_type: v.client_type })
-          .eq('id', id).select('id');
+        const { data, error } = await Money.updateWithFigure('clients', id,
+          { company_name: v.company_name, name: v.name || v.company_name, industry: v.industry, email: v.email, phone: v.phone, status: v.status,
+            client_type: v.client_type }, budget);
         if (error) throw new Error(error.message);
         if (!data?.length) throw new Error('You do not have permission to edit clients.');
         await this.saveClientDepartments(id, v.departments);
-        if (Money.canSee()) await Money.save('client_monthly', id, budget, this.app.currentUser.id);
         Toast.success('Client updated', 'Saved');
         await this.loadCrmData();
       }
@@ -403,12 +399,9 @@ export class CrmModule {
   }
 
   async saveClientDepartments(clientId, ids = []) {
-    const supabase = getSupabase();
-    const del = await supabase.from('client_departments').delete().eq('client_id', clientId);
-    if (del.error) throw new Error(del.error.message);
-    if (!ids.length) return;
-    const ins = await supabase.from('client_departments').insert(ids.map(department_id => ({ client_id: clientId, department_id })));
-    if (ins.error) throw new Error(ins.error.message);
+    // ONE database transaction (migration 032): a failure keeps the client's previous departments instead of losing them
+    const { error } = await getSupabase().rpc('set_client_departments', { p_client: clientId, p_depts: ids });
+    if (error) throw new Error(error.message);
   }
 
   async deleteClient(id) {
@@ -515,7 +508,7 @@ export class CrmModule {
         const clientType = document.getElementById('clientType').value;
         const budget = Money.canSee() ? this.checkBudget(clientType, document.getElementById('clientBudget').value) : null;
         const deptIds = [...document.querySelectorAll('input[name="clientDepts"]:checked')].map(c => c.value);
-        const { data: created, error } = await supabase.from('clients').insert({
+        const { data: created, error } = await Money.insertWithFigure('clients', {
           company_name: companyName,
           name: contactName || companyName,
           industry,
@@ -524,11 +517,10 @@ export class CrmModule {
           status: 'active',
           client_type: clientType,
           created_by: this.app.currentUser.id
-        }).select('id').single();
+        }, budget);
 
         if (error) throw error;
         await this.saveClientDepartments(created.id, deptIds);
-        if (Money.canSee()) await Money.save('client_monthly', created.id, budget, this.app.currentUser.id);
         Toast.success(`Client account "${companyName}" added!`, 'Client Portfolio');
         modalBackdrop.classList.remove('active');
         await this.loadCrmData();
@@ -597,14 +589,13 @@ export class CrmModule {
 
       const supabase = getSupabase();
       try {
-        const { data: made, error } = await supabase.from('leads').insert({
+        const { error } = await Money.insertWithFigure('leads', {
           title,
           stage,
           created_by: this.app.currentUser.id
-        }).select('id').single();
+        }, value);
 
         if (error) throw error;
-        await Money.save('lead_value', made.id, value, this.app.currentUser.id);
         Toast.success('Deal opportunity added to funnel!', 'Pipeline Updated');
         modalBackdrop.classList.remove('active');
         await this.loadCrmData();

@@ -45,5 +45,31 @@ export const Money = {
       { onConflict: 'entity,entity_id' }
     );
     if (error) throw error;
+  },
+
+  /**
+   * Insert a record AND (for the owner / CEO) its money figure in ONE database call, so a failure can never leave a record
+   * without its figure (migration 032). Everyone else inserts normally; row-level security is the same either way.
+   * Returns { data: { id }, error } like supabase-js.
+   */
+  async insertWithFigure(table, row, amount) {
+    const sb = getSupabase();
+    if (!this.canSee()) return sb.from(table).insert(row).select('id').single();
+    const n = Number(amount);
+    const { data, error } = await sb.rpc('create_entity_with_figure', { p_table: table, p_row: row, p_amount: Number.isFinite(n) && n > 0 ? n : null });
+    return { data: data ? { id: data } : null, error };
+  },
+
+  /**
+   * Update a record AND (owner / CEO) its figure in one call. Returns { data: [{ id }], error }; "not found / not permitted"
+   * comes back as an empty list, the same as a plain update that row-level security filtered out.
+   */
+  async updateWithFigure(table, id, row, amount) {
+    const sb = getSupabase();
+    if (!this.canSee()) return sb.from(table).update(row).eq('id', id).select('id');
+    const n = Number(amount);
+    const { data, error } = await sb.rpc('update_entity_with_figure', { p_table: table, p_id: id, p_row: row, p_amount: Number.isFinite(n) && n > 0 ? n : null, p_touch_figure: true });
+    if (error && /not_found_or_not_permitted/.test(error.message)) return { data: [], error: null };
+    return { data: error ? null : [{ id: data }], error };
   }
 };

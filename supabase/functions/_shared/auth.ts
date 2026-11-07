@@ -233,13 +233,19 @@ export async function audit(
   if (error) console.error("audit insert failed:", error.message);
 }
 
+/**
+ * Stores an in-app notification and pushes it. With `dedupeKey` the database allows ONE notification per person and key
+ * (unique index), so a repeated job / retry cannot notify twice: a clash returns false and sends no push.
+ * Returns true only when a new notification was stored.
+ */
 export async function notify(
   admin: SupabaseClient,
   n: {
     userId: string; type: string; title: string; content: string; link?: string; metadata?: Record<string, unknown>;
+    dedupeKey?: string;
     push?: { tag?: string; urgent?: boolean; requireInteraction?: boolean };
   },
-): Promise<void> {
+): Promise<boolean> {
   const { error } = await admin.from("notifications").insert({
     user_id: n.userId,
     type: n.type,
@@ -247,16 +253,19 @@ export async function notify(
     content: n.content,
     link: n.link ?? null,
     metadata: n.metadata ?? {},
+    ...(n.dedupeKey ? { dedupe_key: n.dedupeKey } : {}),
   });
   if (error) {
+    if (n.dedupeKey && error.code === "23505") return false;   // already sent for this key: not an error
     console.error("notification insert failed:", error.message);
-    return;
+    return false;
   }
   // Same message on the user's phone / desktop (no-op when push is not configured)
   await sendPush(admin, n.userId, {
     title: n.title, body: n.content, url: n.link,
     tag: n.push?.tag ?? n.type, urgent: n.push?.urgent, requireInteraction: n.push?.requireInteraction,
   });
+  return true;
 }
 
 /** Active people holding any of the given roles (unknown role names simply match nobody). */

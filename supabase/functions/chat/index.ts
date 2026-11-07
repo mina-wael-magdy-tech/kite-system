@@ -19,6 +19,7 @@
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
 import { adminClient, audit, Caller, getCaller, notify, requireStaff, userClient } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
+import { drainStorageCleanup } from "../_shared/storage-cleanup.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 
 serveJson(async (req) => {
@@ -113,19 +114,11 @@ async function channelMembers(admin: SupabaseClient, caller: Caller, b: Record<s
   if (ch.type === "direct") throw new HttpError(400, "Direct messages have a fixed pair of people");
   const wanted = new Set(await validMembers(admin, b.memberIds));
 
-  const { data: current } = await admin.from("conversation_members").select("user_id").eq("conversation_id", id);
-  const have = new Set((current ?? []).map((r: { user_id: string }) => r.user_id));
-
-  const toAdd = [...wanted].filter((u) => !have.has(u));
-  const toRemove = [...have].filter((u) => !wanted.has(u));
-  if (toAdd.length) {
-    const { error } = await admin.from("conversation_members").insert(toAdd.map((u) => ({ conversation_id: id, user_id: u, role: "member" })));
-    if (error) throw new HttpError(500, "Could not add members");
-  }
-  if (toRemove.length) {
-    const { error } = await admin.from("conversation_members").delete().eq("conversation_id", id).in("user_id", toRemove);
-    if (error) throw new HttpError(500, "Could not remove members");
-  }
+  // one transaction in the database (migration 032): the channel row is locked, so concurrent edits queue instead of clashing
+  const { data, error } = await admin.rpc("chat_set_members", { p_channel: id, p_members: [...wanted] });
+  if (error) throw new HttpError(500, "Could not update the members");
+  const toAdd: string[] = (data as { added?: string[] } | null)?.added ?? [];
+  const toRemove: string[] = (data as { removed?: string[] } | null)?.removed ?? [];
   if (toAdd.length || toRemove.length) {
     await audit(admin, { userId: caller.id, action: "CHANNEL_MEMBERS_CHANGED", entityType: "conversations", entityId: id, newData: { added: toAdd, removed: toRemove } });
   }
@@ -205,8 +198,7 @@ async function messageDelete(req: Request, admin: SupabaseClient, caller: Caller
   }
   const { error } = await admin.from("messages").delete().eq("id", id);
   if (error) throw new HttpError(500, "Could not delete the message");
-  const path = (m.metadata as { path?: string } | null)?.path;
-  if (path && path.startsWith(`${m.conversation_id}/`)) await admin.storage.from("chat-media").remove([path]);
+  await drainStorageCleanup(admin);   // the row is gone and its media file is queued (migration 029); remove it now, retry later if it fails
   if (m.sender_id !== caller.id) {
     await audit(admin, { userId: caller.id, action: "MESSAGE_DELETED_BY_ADMIN", entityType: "messages", entityId: id }, req);
   }
@@ -310,17 +302,10 @@ async function reactionToggle(caller: Caller, admin: SupabaseClient, b: Record<s
   const { data: convo } = await admin.from("conversations").select("is_archived").eq("id", m.conversation_id).single();
   if (convo?.is_archived) throw new HttpError(400, "This channel is archived");
 
-  const { data: existing } = await admin.from("message_reactions").select("id")
-    .eq("message_id", messageId).eq("user_id", caller.id).eq("emoji", emoji).maybeSingle();
-  if (existing) {
-    await admin.from("message_reactions").delete().eq("id", existing.id);
-    return { success: true, active: false };
-  }
-  const { error } = await admin.from("message_reactions").insert({
-    message_id: messageId, conversation_id: m.conversation_id, user_id: caller.id, emoji,
-  });
-  if (error) throw new HttpError(500, "Could not add the reaction");
-  return { success: true, active: true };
+  // one atomic toggle in the database (migration 032): concurrent clicks can no longer clash or fail
+  const { data: active, error } = await admin.rpc("chat_reaction_toggle", { p_user: caller.id, p_message: messageId, p_emoji: emoji });
+  if (error) throw new HttpError(500, "Could not change the reaction");
+  return { success: true, active: active === true };
 }
 
 async function callStart(admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {

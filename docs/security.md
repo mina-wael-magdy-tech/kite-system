@@ -104,4 +104,12 @@ The access model was tested by running all migrations against PostgreSQL and att
 - **Retainers.** One active plan per client + department + name (unique index, created only when no duplicates exist). Concurrent monthly runs queue on an advisory lock and skip plans already billed.
 - **Reconciliation.** `fin_reconcile_invoices()` (service_role only, read-only) lists invoices whose stored figures disagree with their lines or payments; the `finance` function exposes it as the `reconcile` action (executives only).
 - **Tests.** `supabase/tests/verify-finance-concurrency.mjs` (real PostgreSQL; `npm run test:finance-concurrency`) shows each race failing without 028 and holding with it. Rollback commands are in the migration header.
-- **Re-running 017.** Migration 017 is idempotent but re-creates the original bodies of eight finance functions and the 7-argument `fin_payment_add`, which silently undoes this phase. **Always re-apply 028 after any re-run of 017** and check that `SELECT count(*) FROM pg_proc WHERE proname = 'fin_payment_add'` returns 1. The sequence 028 -> 017 -> 028 is tested.
+- **Re-running 017.** Migration 017 is idempotent but re-creates the original bodies of eight finance functions and the 7-argument `fin_payment_add`, which silently undoes this phase. **Always re-apply 028 after any re-run of 017, and then 033** (Phase 3.E re-states the same functions with the studio business date and the operator-only migration switch), and check that `SELECT count(*) FROM pg_proc WHERE proname = 'fin_payment_add'` returns 1. The sequence 017 -> 028 -> 033 is tested.
+
+## Phase 3.B-3.E: history protection, HR and approval integrity, atomic operations, hygiene (migrations 029 to 033)
+
+Rules, apply order, rollback, detectors and the decisions still open are in [database-integrity.md](database-integrity.md). In short: people and
+business records with history cannot be deleted (deactivate / archive); files are removed after their rows, through a retried queue; attendance
+time is the server's; leave and expenses follow enforced rules; approvals and their evidence are atomic and invalidated by changes; department,
+money-figure, Kite Drive, reaction, membership, reminder, broadcast and invitation changes cannot half-happen or double-happen; audit logs are
+append-only; Finance uses the studio's business date. The executive-only Finance policy and every Phase 1, 2 and 3.A protection are unchanged.

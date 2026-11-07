@@ -536,12 +536,11 @@ export class ClientHubModule {
         { name: 'description', label: 'Scope', type: 'textarea', rows: 3 }
       ],
       onSubmit: async (v) => {
-        const { data: made, error } = await this.supabase.from('projects').insert({
+        const { error } = await Money.insertWithFigure('projects', {
           name: v.name, code: String(v.code).toUpperCase(), deadline: v.deadline, description: v.description,
           client_id: c.id, status: 'active', created_by: this.app.currentUser.id
-        }).select('id').single();
+        }, v.budget);
         if (error) throw new Error(error.code === '23505' ? 'That project code is already used.' : error.message);
-        await Money.save('project_budget', made.id, v.budget, this.app.currentUser.id);
         Toast.success('Project created', 'Added');
         if (await this.loadClient()) this.paintTab();
       }

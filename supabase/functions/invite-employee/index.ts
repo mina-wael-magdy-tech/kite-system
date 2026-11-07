@@ -31,13 +31,18 @@ serveJson(async (req) => {
     assertCanManageAccount(caller, await activeRoleNames(admin, targetId));
     await assertNotLastActiveSuperAdmin(admin, targetId);
 
-    await admin.from("invitations").delete().eq("email", target.email);
+    // An employee with history (attendance, leave, chat, audit, ...) is never hard-deleted (migration 029): deactivate instead.
+    const { data: hist } = await admin.rpc("employee_history", { p_user: targetId });
+    if (Array.isArray(hist) && hist.length) {
+      throw new HttpError(409, `This employee has history (${hist.map((h: { source: string }) => h.source).join(", ")}) and cannot be deleted. Set their status to Inactive instead.`);
+    }
+    await removeInvitationsOf(admin, target.email);
     const { error: delErr } = await admin.auth.admin.deleteUser(targetId);
     if (delErr) {
       console.error("delete employee failed:", delErr);
       // refused by the database guard (migration 023)? Say so instead of the generic "linked records" message.
       await assertNotLastActiveSuperAdmin(admin, targetId);
-      throw new HttpError(409, "Could not delete: this employee has linked records (tasks, expenses...). Set their status to Inactive instead.");
+      throw new HttpError(409, "Could not delete: this employee has linked records (tasks, expenses, history...). Set their status to Inactive instead.");
     }
     await audit(admin, { userId: caller.id, action: "EMPLOYEE_DELETED", entityType: "profiles", entityId: targetId, oldData: { email: target.email } }, req);
     return json(req, { success: true });
@@ -74,7 +79,7 @@ serveJson(async (req) => {
     }
     // Re-inviting removes the pending account: the caller must be allowed to manage it
     assertCanManageAccount(caller, await activeRoleNames(admin, existing.id));
-    await admin.from("invitations").delete().eq("email", email);
+    await revokePendingInvitations(admin, email);       // by id, and only one of two concurrent re-invites gets to do it
     const { error } = await admin.auth.admin.deleteUser(existing.id);
     if (error) throw new HttpError(500, "Could not reset the previous invitation");
   } else {
@@ -82,10 +87,22 @@ serveJson(async (req) => {
     const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
     const stale = list?.users?.find((u) => (u.email ?? "").toLowerCase() === email.toLowerCase());
     if (stale) {
-      await admin.from("invitations").delete().eq("email", email);
+      await revokePendingInvitations(admin, email);
       await admin.auth.admin.deleteUser(stale.id);
     }
   }
+
+  // --- claim the invitation FIRST (migration 032: one PENDING invitation per e-mail address, enforced by the database).
+  // Two simultaneous requests for the same address can no longer both go on to create / delete users.
+  const { data: claimed, error: claimErr } = await admin.from("invitations").insert({
+    email, full_name: fullName, role_id: roleId, department_id: departmentId,
+    job_title: jobTitle, invited_by: caller.id, token: crypto.randomUUID(), status: "pending",
+  }).select("id").single();
+  if (claimErr || !claimed) {
+    if (claimErr?.code === "23505") throw new HttpError(409, "An invitation for this e-mail address is already pending.");
+    throw new HttpError(500, "Could not record the invitation");
+  }
+  const claimedId = claimed.id as string;
 
   // --- create the auth user + invitation email
   const appUrl = (Deno.env.get("APP_URL") ?? "").replace(/\/+$/, "");
@@ -96,7 +113,10 @@ serveJson(async (req) => {
     data: { full_name: fullName, role: role.display_name ?? role.name, departments: deptNames || "Kite Design Studio" },
     redirectTo: `${appUrl}/invitation.html`,
   });
-  if (inviteErr || !invited?.user) throw new HttpError(400, "Could not send invitation");
+  if (inviteErr || !invited?.user) {
+    await admin.from("invitations").delete().eq("id", claimedId);   // release the claim (only OUR row)
+    throw new HttpError(400, "Could not send invitation");
+  }
   const userId = invited.user.id;
 
   // --- everything below rolls back (deleting the auth user cascades to profile/roles)
@@ -116,17 +136,29 @@ serveJson(async (req) => {
       );
       if (error) throw error;
     }
-    const { error: invErr } = await admin.from("invitations").insert({
-      email, full_name: fullName, role_id: roleId, department_id: departmentId,
-      job_title: jobTitle, invited_by: caller.id, token: crypto.randomUUID(), status: "pending",
-    });
-    if (invErr) throw invErr;
   } catch (err) {
     console.error("invite rollback:", err);
     await admin.auth.admin.deleteUser(userId);
+    await admin.from("invitations").delete().eq("id", claimedId);   // our own claim only
     throw new HttpError(500, "Invitation failed and was rolled back. Please try again.");
   }
 
   await audit(admin, { userId: caller.id, action: "EMPLOYEE_INVITED", entityType: "profiles", entityId: userId, newData: { email, role: role.name, departmentId } }, req);
   return json(req, { success: true, userId });
 });
+
+/** Marks the PENDING invitations of an address as revoked, by id. Throws 409 when another request already took them. */
+async function revokePendingInvitations(admin: ReturnType<typeof adminClient>, email: string) {
+  const { data: pending } = await admin.from("invitations").select("id").eq("email", email).eq("status", "pending");
+  const ids = (pending ?? []).map((r: { id: string }) => r.id);
+  if (!ids.length) return;
+  const { data: revoked } = await admin.from("invitations").update({ status: "revoked" }).in("id", ids).eq("status", "pending").select("id");
+  if (!revoked?.length) throw new HttpError(409, "Another invitation for this person is being processed. Try again in a moment.");
+}
+
+/** Deletes the invitation records of an address, by id (never a blanket delete by e-mail that could hit a concurrent request's row). */
+async function removeInvitationsOf(admin: ReturnType<typeof adminClient>, email: string) {
+  const { data: rows } = await admin.from("invitations").select("id").eq("email", email);
+  const ids = (rows ?? []).map((r: { id: string }) => r.id);
+  if (ids.length) await admin.from("invitations").delete().in("id", ids);
+}

@@ -150,12 +150,10 @@ export class DepartmentsModule {
         { name: 'description', label: 'Description', type: 'textarea', value: d.description || '', rows: 3 }
       ],
       onSubmit: async (v) => {
-        const { data, error } = await getSupabase().from('departments')
-          .update({ name: v.name, code: v.code, manager_id: v.manager_id, description: v.description })
-          .eq('id', id).select('id');
+        const { data, error } = await Money.updateWithFigure('departments', id,
+          { name: v.name, code: v.code, manager_id: v.manager_id, description: v.description }, v.budget);
         if (error) throw new Error(error.code === '23505' ? 'That name or code is already used.' : error.message);
         if (!data?.length) throw new Error('Only an administrator can edit departments.');
-        await Money.save('department_budget', id, v.budget, this.app.currentUser.id);
         Toast.success('Department updated', 'Saved');
         await this.loadDepartments();
       }
@@ -230,14 +228,13 @@ export class DepartmentsModule {
 
       const supabase = getSupabase();
       try {
-        const { data: made, error } = await supabase.from('departments').insert({
+        const { error } = await Money.insertWithFigure('departments', {
           name,
           code,
           description
-        }).select('id').single();
+        }, budget);
 
         if (error) throw error;
-        await Money.save('department_budget', made.id, budget, this.app.currentUser.id);
         Toast.success(`Department "${name}" created!`, 'Department Added');
         modalBackdrop.classList.remove('active');
         await this.loadDepartments();

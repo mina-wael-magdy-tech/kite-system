@@ -174,6 +174,7 @@ serveJson(async (req) => {
   }
 
   let match: { id: number; name: string } | undefined;
+  let createdHere = false;   // true only when THIS request made the account on Drive
   if (action === "link.create") {
     if (link) throw new HttpError(409, "This client is already linked to Kite Drive");
     const account = {
@@ -181,27 +182,68 @@ serveJson(async (req) => {
       email: email(body.email),
       password: text(body.password, "Password", 8, 128),
     };
-    const { url, secret } = driveConfig();
-    const { token } = await signToken(secret, caller.id, "admin", null);
-    const res = await fetch(`${url}/api/index.php?action=create_client`, {
-      method: "POST",
-      headers: { "X-Drive-Token": token, "Content-Type": "application/json" },
-      body: JSON.stringify(account),
-    });
-    const created = await res.json().catch(() => ({}));
-    if (!res.ok) throw new HttpError(res.status === 409 || res.status === 400 ? res.status : 502, created.error ?? "Kite Drive refused the request");
-    match = { id: created.id, name: created.name };
+    // Creating the account is a dual write (Drive, then this database). The INTENT is recorded first (migration 032) so a crash
+    // between the two steps is recoverable: a retry adopts the account instead of creating a second one, and it shows up in
+    // drive_link_orphans().
+    const { data: begun, error: bErr } = await admin.rpc("drive_link_begin", { p_client: clientId, p_email: account.email, p_actor: caller.id });
+    if (bErr) {
+      if (/already_linked/.test(bErr.message)) throw new HttpError(409, "This client is already linked to Kite Drive");
+      throw bErr;
+    }
+    const b = (Array.isArray(begun) ? begun[0] : begun) as { drive_user_id: number | null; drive_name: string | null; state: string } | null;
+    if (!b) throw new Error("drive_link_begin returned nothing");
+    if (b.state === "busy") throw new HttpError(409, "This Kite Drive account is already being created. Wait a moment, then check the client again.");
+    if (b.state === "adopt" && b.drive_user_id) {
+      match = { id: b.drive_user_id, name: b.drive_name ?? account.name };      // created earlier, never linked: link it now
+    } else {
+      if (b.state === "stale") {                                                   // an earlier request died before recording its account
+        const existing = (await driveClients(caller).catch(() => [])).find((c) => c.email.toLowerCase() === account.email.toLowerCase());
+        if (existing) match = { id: existing.id, name: existing.name };
+      }
+      if (!match) {
+        const { url, secret } = driveConfig();
+        const { token } = await signToken(secret, caller.id, "admin", null);
+        let res: Response;
+        try {
+          res = await fetch(`${url}/api/index.php?action=create_client`, {
+            method: "POST",
+            headers: { "X-Drive-Token": token, "Content-Type": "application/json" },
+            body: JSON.stringify(account),
+          });
+        } catch (err) {
+          console.error("Kite Drive unreachable:", err);
+          await admin.rpc("drive_link_abort", { p_client: clientId });
+          throw new HttpError(502, "Couldn't reach Kite Drive");
+        }
+        const created = await res.json().catch(() => ({}));
+        if (res.ok) {
+          createdHere = true;
+          match = { id: created.id, name: created.name };
+          const { error: rErr } = await admin.rpc("drive_link_remote_created", { p_client: clientId, p_drive_user_id: created.id, p_name: created.name });
+          if (rErr) console.error("Kite Drive account", created.id, "created but the intent could not record it:", rErr.message);
+        } else {
+          await admin.rpc("drive_link_abort", { p_client: clientId });
+          throw new HttpError(res.status === 409 || res.status === 400 ? res.status : 502, created.error ?? "Kite Drive refused the request");
+        }
+      }
+    }
   } else {
     const wanted = positiveInt(body.driveUserId, "driveUserId");
     match = (await driveClients(caller)).find((c) => c.id === wanted);
     if (!match) throw new HttpError(404, "That Kite Drive account no longer exists");
   }
   const driveUserId = match.id;
-  const { error } = await admin.from("client_drive_links").upsert({
-    client_id: clientId, drive_user_id: driveUserId, drive_name: match.name, linked_by: caller.id, linked_at: new Date().toISOString(),
+  // the link and the removal of the intent commit together; "link another account" (link.set) may replace an existing link, as before
+  const { error } = await admin.rpc("drive_link_complete", {
+    p_client: clientId, p_drive_user_id: driveUserId, p_name: match.name, p_actor: caller.id, p_replace: action === "link.set",
   });
   if (error) {
+    if (action === "link.create" && !createdHere) await admin.rpc("drive_link_abort", { p_client: clientId });
     if (error.code === "23505") throw new HttpError(409, "That Kite Drive account is already linked to another client");
+    if (action === "link.create") {
+      console.error("Kite Drive account", driveUserId, "exists but linking failed:", error.message);
+      throw new HttpError(502, "The Kite Drive account was created but could not be linked yet. Try again: it will be linked, not created twice.");
+    }
     throw error;
   }
   await audit(admin, { userId: caller.id, action: "kite_drive.link", entityType: "client", entityId: clientId, oldData: link, newData: { drive_user_id: driveUserId, drive_name: match.name } }, req);

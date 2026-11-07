@@ -991,11 +991,11 @@ export class ContentPlanEditor {
           ...colourFields(planColours(pl))
         ],
         onDelete: Permissions.isAdmin() || pl.created_by === this.me ? async () => {
-          // files first: the storage rule needs the plan to still exist
-          const paths = this.assets.map(a => a.storage_path);
-          if (paths.length) await supabase.storage.from(CONFIG.STORAGE_BUCKETS.STUDIO_ASSETS).remove(paths);
+          // The database row goes FIRST: its files are queued in the same transaction (migration 029) and removed afterwards,
+          // so a failed delete never leaves a plan whose pictures are already gone. Anything that cannot be removed now is retried daily.
           const { error } = await supabase.from('content_plans').delete().eq('id', pl.id);
           if (error) throw new Error(error.message);
+          Api.cleanupStorage().catch(() => {});
           Toast.success('Content plan deleted', 'Deleted');
           window.location.hash = '#campaigns';
         } : undefined,

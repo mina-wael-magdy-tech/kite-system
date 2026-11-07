@@ -82,19 +82,33 @@ serveJson(async (req) => {
   ids = [...new Set(ids)].filter((id) => id !== caller.id);
   if (!ids.length) throw new HttpError(400, "No active employees match that audience");
 
-  // in-app notification + push, a few at a time
-  for (let i = 0; i < ids.length; i += 10) {
-    await Promise.all(ids.slice(i, i + 10).map((userId) =>
-      notify(admin, { userId, type: "announcement", title, content: message, link: link ?? undefined, metadata: { sender_id: caller.id } })
-    ));
+  // Claim the send FIRST (migration 032): the same requestId can only be recorded once, so a double click / retry never notifies twice.
+  const requestId = body.requestId === undefined || body.requestId === null || body.requestId === "" ? null : uuid(body.requestId, "requestId");
+  const { data: claim, error: claimErr } = await admin.from("broadcasts").insert({
+    sender_id: caller.id, title, message, link, audience_type: audience, audience_label: label.slice(0, 200), recipient_count: 0, request_id: requestId,
+  }).select("id").single();
+  if (claimErr) {
+    if (claimErr.code === "23505" && requestId) {
+      const { data: prev } = await admin.from("broadcasts").select("recipient_count, completed_at").eq("request_id", requestId).maybeSingle();
+      return json(req, { success: true, duplicate: true, status: prev?.completed_at ? "sent" : "processing", recipients: prev?.recipient_count ?? 0 });
+    }
+    console.error("broadcast claim failed:", claimErr.message);   // history is not essential: still send
   }
 
-  const { error } = await admin.from("broadcasts").insert({
-    sender_id: caller.id, title, message, link, audience_type: audience, audience_label: label.slice(0, 200), recipient_count: ids.length,
-  });
-  if (error) console.error("broadcast history insert failed:", error.message);
-  await audit(admin, { userId: caller.id, action: "BROADCAST_SENT", entityType: "broadcasts", newData: { audience, label, count: ids.length, title } }, req);
-  return json(req, { success: true, recipients: ids.length });
+  // in-app notification + push, a few at a time; only notifications that were really stored are counted
+  let delivered = 0;
+  for (let i = 0; i < ids.length; i += 10) {
+    const results = await Promise.all(ids.slice(i, i + 10).map((userId) =>
+      notify(admin, { userId, type: "announcement", title, content: message, link: link ?? undefined, metadata: { sender_id: caller.id } })
+    ));
+    delivered += results.filter(Boolean).length;
+  }
+  if (claim?.id) {
+    const { error } = await admin.from("broadcasts").update({ recipient_count: delivered, completed_at: new Date().toISOString() }).eq("id", claim.id);
+    if (error) console.error("broadcast history update failed:", error.message);
+  }
+  await audit(admin, { userId: caller.id, action: "BROADCAST_SENT", entityType: "broadcasts", newData: { audience, label, count: delivered, intended: ids.length, title } }, req);
+  return json(req, { success: true, recipients: delivered });
 });
 
 function list(v: unknown, field: string): unknown[] {

@@ -199,12 +199,10 @@ export class ProjectsModule {
         { name: 'description', label: 'Description', type: 'textarea', value: p.description || '', rows: 3 }
       ],
       onSubmit: async (v) => {
-        const { data, error } = await getSupabase().from('projects')
-          .update({ name: v.name, code: v.code, client_id: v.clientId || null, status: v.status, deadline: v.deadline, description: v.description })
-          .eq('id', id).select('id');
+        const { data, error } = await Money.updateWithFigure('projects', id,
+          { name: v.name, code: v.code, client_id: v.clientId || null, status: v.status, deadline: v.deadline, description: v.description }, v.budget);
         if (error) throw new Error(error.code === '23505' ? 'That project code is already used.' : error.message);
         if (!data?.length) throw new Error('You do not have permission to edit this project.');
-        await Money.save('project_budget', id, v.budget, this.app.currentUser.id);
         Toast.success('Project updated', 'Saved');
         await this.loadProjects();
       }
@@ -305,7 +303,7 @@ export class ProjectsModule {
 
       const supabase = getSupabase();
       try {
-        const { data: made, error } = await supabase.from('projects').insert({
+        const { error } = await Money.insertWithFigure('projects', {
           name,
           code,
           deadline,
@@ -313,10 +311,9 @@ export class ProjectsModule {
           client_id: document.getElementById('projClientSelect')?.value || null,
           status: 'active',
           created_by: this.app.currentUser.id
-        }).select('id').single();
+        }, budget);
 
         if (error) throw error;
-        await Money.save('project_budget', made.id, budget, this.app.currentUser.id);
         Toast.success('Client project created successfully', 'Project Added');
         modalBackdrop.classList.remove('active');
         this.page = 1; // the new project is the newest

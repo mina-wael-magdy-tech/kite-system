@@ -10,6 +10,7 @@
 
 import { HttpError, json, serveJson } from "../_shared/http.ts";
 import { adminClient, audit, notify } from "../_shared/auth.ts";
+import { drainStorageCleanup } from "../_shared/storage-cleanup.ts";
 
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
@@ -70,13 +71,15 @@ serveJson(async (req) => {
       d.tomorrow.length ? `${d.tomorrow.length} due tomorrow` : "",
     ].filter(Boolean);
     const first = [...d.overdue, ...d.today, ...d.tomorrow][0];
-    await notify(admin, {
+    // dedupeKey: the DATABASE allows one digest per person per day, so two overlapping runs cannot both send (migration 032)
+    const sent = await notify(admin, {
       userId, type: "due_digest",
       title: "Your deadlines",
       content: `${parts.join(", ")}. Next: ${first}`,
       link: "#calendar",
+      dedupeKey: `due_digest:${today}`,
     });
-    notified++;
+    if (sent) notified++;
   }
 
   // ---- social posts the person has to publish (content plans) ----
@@ -111,15 +114,19 @@ serveJson(async (req) => {
       d.tomorrow.length ? `${d.tomorrow.length} tomorrow` : "",
     ].filter(Boolean);
     const first = [...d.today, ...d.late, ...d.tomorrow][0];
-    await notify(admin, {
+    const sent = await notify(admin, {
       userId, type: "publish_reminder",
       title: "Posts to publish",
       content: `${parts.join(", ")}. Next: ${first}`,
       link: "#calendar",
+      dedupeKey: `publish_reminder:${today}`,
     });
-    publishNotified++;
+    if (sent) publishNotified++;
   }
 
-  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, publishNotified, today, tz } });
-  return json(req, { success: true, notified, publishNotified, today });
+  // files whose database rows were deleted: remove them now, retry the ones that failed earlier (migration 029)
+  const cleanup = await drainStorageCleanup(admin, 200);
+
+  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, publishNotified, today, tz, storageCleanup: cleanup } });
+  return json(req, { success: true, notified, publishNotified, today, storageCleanup: cleanup });
 });

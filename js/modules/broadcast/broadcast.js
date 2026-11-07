@@ -130,7 +130,9 @@ export class BroadcastModule {
     const title = document.getElementById('bcTitle').value.trim();
     const message = document.getElementById('bcMsg').value.trim();
     const link = document.getElementById('bcLink').value;
-    const payload = { title, message, audience: this.audience, link: link || undefined };
+    // one id per announcement: a retry after an error (or a double click) re-sends the SAME id, which the server recognises
+    this.requestId = this.requestId || crypto.randomUUID();
+    const payload = { title, message, audience: this.audience, link: link || undefined, requestId: this.requestId };
     if (this.audience === 'department') payload.departmentIds = this.selected('dept');
     if (this.audience === 'role') payload.roles = this.selected('role');
     if (this.audience === 'people') payload.userIds = this.selected('person');
@@ -143,7 +145,8 @@ export class BroadcastModule {
     this.sending = true; btn.disabled = true;
     try {
       const res = await Api.broadcast({ action: 'send', ...payload });
-      Toast.success(`Sent to ${res.recipients} ${res.recipients === 1 ? 'person' : 'people'}.`, 'Announcement');
+      this.requestId = null;
+      Toast.success(res.duplicate ? 'This announcement was already sent.' : `Sent to ${res.recipients} ${res.recipients === 1 ? 'person' : 'people'}.`, 'Announcement');
       document.getElementById('bcForm').reset();
       this.audience = 'all';
       document.querySelectorAll('#bcAud button').forEach(x => x.classList.toggle('on', x.dataset.aud === 'all'));

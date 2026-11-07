@@ -20,6 +20,7 @@ import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
 import { activeRoleNames, adminClient, ADMIN_ROLES, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, Caller, canManageEmployees, EXECUTIVE_ROLES, getCaller, isExecutive, notify, replaceUserRole, requireStaff, userClient, userIdsWithRoles } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 import { isAllowedPushEndpoint, pushConfigured, sendPush } from "../_shared/push.ts";
+import { drainStorageCleanup } from "../_shared/storage-cleanup.ts";
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 const TASK_STATUSES = [
@@ -71,6 +72,9 @@ serveJson(async (req) => {
     case "push.unsubscribe": return json(req, await pushUnsubscribe(admin, caller, body));
     case "push.test": return json(req, await pushTest(admin, caller));
     case "expense.decide": return json(req, await expenseDecide(req, admin, caller, body));
+    case "expense.submit": return json(req, await expenseSubmit(req, admin, caller, body));
+    case "expense.pay": return json(req, await expensePay(req, admin, caller, body));
+    case "storage.cleanup": return json(req, { success: true, ...(await drainStorageCleanup(admin, 100)) });
     case "leave.decide": return json(req, await leaveDecide(req, admin, caller, body));
     case "task.comment": return json(req, await taskComment(admin, caller, body));
     case "task.file_added": return json(req, await taskFileAdded(admin, caller, body));
@@ -279,21 +283,43 @@ async function expenseDecide(req: Request, admin: SupabaseClient, caller: Caller
   }
   const { data: exp } = await admin.from("expenses").select("id, title, status, submitted_by").eq("id", expenseId).maybeSingle();
   if (!exp) throw new HttpError(404, "Expense not found");
-  if (exp.submitted_by === caller.id) throw new HttpError(403, "You cannot decide on your own expense");
-  if (exp.status !== "submitted") throw new HttpError(409, `Expense is already ${exp.status}`);
-
-  const { data: updated, error } = await admin.from("expenses")
-    .update({ status: decision }).eq("id", expenseId).eq("status", "submitted").select("id").maybeSingle();
-  if (error) throw error;
-  if (!updated) throw new HttpError(409, "Expense was already decided");
-
-  await admin.from("expense_approvals").insert({ expense_id: expenseId, approver_id: caller.id, action: decision, notes });
+  // One SQL transaction: lock the claim, check it is still "submitted", change the status AND write the approval record.
+  await expenseRpc(admin, "expense_decide", { p_actor: caller.id, p_expense: expenseId, p_decision: decision, p_notes: notes });
   await notify(admin, {
     userId: exp.submitted_by, type: "expense_decision",
     title: `Expense ${decision}`, content: exp.title, link: "#finance",
   });
   await audit(admin, { userId: caller.id, action: `EXPENSE_${decision.toUpperCase()}`, entityType: "expenses", entityId: expenseId, oldData: { status: "submitted" }, newData: { status: decision } }, req);
   return { success: true, status: decision };
+}
+
+/** Calls an expense SQL function; its stable error codes (migration 031) become HTTP statuses. */
+async function expenseRpc(admin: SupabaseClient, fn: string, args: Record<string, unknown>) {
+  const { data, error } = await admin.rpc(fn, args);
+  if (!error) return data;
+  const m = /^expense_(\w+):\s*(.*)$/s.exec(error.message ?? "");
+  if (m) {
+    const status = ({ forbidden: 403, self_decision: 403, not_found: 404, already_decided: 409, not_approved: 409, bad_decision: 400 } as Record<string, number>)[m[1]] ?? 400;
+    throw new HttpError(status, m[2]);
+  }
+  throw error;
+}
+
+async function expenseSubmit(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const expenseId = v.uuid(b.expenseId, "expenseId");
+  await expenseRpc(admin, "expense_submit", { p_actor: caller.id, p_expense: expenseId });
+  await audit(admin, { userId: caller.id, action: "EXPENSE_SUBMITTED", entityType: "expenses", entityId: expenseId, oldData: { status: "draft" }, newData: { status: "submitted" } }, req);
+  return { success: true, status: "submitted" };
+}
+
+async function expensePay(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
+  const expenseId = v.uuid(b.expenseId, "expenseId");
+  if (!isExecutive(caller)) throw new HttpError(403, "Finance privilege required");   // Finance data is executive-only
+  const { data: exp } = await admin.from("expenses").select("id, title, submitted_by").eq("id", expenseId).maybeSingle();
+  if (!exp) throw new HttpError(404, "Expense not found");
+  await expenseRpc(admin, "expense_mark_paid", { p_actor: caller.id, p_expense: expenseId });
+  await audit(admin, { userId: caller.id, action: "EXPENSE_PAID", entityType: "expenses", entityId: expenseId, oldData: { status: "approved" }, newData: { status: "paid" } }, req);
+  return { success: true, status: "paid" };
 }
 
 // ---------------------------------------------------------------- leave.decide
@@ -382,29 +408,28 @@ async function taskDelete(req: Request, admin: SupabaseClient, caller: Caller, b
     (await isProjectManager(admin, caller.id, task.project_id));
   if (!allowed) throw new HttpError(403, "Only an admin, a manager or the task creator can delete this task");
 
-  {
-    const who = await personName(admin, caller.id);
-    for (const userId of await taskAudience(admin, task, caller.id)) {
-      await notify(admin, {
-        userId, type: "task_deleted", title: `Task removed: ${task.task_number}`,
-        content: `${who} deleted “${task.title}”`, link: "#tasks",
-      });
-    }
-  }
-  // Remove stored files first so nothing is orphaned in the bucket.
-  const { data: files } = await admin.from("task_attachments").select("storage_path").eq("task_id", taskId);
-  const paths = (files ?? []).map((f: { storage_path: string }) => f.storage_path);
-  if (paths.length) {
-    const { error: rmErr } = await admin.storage.from("task-attachments").remove(paths);
-    if (rmErr) console.error("storage cleanup failed:", rmErr.message);
-  }
-
+  // The database row goes FIRST (a trigger queues its files in the same transaction), then the files are removed.
+  // If the task has billing or time history the database refuses and nothing is touched.
+  const who = await personName(admin, caller.id);
+  const audience = await taskAudience(admin, task, caller.id);   // read before the delete: the assignee rows go with the task
+  const taskFiles = await admin.from("task_attachments").select("id", { count: "exact", head: true }).eq("task_id", taskId);
+  const fileCount = taskFiles.count ?? 0;
   const { error } = await admin.from("tasks").delete().eq("id", taskId);
-  if (error) throw error;
+  if (error) {
+    if (/record_has_history/.test(error.message)) throw new HttpError(409, "This task has billing or time history and cannot be deleted. Cancel it instead.");
+    throw error;
+  }
+  for (const userId of audience) {
+    await notify(admin, {
+      userId, type: "task_deleted", title: `Task removed: ${task.task_number}`,
+      content: `${who} deleted “${task.title}”`, link: "#tasks",
+    });
+  }
+  await drainStorageCleanup(admin);   // best effort; anything that fails stays queued and is retried by the daily job
 
   await audit(admin, {
     userId: caller.id, action: "TASK_DELETED", entityType: "tasks", entityId: taskId,
-    oldData: { task_number: task.task_number, title: task.title, status: task.status, files: paths.length },
+    oldData: { task_number: task.task_number, title: task.title, status: task.status, files: fileCount },
   }, req);
   return { success: true };
 }
@@ -427,6 +452,7 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
   assertCanManageAccount(caller, targetRoles);
 
   const patch: Record<string, unknown> = {};
+  let primaryDept: { id: string | null } | null = null;   // department changes go through ONE SQL transaction (migration 032)
   if ("fullName" in b) patch.full_name = v.text(b.fullName, "fullName", 2, 120);
   if ("jobTitle" in b) patch.job_title = v.optText(b.jobTitle, "jobTitle", 100);
   if ("departmentId" in b) {
@@ -435,7 +461,7 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
       const { data: d } = await admin.from("departments").select("id").eq("id", deptId).maybeSingle();
       if (!d) throw new HttpError(400, "Unknown department");
     }
-    patch.department_id = deptId;
+    primaryDept = { id: deptId };
   }
 
   // Multiple departments: the first one is the primary (profiles.department_id)
@@ -447,7 +473,6 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
       const { data: found } = await admin.from("departments").select("id").in("id", deptIds);
       if ((found?.length ?? 0) !== deptIds.length) throw new HttpError(400, "Unknown department");
     }
-    patch.department_id = deptIds[0] ?? null;
   }
 
   let newStatus: typeof EMPLOYMENT_STATUSES[number] | null = null;
@@ -470,7 +495,7 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     // never demote the last active super admin (the DB function re-checks this under a lock)
     if (newRole && targetRoles.includes("super_admin") && role.name !== "super_admin") await assertNotLastActiveSuperAdmin(admin, userId);
   }
-  if (Object.keys(patch).length === 0 && !newRole) return { success: true, unchanged: true };
+  if (Object.keys(patch).length === 0 && !newRole && !deptIds && !primaryDept) return { success: true, unchanged: true };
 
   if (Object.keys(patch).length) {
     const { error } = await admin.from("profiles").update(patch).eq("id", userId);
@@ -479,23 +504,12 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
       if (/last_super_admin/.test(error.message)) throw new HttpError(409, "Cannot remove, disable or delete the last active super administrator");
       throw error;
     }
-    if (deptIds) {
-      await admin.from("user_departments").delete().eq("user_id", userId);
-      if (deptIds.length) {
-        const { error: udErr } = await admin.from("user_departments").insert(
-          deptIds.map((id, i) => ({ user_id: userId, department_id: id, is_primary: i === 0 })),
-        );
-        if (udErr) throw udErr;
-      }
-    } else if ("department_id" in patch) {
-      await admin.from("user_departments").delete().eq("user_id", userId).eq("is_primary", true);
-      if (patch.department_id) {
-        await admin.from("user_departments").upsert(
-          { user_id: userId, department_id: patch.department_id, is_primary: true },
-          { onConflict: "user_id,department_id" },
-        );
-      }
-    }
+  }
+  if (deptIds || primaryDept) {
+    const { error: dErr } = deptIds
+      ? await admin.rpc("set_user_departments", { p_user: userId, p_depts: deptIds })
+      : await admin.rpc("set_primary_department", { p_user: userId, p_dept: primaryDept!.id });
+    if (dErr) throw /Unknown department|Too many/.test(dErr.message) ? new HttpError(400, dErr.message) : dErr;
   }
   if (newRole) {
     // one transaction: a failure leaves the previous role untouched
@@ -516,7 +530,7 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
       full_name: target.full_name, job_title: target.job_title, department_id: target.department_id,
       employment_status: target.employment_status, roles: targetRoles,
     },
-    newData: { ...patch, role: newRole?.name },
+    newData: { ...patch, ...(deptIds ? { department_ids: deptIds } : primaryDept ? { department_id: primaryDept.id } : {}), role: newRole?.name },
   }, req);
   return { success: true };
 }

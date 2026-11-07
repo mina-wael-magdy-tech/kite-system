@@ -58,6 +58,9 @@ export const Api = {
   deleteTask: (taskId) => Api.workflow('task.delete', { taskId }),
   updateEmployee: (userId, fields) => Api.workflow('employee.update', { userId, ...fields }),
   decideExpense: (expenseId, decision, notes) => Api.workflow('expense.decide', { expenseId, decision, notes }),
+  payExpense: (expenseId) => Api.workflow('expense.pay', { expenseId }),
+  submitExpense: (expenseId) => Api.workflow('expense.submit', { expenseId }),
+  cleanupStorage: () => Api.workflow('storage.cleanup'),
   decideLeave: (leaveId, decision, notes) => Api.workflow('leave.decide', { leaveId, decision, notes }),
 
   broadcast: (params) => invoke('broadcast', params),

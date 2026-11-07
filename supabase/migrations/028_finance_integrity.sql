@@ -24,7 +24,7 @@
 --
 -- IMPORTANT: if 017_finance_invoicing.sql is EVER re-run after this migration (it is idempotent, but it re-creates the
 -- ORIGINAL bodies of eight functions and the original 7-argument fin_payment_add, silently undoing F-01, F-03, F-04,
--- F-13 and F-14), RE-APPLY 028 immediately afterwards. 028 is idempotent: it drops the old overload and restores every
+-- F-13 and F-14), RE-APPLY 028 immediately afterwards AND THEN 033 (Phase 3.E re-states these functions with the studio business date). 028 is idempotent: it drops the old overload and restores every
 -- function. Verify with:  SELECT count(*) FROM pg_proc WHERE proname = 'fin_payment_add';   -- must be 1
 -- (tested: supabase/tests/verify-finance-concurrency.mjs, section 10).
 --

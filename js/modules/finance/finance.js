@@ -10,7 +10,7 @@ import { Api } from '../../services/api.js';
 import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
 import { formatExpenseStatusBadge } from '../../utils/formatters.js';
-import { loadBase, egp } from './fin-util.js';
+import { loadBase, egp, fmt } from './fin-util.js';
 import { InvoicesTab } from './tabs/invoices.js';
 import { ClientsTab } from './tabs/clients.js';
 import { SettingsTab } from './tabs/settings.js';
@@ -115,14 +115,20 @@ export class FinanceModule {
     try {
       const monthStart = new Date().toISOString().slice(0, 7) + '-01';
       const [inv, pay] = await Promise.all([
-        sb.from('invoices').select('balance, status').in('status', ['sent', 'partially_paid', 'overdue']),
-        sb.from('invoice_payments').select('amount').gte('paid_on', monthStart).is('reversed_at', null)
+        sb.from('invoices').select('balance, status, currency').in('status', ['sent', 'partially_paid', 'overdue']),
+        sb.from('invoice_payments').select('amount, invoices(currency)').gte('paid_on', monthStart).is('reversed_at', null)
       ]);
       if (inv.error || pay.error) throw (inv.error || pay.error);
-      const sum = (rows, k) => (rows || []).reduce((a, r) => a + (Number(r[k]) || 0), 0);
-      set('kpiOutstanding', egp(sum(inv.data, 'balance')));
-      set('kpiOverdue', egp(sum((inv.data || []).filter(i => i.status === 'overdue'), 'balance')));
-      set('kpiCollected', egp(sum(pay.data, 'amount')));
+      // Amounts in different currencies are NEVER added together: one total per currency ("EGP 1,000 · USD 50")
+      const byCurrency = (rows, amountKey, cur) => {
+        const m = new Map();
+        for (const r of rows || []) { const c = cur(r) || 'EGP'; m.set(c, (m.get(c) || 0) + (Number(r[amountKey]) || 0)); }
+        return m;
+      };
+      const show = (m) => (m.size === 0 ? egp(0) : [...m.entries()].sort().map(([c, v]) => `${c} ${fmt(v)}`).join(' · '));
+      set('kpiOutstanding', show(byCurrency(inv.data, 'balance', r => r.currency)));
+      set('kpiOverdue', show(byCurrency((inv.data || []).filter(i => i.status === 'overdue'), 'balance', r => r.currency)));
+      set('kpiCollected', show(byCurrency(pay.data, 'amount', r => r.invoices?.currency)));
     } catch (err) {
       console.warn('Finance KPIs:', err);
       ['kpiOutstanding', 'kpiOverdue', 'kpiCollected'].forEach(id => set(id, 'n/a'));
@@ -212,7 +218,7 @@ export class FinanceModule {
         </td>
         <td class="text-xs text-muted">${escapeHTML(e.profiles?.full_name || 'Specialist')}</td>
         <td><span class="badge badge-indigo">${escapeHTML(e.departments?.name || 'Studio')}</span></td>
-        <td class="font-mono font-bold text-emerald">${formatCurrency(e.amount)}</td>
+        <td class="font-mono font-bold text-emerald">${formatCurrency(e.amount, e.currency || 'EGP')}</td>
         <td>${formatExpenseStatusBadge(e.status)}</td>
         <td class="font-mono text-2xs text-dim">${formatDate(e.created_at)}</td>
         ${isFinanceOrAdmin ? `
@@ -220,6 +226,8 @@ export class FinanceModule {
             ${e.status === 'submitted' ? `
               <button type="button" class="btn btn-primary btn-sm btn-approve-exp" data-id="${e.id}">Approve</button>
               <button type="button" class="btn btn-danger btn-sm btn-reject-exp" data-id="${e.id}">Reject</button>
+            ` : e.status === 'approved' ? `
+              <button type="button" class="btn btn-primary btn-sm btn-pay-exp" data-id="${e.id}">Mark paid</button>
             ` : '<span class="text-2xs text-dim">Settled</span>'}
           </td>
         ` : ''}
@@ -233,6 +241,9 @@ export class FinanceModule {
       tbody.querySelectorAll('.btn-reject-exp').forEach(btn => {
         btn.addEventListener('click', () => this.handleReviewExpense(btn.getAttribute('data-id'), 'rejected'));
       });
+      tbody.querySelectorAll('.btn-pay-exp').forEach(btn => {
+        btn.addEventListener('click', () => this.handlePayExpense(btn.getAttribute('data-id')));
+      });
     }
   }
 
@@ -243,6 +254,17 @@ export class FinanceModule {
       await this.loadFinanceData();
     } catch (err) {
       console.error('Expense review error:', err);
+      Toast.error(err.message || 'Action failed', 'Error');
+    }
+  }
+
+  async handlePayExpense(expenseId) {
+    try {
+      await Api.payExpense(expenseId);
+      Toast.success('Expense marked as paid', 'Finance');
+      await this.loadFinanceData();
+    } catch (err) {
+      console.error('Expense payment error:', err);
       Toast.error(err.message || 'Action failed', 'Error');
     }
   }
@@ -319,6 +341,7 @@ export class FinanceModule {
           title,
           amount,
           category,
+          currency: 'EGP',   // the form is in EGP; the amount is stored with the currency it was typed in
           department_id: deptId,
           submitted_by: this.app.currentUser.id,
           status: 'submitted'
