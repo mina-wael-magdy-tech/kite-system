@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { adminClient, ADMIN_ROLES, audit, Caller, getCaller, notify, requireStaff, userClient, userIdsWithRoles } from "../_shared/auth.ts";
+import { activeRoleNames, adminClient, ADMIN_ROLES, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, Caller, getCaller, notify, replaceUserRole, requireStaff, userClient, userIdsWithRoles } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
 import { isAllowedPushEndpoint, pushConfigured, sendPush } from "../_shared/push.ts";
 
@@ -410,7 +410,6 @@ async function taskDelete(req: Request, admin: SupabaseClient, caller: Caller, b
 
 // ---------------------------------------------------------------- employee.update
 
-const ADMIN_LEVEL_ROLES = ["super_admin", "owner", "general_manager"];
 const EMPLOYMENT_STATUSES = ["active", "inactive", "suspended"] as const;
 
 async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Caller, b: Record<string, unknown>) {
@@ -422,13 +421,9 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     .select("id, full_name, job_title, department_id, employment_status").eq("id", userId).maybeSingle();
   if (!target) throw new HttpError(404, "Employee not found");
 
-  const { data: roleRows } = await admin.from("user_roles").select("roles(id, name)").eq("user_id", userId);
-  // deno-lint-ignore no-explicit-any
-  const targetRoles: string[] = (roleRows ?? []).map((r: any) => r.roles?.name).filter(Boolean);
-  // Only admins may touch admin-level people
-  if (targetRoles.some((r) => ADMIN_LEVEL_ROLES.includes(r)) && !caller.isAdmin) {
-    throw new HttpError(403, "Only an administrator can modify this account");
-  }
+  const targetRoles = await activeRoleNames(admin, userId);
+  // Tier rule (see _shared/auth.ts): only an equal-or-higher tier may touch this account
+  assertCanManageAccount(caller, targetRoles);
 
   const patch: Record<string, unknown> = {};
   if ("fullName" in b) patch.full_name = v.text(b.fullName, "fullName", 2, 120);
@@ -458,6 +453,8 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     newStatus = v.oneOf(b.employmentStatus, EMPLOYMENT_STATUSES, "employmentStatus");
     if (isSelf && newStatus !== "active") throw new HttpError(400, "You cannot deactivate your own account");
     if (newStatus !== target.employment_status) patch.employment_status = newStatus;
+    // the last active super administrator can never be disabled
+    if (newStatus !== "active" && newStatus !== target.employment_status) await assertNotLastActiveSuperAdmin(admin, userId);
   }
 
   let newRole: { id: string; name: string } | null = null;
@@ -466,14 +463,10 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     if (isSelf) throw new HttpError(400, "You cannot change your own role");
     const { data: role } = await admin.from("roles").select("id, name, is_active").eq("id", roleId).maybeSingle();
     if (!role || !role.is_active) throw new HttpError(400, "Unknown or inactive role");
-    if (ADMIN_LEVEL_ROLES.includes(role.name) && !caller.isAdmin) throw new HttpError(403, "Only an administrator can grant this role");
-    if (role.name === "super_admin" && !caller.has("super_admin")) throw new HttpError(403, "Only a super administrator can grant super_admin");
+    assertCanGrantRole(caller, role.name);
     if (!(targetRoles.length === 1 && targetRoles[0] === role.name)) newRole = { id: role.id, name: role.name };
-    // never remove the last super admin
-    if (newRole && targetRoles.includes("super_admin") && role.name !== "super_admin") {
-      const { count } = await admin.from("user_roles").select("id, roles!inner(name)", { count: "exact", head: true }).eq("roles.name", "super_admin");
-      if ((count ?? 0) <= 1) throw new HttpError(409, "Cannot remove the last super administrator");
-    }
+    // never demote the last active super admin (the DB function re-checks this under a lock)
+    if (newRole && targetRoles.includes("super_admin") && role.name !== "super_admin") await assertNotLastActiveSuperAdmin(admin, userId);
   }
   if (Object.keys(patch).length === 0 && !newRole) return { success: true, unchanged: true };
 
@@ -499,9 +492,8 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
     }
   }
   if (newRole) {
-    await admin.from("user_roles").delete().eq("user_id", userId);
-    const { error } = await admin.from("user_roles").insert({ user_id: userId, role_id: newRole.id, assigned_by: caller.id });
-    if (error) throw error;
+    // one transaction: a failure leaves the previous role untouched
+    await replaceUserRole(admin, userId, newRole.id, caller.id);
   }
   // Deactivated people can no longer sign in or refresh a session.
   if (newStatus && "employment_status" in patch) {

@@ -2,6 +2,14 @@
   "name": "pulse-studio-rls-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node verify-rls.mjs" },
-  "dependencies": { "@electric-sql/pglite": "0.5.14" }
+  "scripts": {
+    "test": "node verify-rls.mjs && node verify-roles.mjs",
+    "test:roles": "node verify-roles.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.14"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }

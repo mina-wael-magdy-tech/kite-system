@@ -2,16 +2,16 @@
 // Admin / HR invites a new employee. Server-side only: creates the auth user,
 // the profile (status = onboarding), the role assignment and the invitation record.
 //
-// Privilege rules (enforced here, not in the browser):
+// Privilege rules (enforced here, not in the browser; tier model lives in _shared/auth.ts):
 //   * caller must be an active admin (super_admin/owner/general_manager) or hr_manager
-//   * only admins may grant admin-level roles; only a super_admin may grant super_admin
+//   * a caller may grant only roles at or below their own tier; only a super_admin grants super_admin
+//   * a caller may delete / re-invite only accounts at or below their own tier
+//   * the last active super_admin can never be deleted
 //   * if any step fails, everything created so far is rolled back
 
 import { HttpError, json, readJson, serveJson } from "../_shared/http.ts";
-import { adminClient, audit, getCaller } from "../_shared/auth.ts";
+import { activeRoleNames, adminClient, assertCanGrantRole, assertCanManageAccount, assertNotLastActiveSuperAdmin, audit, getCaller } from "../_shared/auth.ts";
 import * as v from "../_shared/validate.ts";
-
-const ADMIN_LEVEL = ["super_admin", "owner", "general_manager"];
 
 serveJson(async (req) => {
   const admin = adminClient();
@@ -28,10 +28,8 @@ serveJson(async (req) => {
     if (targetId === caller.id) throw new HttpError(400, "You cannot delete your own account");
     const { data: target } = await admin.from("profiles").select("id, email, employment_status").eq("id", targetId).maybeSingle();
     if (!target) throw new HttpError(404, "Employee not found");
-    const { data: targetRoles } = await admin.from("user_roles").select("roles(name)").eq("user_id", targetId);
-    // deno-lint-ignore no-explicit-any
-    const isTargetAdmin = (targetRoles ?? []).some((r: any) => ADMIN_LEVEL.includes(r.roles?.name));
-    if (isTargetAdmin && !caller.isAdmin) throw new HttpError(403, "Only an administrator can delete this account");
+    assertCanManageAccount(caller, await activeRoleNames(admin, targetId));
+    await assertNotLastActiveSuperAdmin(admin, targetId);
 
     await admin.from("invitations").delete().eq("email", target.email);
     const { error: delErr } = await admin.auth.admin.deleteUser(targetId);
@@ -56,12 +54,7 @@ serveJson(async (req) => {
   // --- authorize the requested role
   const { data: role } = await admin.from("roles").select("id, name, display_name, is_active").eq("id", roleId).maybeSingle();
   if (!role || !role.is_active) throw new HttpError(400, "Unknown or inactive role");
-  if (ADMIN_LEVEL.includes(role.name) && !caller.isAdmin) {
-    throw new HttpError(403, "Only an administrator can grant this role");
-  }
-  if (role.name === "super_admin" && !caller.has("super_admin")) {
-    throw new HttpError(403, "Only a super administrator can grant super_admin");
-  }
+  assertCanGrantRole(caller, role.name);
 
   let deptNames = "";
   if (deptIds.length) {
@@ -76,6 +69,8 @@ serveJson(async (req) => {
     if (existing.employment_status !== "onboarding") {
       throw new HttpError(409, "An employee with this email already exists");
     }
+    // Re-inviting removes the pending account: the caller must be allowed to manage it
+    assertCanManageAccount(caller, await activeRoleNames(admin, existing.id));
     await admin.from("invitations").delete().eq("email", email);
     const { error } = await admin.auth.admin.deleteUser(existing.id);
     if (error) throw new HttpError(500, "Could not reset the previous invitation");
