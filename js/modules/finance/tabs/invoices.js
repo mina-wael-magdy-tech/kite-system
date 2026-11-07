@@ -220,6 +220,7 @@ export class InvoicesTab {
   }
 
   recordPayment(inv) {
+    const requestId = crypto.randomUUID();   // one id per dialog: a retry or a double click re-sends the SAME id, so it records one payment
     formDialog({
       title: `Record payment — ${inv.invoice_number}`,
       subtitle: `Balance due: ${egp(inv.balance)}`,
@@ -234,7 +235,7 @@ export class InvoicesTab {
         { name: 'notes', label: 'Notes', type: 'textarea', rows: 2, maxlength: 500 }
       ],
       onSubmit: async (v) => {
-        await Api.finance('payment.add', { invoiceId: inv.id, amount: v.amount, paidOn: v.paidOn, method: v.method, reference: v.reference, notes: v.notes });
+        await Api.finance('payment.add', { invoiceId: inv.id, requestId, amount: v.amount, paidOn: v.paidOn, method: v.method, reference: v.reference, notes: v.notes });
         Toast.success('Payment recorded', 'Saved');
         await this.load();
       }

@@ -262,6 +262,11 @@ await db.query(`INSERT INTO public.invoices(id,invoice_number,type,amount,tax,to
   catch (e) { console.log('FAIL  017 ->', e.message); process.exit(1); }
   try { await db.exec(sql017); check('017 can be run twice', true); } catch (e) { check('017 can be run twice', false, e.message); }
 }
+{
+  const sql028 = fs.readFileSync(M + 'migrations/028_finance_integrity.sql', 'utf8');
+  try { await db.exec(sql028); check('028 applies on top of 017 (legacy rows present)', true); } catch (e) { console.log('FAIL  028 ->', e.message); process.exit(1); }
+  try { await db.exec(sql028); check('028 can be run twice', true); } catch (e) { check('028 can be run twice', false, e.message); }
+}
 
 const fq = async (sql, params = []) => { try { return { rows: (await db.query(sql, params)).rows }; } catch (e) { return { error: e.message }; } };
 const num = (v) => Number(v);
@@ -480,6 +485,116 @@ check('an employee cannot read finance settings', denied(r3) || r3.rows.length =
 r3 = await as('emp', `SELECT count(*)::int c FROM finance_backup.invoices_pre017`);
 check('the backup schema is not reachable from the API roles', denied(r3), JSON.stringify(r3));
 
+
+// ---- Phase 3.A (migration 028): the single-connection checks. The races are in verify-finance-concurrency.mjs (real PostgreSQL).
+{
+  const mk = async (its = items, extra = {}) => {
+    const d = await fq(`SELECT public.fin_invoice_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, kind: 'project', withholding_rate: 0, items: its, ...extra })]);
+    const n = await fq(`SELECT public.fin_invoice_issue($1, $2) n`, [U.admin, d.rows[0].id]);
+    return { id: d.rows[0].id, error: n.error };
+  };
+  const one = [{ description_en: 'x', quantity: 1, unit_price: 1000, vat_rate: 0 }];
+  const st = async (id) => (await fq(`SELECT status, amount_paid, balance FROM public.invoices WHERE id=$1`, [id])).rows[0];
+  // F-03 idempotency
+  const A = await mk(one); const REQ = 'dddddddd-0000-4000-8000-000000000001';
+  const pay = (id, amt, req) => fq(`SELECT public.fin_payment_add($1, $2, $3, current_date, 'cash', NULL, NULL, $4) id`, [U.admin, id, amt, req]);
+  const p1 = await pay(A.id, 400, REQ), p2 = await pay(A.id, 400, REQ);
+  check('F-03 the same request id returns the same payment', !p1.error && !p2.error && p1.rows[0].id === p2.rows[0].id, JSON.stringify([p1, p2]));
+  check('F-03 ... and records it once (paid 400, one row)', num((await st(A.id)).amount_paid) === 400 && num((await fq(`SELECT count(*) c FROM public.invoice_payments WHERE invoice_id=$1`, [A.id])).rows[0].c) === 1);
+  const p3 = await pay(A.id, 250, REQ);
+  check('F-03 the same request id with different details is refused', !!p3.error && /different payment/.test(p3.error), JSON.stringify(p3));
+  const p4 = await pay(A.id, 400, 'dddddddd-0000-4000-8000-000000000002');
+  check('F-03 a NEW request id is a new payment', !p4.error && num((await st(A.id)).amount_paid) === 800);
+  const B = await mk(one); const p5 = await pay(B.id, 100, REQ);
+  check('F-03 a request id cannot be reused on another invoice', !!p5.error && /different payment/.test(p5.error), JSON.stringify(p5));
+  const p6 = await fq(`SELECT public.fin_payment_add($1, $2, 50, current_date, 'cash', NULL, NULL) id`, [U.admin, B.id]);
+  check('F-03 callers that send no request id still work (legacy 7-argument call)', !p6.error, JSON.stringify(p6));
+  const rep = await pay(A.id, 200, 'dddddddd-0000-4000-8000-000000000003');
+  check('F-03 the last payment settles the invoice (paid 1000, status paid)', !rep.error && num((await st(A.id)).amount_paid) === 1000 && (await st(A.id)).status === 'paid');
+  const rep2 = await pay(A.id, 200, 'dddddddd-0000-4000-8000-000000000003');
+  check('F-03 a retry after the invoice became paid returns the first payment (no "paid invoice" error)', !rep2.error && rep2.rows[0].id === rep.rows[0].id, JSON.stringify(rep2));
+  r3 = await fq(`UPDATE public.invoice_payments SET request_id = NULL WHERE id=$1`, [rep.rows[0].id]);
+  check('F-03 the request id of a payment cannot be edited', !!r3.error, JSON.stringify(r3));
+
+  // F-01 (single-connection part): reversing keeps figures and status in step
+  await db.query(`SELECT public.fin_payment_reverse($1, $2, 'bounced')`, [U.admin, rep.rows[0].id]);
+  let x = await st(A.id);
+  check('F-01 reversing a payment: paid 800, balance 200, status partially_paid (one statement)', num(x.amount_paid) === 800 && num(x.balance) === 200 && x.status === 'partially_paid', JSON.stringify(x));
+  r3 = await fq(`SELECT count(*)::int c FROM public.fin_reconcile_invoices() WHERE invoice_id = $1`, [A.id]);
+  check('F-01 reconcile reports nothing for it', r3.rows[0].c === 0, JSON.stringify(r3));
+  r3 = await fq(`SELECT public.fin_payment_reverse($1, $2, 'again')`, [U.admin, rep.rows[0].id]);
+  check('F-01 a payment cannot be reversed twice', !!r3.error && /already reversed/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`SELECT public.fin_payment_reverse($1, 'eeeeeeee-0000-4000-8000-000000000009', 'x')`, [U.admin]);
+  check('F-01 reversing an unknown payment is refused', !!r3.error && /not found/.test(r3.error), JSON.stringify(r3));
+
+  // F-04 / F-05 transitions
+  const D = (await fq(`SELECT public.fin_invoice_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, items: one })])).rows[0].id;
+  await db.query(`ALTER TABLE public.invoices DISABLE TRIGGER fin_audit`);     // fixture only: the client row is gone (the FK does SET NULL)
+  await db.query(`UPDATE public.invoices SET client_id = NULL WHERE id=$1`, [D]);
+  await db.query(`ALTER TABLE public.invoices ENABLE TRIGGER fin_audit`);
+  r3 = await fq(`SELECT public.fin_invoice_issue($1, $2)`, [U.admin, D]);
+  check('F-04 a draft whose client is gone cannot be issued', !!r3.error && /Choose a client/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`UPDATE public.invoices SET status='sent', invoice_number='KITE-9999-0001' WHERE id=$1`, [D]);
+  check('F-04 ... nor by a direct status change (guard)', !!r3.error && /Choose a client/.test(r3.error), JSON.stringify(r3));
+  check('F-04 ... and no invoice number was consumed', (await fq(`SELECT count(*)::int c FROM public.invoices WHERE invoice_number LIKE 'KITE-9999%'`)).rows[0].c === 0);
+  r3 = await fq(`UPDATE public.invoices SET status='paid' WHERE id=$1`, [D]);
+  check('F-05 a draft cannot jump to paid', !!r3.error && /must be issued/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`UPDATE public.invoices SET status='draft' WHERE id=$1`, [A.id]);
+  check('F-05 an issued invoice cannot go back to draft', !!r3.error && /back to draft/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`UPDATE public.invoices SET amount_paid = 99999 WHERE id=$1`, [B.id]);
+  check('F-05 amount_paid above the net receivable is refused', !!r3.error, JSON.stringify(r3));
+  r3 = await fq(`UPDATE public.invoices SET balance = -5 WHERE id=$1`, [B.id]);
+  check('F-05 a negative balance is refused', !!r3.error, JSON.stringify(r3));
+  r3 = await fq(`UPDATE public.invoices SET status='paid' WHERE id=$1`, [B.id]);
+  check('F-05 status paid with a balance is refused', !!r3.error, JSON.stringify(r3));
+  r3 = await fq(`UPDATE public.invoices SET amount_paid = 10, balance = 990 WHERE id=$1`, [B.id]);
+  check('F-05 an amount_paid that does not match the payments is refused at commit (deferred check)', !!r3.error && /out of balance/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`INSERT INTO public.invoice_payments(invoice_id, amount, paid_on) VALUES ($1, 5, current_date)`, [B.id]);
+  check('F-05 a payment inserted without updating the invoice is refused at commit', !!r3.error && /out of balance/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`SELECT count(*)::int c FROM pg_constraint WHERE conrelid='public.invoices'::regclass AND conname LIKE 'invoices\\_%\\_chk' AND convalidated`);
+  check('F-05 all six invoice CHECKs exist and were VALIDATED on the legacy data', r3.rows[0].c === 6, JSON.stringify(r3));
+  // F-13
+  r3 = await fq(`SELECT public.fin_invoice_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, withholding_rate: 100, items: [{ description_en: 'w', quantity: 1, unit_price: 500, vat_rate: 0 }] })]);
+  check('F-13 100% withholding with 0% VAT cannot be saved', !!r3.error && /Nothing to collect/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`SELECT public.fin_invoice_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ client_id: CLIENT, withholding_rate: 100, items: [{ description_en: 'w', quantity: 1, unit_price: 500, vat_rate: 14 }] })]);
+  check('F-13 100% withholding WITH VAT is still allowed (the VAT is collectable)', !r3.error, JSON.stringify(r3));
+  // F-10 / F-14 (sequential)
+  const plan = { client_id: CLIENT, name: 'Monthly social', monthly_fee: 5000, start_date: '2026-01-01' };
+  await db.query(`SELECT public.fin_plan_save($1, $2::jsonb)`, [U.admin, JSON.stringify(plan)]);
+  r3 = await fq(`SELECT public.fin_plan_save($1, $2::jsonb)`, [U.admin, JSON.stringify({ ...plan, name: '  MONTHLY SOCIAL ' })]);
+  check('F-10 a duplicate active plan (same client, department, name ignoring case/spaces) is refused', !!r3.error && /uq_retainer_plan_active/.test(r3.error), JSON.stringify(r3));
+  r3 = await fq(`SELECT public.fin_plan_save($1, $2::jsonb)`, [U.admin, JSON.stringify({ ...plan, name: 'Monthly ads' })]);
+  check('F-10 a different plan name for the same client is allowed', !r3.error, JSON.stringify(r3));
+  r3 = await fq(`SELECT public.fin_plan_save($1, $2::jsonb) id`, [U.admin, JSON.stringify({ ...plan, is_active: false })]);
+  check('F-10 an inactive duplicate is allowed (history)', !r3.error, JSON.stringify(r3));
+  const g1 = await fq(`SELECT public.fin_retainer_generate($1, '2027-02-01') n`, [U.admin]);
+  const g2 = await fq(`SELECT public.fin_retainer_generate($1, '2027-02-01') n`, [U.admin]);
+  check('F-14 running the month twice creates the drafts once (2 plans, then 0)', g1.rows[0].n === 2 && g2.rows[0].n === 0, JSON.stringify([g1, g2]));
+  // reconcile: corrupt one invoice behind the guards, then read it
+  await db.query(`ALTER TABLE public.invoices DISABLE TRIGGER USER`);
+  await db.query(`ALTER TABLE public.invoices DROP CONSTRAINT invoices_money_nonneg_chk, DROP CONSTRAINT invoices_paid_within_net_chk, DROP CONSTRAINT invoices_balance_chk, DROP CONSTRAINT invoices_paid_status_chk`);
+  await db.query(`UPDATE public.invoices SET amount_paid = 77777, balance = 5, status='paid' WHERE id=$1`, [B.id]);   // fixture: corruption
+  r3 = await fq(`SELECT problem FROM public.fin_reconcile_invoices() WHERE invoice_id = $1`, [B.id]);
+  const probs = r3.rows.map((z) => z.problem).join(' | ');
+  check('reconcile reports a corrupted invoice (paid mismatch, balance mismatch, paid-with-balance, overpaid)', /amount_paid differs/.test(probs) && /balance differs/.test(probs) && /status is paid but a balance/.test(probs), probs);
+  const snap = async () => JSON.stringify((await db.query(`SELECT count(*)::int c, sum(amount_paid) s, sum(balance) b FROM public.invoices`)).rows[0]);
+  const before = await snap(); await db.query(`SELECT count(*) FROM public.fin_reconcile_invoices()`);
+  check('reconcile is read-only (no row changed)', before === await snap());
+  check('reconcile is STABLE (cannot write)', (await db.query(`SELECT provolatile v FROM pg_proc WHERE proname='fin_reconcile_invoices'`)).rows[0].v === 's');
+  r3 = await as('fin', `SELECT * FROM public.fin_reconcile_invoices()`);
+  check('reconcile is not callable by a signed-in user', denied(r3), JSON.stringify(r3));
+  r3 = await as('admin', `SELECT * FROM public.fin_reconcile_invoices()`);
+  check('... not even by the owner through the API (service_role only)', denied(r3), JSON.stringify(r3));
+  // put the suite back as it was: remove the corrupted fixture, restore the constraints
+  await db.query(`SET session_replication_role = replica`);
+  await db.query(`DELETE FROM public.invoice_payments WHERE invoice_id = $1`, [B.id]);
+  await db.query(`DELETE FROM public.invoice_items WHERE invoice_id = $1`, [B.id]);
+  await db.query(`DELETE FROM public.invoices WHERE id = $1`, [B.id]);
+  await db.query(`SET session_replication_role = origin`);
+  await db.query(`ALTER TABLE public.invoices ENABLE TRIGGER USER`);
+  await db.exec(fs.readFileSync(M + 'migrations/028_finance_integrity.sql', 'utf8'));   // re-adds the dropped CHECKs
+  check('re-running 028 restores the dropped CHECKs', (await fq(`SELECT count(*)::int c FROM pg_constraint WHERE conrelid='public.invoices'::regclass AND conname LIKE 'invoices\\_%\\_chk'`)).rows[0].c === 6);
+}
 
 // ---- the optional demo seed runs cleanly on top of real data
 await db.query(`INSERT INTO public.clients(id,name,company_name) VALUES ('cccccccc-0000-0000-0000-000000000002','Sama','Sama Studio')`);

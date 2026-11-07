@@ -9,9 +9,10 @@
 //   invoice.save      finance tier              { id?, client_id, kind, items[], ... }   (drafts only)
 //   invoice.issue     finance tier              { id }          -> sequential number
 //   invoice.void      owner / finance manager   { id, reason }
-//   payment.add       finance tier              { invoiceId, amount, paidOn, method, reference?, notes? }
+//   payment.add       finance tier              { invoiceId, requestId (UUID), amount, paidOn, method, reference?, notes? }
 //   payment.reverse   owner / finance manager   { paymentId, reason }
 //   retainer.run      finance tier              { month: "YYYY-MM-01" }   (creates the month's draft retainer invoices)
+//   reconcile         finance tier              {}              -> invoices whose stored figures disagree with their lines / payments (read-only)
 //
 // Finance access = executives only: super_admin, owner, ceo. (finance_manager and accountant have none.)
 
@@ -50,6 +51,7 @@ serveJson(async (req) => {
     case "payment.add":
       return json(req, { id: await rpc(admin, "fin_payment_add", {
         p_actor: caller.id, p_invoice: v.uuid(b.invoiceId, "invoiceId"), p_amount: money(b.amount, "amount"),
+        p_request: v.uuid(b.requestId, "requestId"),   // idempotency key: a repeated request returns the same payment
         p_paid_on: v.isoDate(b.paidOn, "paidOn"),
         p_method: v.oneOf(b.method ?? "bank_transfer", ["cash", "bank_transfer", "cheque", "card", "wallet", "other"] as const, "method"),
         p_reference: v.optText(b.reference, "reference", 120), p_notes: v.optText(b.notes, "notes", 500),
@@ -62,6 +64,7 @@ serveJson(async (req) => {
       const month = v.isoDate(b.month, "month");
       return json(req, { created: await rpc(admin, "fin_retainer_generate", { p_actor: caller.id, p_month: month }) });
     }
+    case "reconcile": return json(req, { problems: await rpc(admin, "fin_reconcile_invoices", {}) });   // read-only report
     default: throw new HttpError(400, "Unknown action");
   }
 });
@@ -119,6 +122,8 @@ async function rpc(admin: SupabaseClient, fn: string, args: Record<string, unkno
 
 function friendly(m: string): string {
   if (/invalid input syntax for type (numeric|integer|date|uuid)/.test(m)) return "One of the numbers or dates is not valid";
+  if (/uq_retainer_plan_active/.test(m)) return "This client already has an active plan with that name and department";
+  if (/uq_invoice_payment_request/.test(m)) return "This payment request was already used";
   if (/uq_invoice_retainer_month/.test(m)) return "This plan was already billed for that month";
   if (/violates check constraint/.test(m)) return "One of the values is out of range";
   if (/violates foreign key/.test(m)) return "A linked record was not found";

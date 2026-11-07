@@ -445,7 +445,7 @@ section('A10 static inventory of role writers');
 // ---------------------------------------------------------------- Finance (executive only)
 const finance = await load('finance/index.ts');
 const retainer = await load('retainer-billing/index.ts');
-const FIN_ACTIONS = ['settings.update', 'billing.save', 'plan.save', 'invoice.save', 'invoice.issue', 'invoice.void', 'payment.add', 'payment.reverse', 'retainer.run'];
+const FIN_ACTIONS = ['settings.update', 'billing.save', 'plan.save', 'invoice.save', 'invoice.issue', 'invoice.void', 'payment.add', 'payment.reverse', 'retainer.run', 'reconcile'];
 const FIN_DENIED = ['general_manager', 'finance_manager', 'accountant', 'hr_manager', 'department_manager', 'team_leader', 'project_manager', 'employee', 'client', 'suspended_owner'];
 
 section('A11 Finance Edge Function: every action, every role');
@@ -955,7 +955,7 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025', '026', '027'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026', '027', '028'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }
@@ -1135,6 +1135,8 @@ ok(clientsBeforeFm === 2, 'precondition: before 022 a finance role sees every cl
 
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/022_finance_executive_only.sql'), 'utf8'));
 await db.exec(fs.readFileSync(path.join(SB, 'migrations/022_finance_executive_only.sql'), 'utf8')); // idempotent
+await db.exec(fs.readFileSync(path.join(SB, 'migrations/028_finance_integrity.sql'), 'utf8'));
+await db.exec(fs.readFileSync(path.join(SB, 'migrations/028_finance_integrity.sql'), 'utf8')); // idempotent
 
 const EXEC_USERS = [['super_admin', 'sa2'], ['owner', 'own'], ['owner', 'own2'], ['ceo', 'ceo'], ['ceo', 'ceo2']];
 const DENIED_USERS = [['general_manager', 'gm'], ['hr_manager', 'hr'], ['finance_manager (Finance dept)', 'fm'], ['accountant (Finance dept)', 'acc'], ['department_manager', 'dm'], ['employee', 'emp'], ['client', 'cli']];
