@@ -442,6 +442,7 @@ async function employeeUpdate(req: Request, admin: SupabaseClient, caller: Calle
   let deptIds: string[] | null = null;
   if (Array.isArray(b.departmentIds)) {
     deptIds = [...new Set(b.departmentIds.map((x) => v.uuid(x, "departmentIds")))];
+    if (deptIds.length > 50) throw new HttpError(400, "Too many departments (maximum 50)");
     if (deptIds.length) {
       const { data: found } = await admin.from("departments").select("id").in("id", deptIds);
       if ((found?.length ?? 0) !== deptIds.length) throw new HttpError(400, "Unknown department");

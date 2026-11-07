@@ -303,7 +303,7 @@ async function notifyMembers(admin: SupabaseClient, caller: Caller, conversation
 async function reactionToggle(caller: Caller, admin: SupabaseClient, b: Record<string, unknown>) {
   const messageId = v.uuid(b.messageId, "messageId");
   const emoji = v.text(b.emoji, "emoji", 1, 16);
-  if (/[<>&"'\s]/.test(emoji)) throw new HttpError(400, "Invalid emoji");
+  if (/[\x00-\x1F\x7F<>&"'`\\]|\s/.test(emoji)) throw new HttpError(400, "Invalid emoji");
   // RLS decides whether the caller may see (and therefore react to) this message
   const { data: m } = await userClient(caller.token).from("messages").select("id, conversation_id").eq("id", messageId).maybeSingle();
   if (!m) throw new HttpError(404, "Message not found");

@@ -50,6 +50,7 @@ serveJson(async (req) => {
   const deptIds: string[] = Array.isArray(b.departmentIds)
     ? [...new Set(b.departmentIds.map((x) => v.uuid(x, "departmentIds")))]
     : (v.optUuid(b.departmentId, "departmentId") ? [v.optUuid(b.departmentId, "departmentId") as string] : []);
+  if (deptIds.length > 50) throw new HttpError(400, "Too many departments (maximum 50)");
   const departmentId = deptIds[0] ?? null;
   const jobTitle = v.optText(b.jobTitle, "jobTitle", 100) ?? "Studio Member";
 

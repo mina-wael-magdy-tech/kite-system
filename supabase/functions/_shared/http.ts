@@ -41,18 +41,88 @@ export function json(req: Request, body: unknown, status = 200): Response {
   });
 }
 
-export async function readJson(req: Request, maxBytes = 32_768): Promise<Record<string, unknown>> {
-  const text = await req.text();
-  if (text.length > maxBytes) throw new HttpError(413, "Request body too large");
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("not an object");
+const MAX_JSON_DEPTH = 20;
+const MAX_JSON_NODES = 5_000;
+
+export function validateJsonStructure(val: unknown, depth = 1, counter = { count: 0 }): void {
+  if (depth > MAX_JSON_DEPTH) {
+    throw new HttpError(400, "JSON nesting depth exceeded (max 20)");
+  }
+  counter.count++;
+  if (counter.count > MAX_JSON_NODES) {
+    throw new HttpError(400, "JSON node count exceeded (max 5000)");
+  }
+  if (val !== null && typeof val === "object") {
+    if (Array.isArray(val)) {
+      for (let i = 0; i < val.length; i++) {
+        validateJsonStructure(val[i], depth + 1, counter);
+      }
+    } else {
+      const keys = Object.keys(val as Record<string, unknown>);
+      for (let i = 0; i < keys.length; i++) {
+        validateJsonStructure((val as Record<string, unknown>)[keys[i]], depth + 1, counter);
+      }
     }
-    return parsed as Record<string, unknown>;
+  }
+}
+
+export async function readJson(req: Request, maxBytes = 32_768): Promise<Record<string, unknown>> {
+  const clHeader = req.headers.get("content-length");
+  if (clHeader !== null) {
+    const cl = parseInt(clHeader, 10);
+    if (!Number.isNaN(cl) && cl > maxBytes) {
+      throw new HttpError(413, "Request body too large");
+    }
+  }
+
+  let text = "";
+  if (req.body) {
+    const reader = req.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          try { await reader.cancel(); } catch { /* ignore cancel errors */ }
+          throw new HttpError(413, "Request body too large");
+        }
+        chunks.push(value);
+      }
+    }
+    const merged = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(merged);
+    } catch {
+      throw new HttpError(400, "Body must be valid UTF-8 JSON");
+    }
+  } else {
+    text = await req.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      throw new HttpError(413, "Request body too large");
+    }
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
   } catch {
     throw new HttpError(400, "Body must be a JSON object");
   }
+
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, "Body must be a JSON object");
+  }
+
+  validateJsonStructure(parsed);
+  return parsed as Record<string, unknown>;
 }
 
 // Wraps a handler: CORS preflight, POST-only, and error mapping.

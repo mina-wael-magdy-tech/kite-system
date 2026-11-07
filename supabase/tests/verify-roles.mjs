@@ -54,15 +54,17 @@ async function load(rel) {
 const invite = await load('invite-employee/index.ts');
 const workflow = await load('workflow/index.ts');
 const accept = await load('accept-invitation/index.ts');
+const chat = await load('chat/index.ts');
 const authMod = (await load('_shared/auth.ts')).mod;
-ok(!!invite.handler && !!workflow.handler && !!accept.handler, 'handlers captured from the real function code');
+const httpMod = (await load('_shared/http.ts')).mod;
+ok(!!invite.handler && !!workflow.handler && !!accept.handler && !!chat.handler, 'handlers captured from the real function code');
 
 // ---------------------------------------------------------------- in-memory fake of the service-role client
 const ALL_ROLES = ['super_admin', 'owner', 'ceo', 'general_manager', 'finance_manager', 'accountant', 'hr_manager',
   'department_manager', 'team_leader', 'project_manager', 'employee', 'client'];
 
 function makeDb() {
-  const T = { profiles: [], roles: [], user_roles: [], departments: [], user_departments: [], invitations: [], audit_logs: [], notifications: [], push_subscriptions: [], expenses: [] };
+  const T = { profiles: [], roles: [], user_roles: [], departments: [], user_departments: [], invitations: [], audit_logs: [], notifications: [], push_subscriptions: [], expenses: [], messages: [], conversations: [], message_reactions: [] };
   const users = [], log = [], flags = { failInsert: null, failRpc: false, rpcMissing: false, profileUpdateError: null, rpcError: null, onDeleteUser: null };
   let seq = 0;
   const uid = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
@@ -529,6 +531,278 @@ section('A15 race losers are reported as 409 (database guard from migration 023)
   ok(r.status === 409 && /linked records/.test(r.body?.error ?? ''), 'an ordinary delete failure keeps the original linked-records message', JSON.stringify(r));
 }
 
+section('A16 role consistency guard: no undeclared role authorization lists in Edge Functions (P2-01)');
+{
+  const functionsDir = process.env.ARC01_FUNCTIONS_DIR || path.join(SB, 'functions');
+  const KNOWN_ROLES = new Set([
+    'super_admin', 'owner', 'ceo', 'general_manager', 'finance_manager',
+    'accountant', 'hr_manager', 'department_manager', 'team_leader',
+    'project_manager', 'employee', 'client'
+  ]);
+  const roleRegex = new RegExp(`['"](${[...KNOWN_ROLES].join('|')})['"]`, 'g');
+
+  const violations = [];
+  const walk = (d) => {
+    for (const item of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, item.name);
+      if (item.isDirectory()) {
+        walk(p);
+      } else if (item.isFile() && item.name.endsWith('.ts')) {
+        const rel = path.relative(functionsDir, p).replace(/\\/g, '/');
+        if (rel === '_shared/auth.ts') continue; // canonical role definitions live here
+
+        const content = fs.readFileSync(p, 'utf8');
+        // Match array literals [...]
+        const arrayMatches = content.matchAll(/\[([^\]\n]{2,300})\]/g);
+        for (const m of arrayMatches) {
+          const inner = m[1];
+          const matchedRoles = [...inner.matchAll(roleRegex)].map((r) => r[1]);
+          if (matchedRoles.length >= 2) {
+            // Approved documented role lists outside _shared/auth.ts:
+            // broadcast SENDER_ROLES (must equal EXECUTIVE_ROLES)
+            if (rel === 'broadcast/index.ts' && inner.includes('owner') && inner.includes('ceo') && inner.includes('super_admin')) {
+              continue;
+            }
+            violations.push(`${rel}: [${matchedRoles.join(', ')}] in "${inner.trim()}"`);
+          }
+        }
+      }
+    }
+  };
+  walk(functionsDir);
+  ok(violations.length === 0, 'no undeclared hard-coded role authorization lists in Edge Functions', violations.join('; '));
+
+  // Verify that an unauthorized new role list would be caught:
+  const sample = 'const ALLOWED = ["super_admin", "finance_manager"];';
+  const sampleRoles = [...sample.matchAll(roleRegex)].map((r) => r[1]);
+  ok(sampleRoles.length === 2 && sampleRoles.includes('super_admin') && sampleRoles.includes('finance_manager'), 'guard regex detects new hardcoded role arrays');
+
+  // Verify legitimate non-authorization role usages are not flagged as role lists:
+  const benignSingle = 'caller.has("hr_manager")';
+  ok([...benignSingle.matchAll(roleRegex)].length === 1, 'single role checks are not flagged as role lists');
+  const benignQuery = '.eq("name", "super_admin")';
+  ok([...benignQuery.matchAll(roleRegex)].length === 1, 'single query filter is not flagged as role list');
+}
+
+section('A17 request body hardening & payload streaming limits (P2-10, P2-11)');
+{
+  const { readJson } = httpMod;
+
+  // 1. Content-Length header check (immediate 413)
+  {
+    const req = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-length': '2000' },
+      body: JSON.stringify({ a: 1 })
+    });
+    let err = null;
+    try { await readJson(req, 1000); } catch (e) { err = e; }
+    ok(err?.status === 413, 'Content-Length > maxBytes returns HTTP 413 immediately', String(err?.status));
+  }
+
+  // 2. Hard streaming byte limit before buffering
+  {
+    const enc = new TextEncoder();
+    const chunk1 = enc.encode('{"part1":"' + 'x'.repeat(400) + '",');
+    const chunk2 = enc.encode('"part2":"' + 'y'.repeat(400) + '"}');
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(chunk1);
+        controller.enqueue(chunk2);
+        controller.close();
+      }
+    });
+    const req = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: stream,
+      duplex: 'half'
+    });
+    let err = null;
+    try { await readJson(req, 500); } catch (e) { err = e; }
+    ok(err?.status === 413, 'streaming byte limit exceeded returns HTTP 413', String(err?.status));
+  }
+
+  // 3. Early stream termination on infinite/oversized stream
+  {
+    let canceled = false;
+    let chunksSent = 0;
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      pull(controller) {
+        chunksSent++;
+        controller.enqueue(enc.encode('x'.repeat(1024)));
+      },
+      cancel() {
+        canceled = true;
+      }
+    });
+    const req = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: stream,
+      duplex: 'half'
+    });
+    let err = null;
+    try { await readJson(req, 2048); } catch (e) { err = e; }
+    ok(err?.status === 413 && canceled && chunksSent <= 4, 'oversized stream is cancelled early and returns 413 without draining', `chunks=${chunksSent}, canceled=${canceled}`);
+  }
+
+  // 4. Valid JSON within limit
+  {
+    const req = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'hello', count: 42 })
+    });
+    const parsed = await readJson(req, 1024);
+    ok(parsed.message === 'hello' && parsed.count === 42, 'valid JSON within limit parsed successfully');
+  }
+
+  // 5. JSON nesting depth bound (max 20)
+  {
+    let deep = { val: 1 };
+    for (let i = 0; i < 21; i++) deep = { nested: deep };
+    const req = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(deep)
+    });
+    let err = null;
+    try { await readJson(req, 32768); } catch (e) { err = e; }
+    ok(err?.status === 400 && /depth/.test(err.message), 'nesting depth > 20 rejected with 400', err?.message);
+
+    // exactly 20 levels deep: accepted
+    let exact20 = { val: 1 };
+    for (let i = 0; i < 18; i++) exact20 = { nested: exact20 };
+    const req20 = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(exact20)
+    });
+    let err20 = null;
+    try { await readJson(req20, 32768); } catch (e) { err20 = e; }
+    ok(err20 === null, 'nesting depth <= 20 accepted');
+  }
+
+  // 6. JSON node count bound (max 5000)
+  {
+    const manyNodes = { list: Array.from({ length: 5001 }, (_, i) => i) };
+    const req = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(manyNodes)
+    });
+    let err = null;
+    try { await readJson(req, 200000); } catch (e) { err = e; }
+    ok(err?.status === 400 && /node count/.test(err.message), 'node count > 5000 rejected with 400', err?.message);
+
+    // exactly 5000 nodes total: accepted
+    const okNodes = { list: Array.from({ length: 4998 }, (_, i) => i) };
+    const reqOk = new Request('http://t/', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(okNodes)
+    });
+    let errOk = null;
+    try { await readJson(reqOk, 200000); } catch (e) { errOk = e; }
+    ok(errOk === null, 'node count <= 5000 accepted');
+  }
+
+  // 7. Endpoint-specific limits preserved: Finance 200 KB
+  {
+    const payload150k = { items: Array.from({ length: 90 }, (_, i) => ({ desc: 'Line item description text padding with extra content '.repeat(25) + i, qty: 1, price: 100 })) };
+    const bodyStr = JSON.stringify(payload150k);
+    ok(bodyStr.length > 32768 && bodyStr.length < 200000, 'test payload is between 32 KB and 200 KB');
+
+    // Rejected with standard 32 KB limit:
+    const reqDefault = new Request('http://t/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: bodyStr });
+    let errDef = null;
+    try { await readJson(reqDefault, 32768); } catch (e) { errDef = e; }
+    ok(errDef?.status === 413, 'payload > 32 KB rejected by default limit');
+
+    // Accepted with finance 200 KB limit:
+    const reqFinance = new Request('http://t/', { method: 'POST', headers: { 'content-type': 'application/json' }, body: bodyStr });
+    const parsedFin = await readJson(reqFinance, 200000);
+    ok(parsedFin.items.length === 90, 'payload accepted under finance 200 KB limit');
+  }
+
+  // 8. Department IDs array cap at 50 in invite-employee and workflow
+  {
+    const db = world();
+    const depts51 = Array.from({ length: 51 }, () => db.uid());
+    const rInvite51 = await call(invite, db.P.caller_owner, {
+      email: 'toomany@x.test', fullName: 'Too Many', roleId: db.roleId('employee'), departmentIds: depts51
+    });
+    ok(rInvite51.status === 400 && /maximum 50/.test(rInvite51.body?.error ?? ''), 'invite-employee rejects > 50 departmentIds with 400', JSON.stringify(rInvite51));
+
+    const depts50 = Array.from({ length: 50 }, () => db.uid());
+    depts50.forEach((id) => db.T.departments.push({ id, name: 'D-' + id }));
+    const rInvite50 = await call(invite, db.P.caller_owner, {
+      email: 'okdepts@x.test', fullName: 'OK Depts', roleId: db.roleId('employee'), departmentIds: depts50
+    });
+    ok(rInvite50.status === 200, 'invite-employee accepts <= 50 departmentIds', JSON.stringify(rInvite50));
+
+    const rWorkflow51 = await call(workflow, db.P.caller_owner, {
+      action: 'employee.update', userId: db.P.victim, departmentIds: depts51
+    });
+    ok(rWorkflow51.status === 400 && /maximum 50/.test(rWorkflow51.body?.error ?? ''), 'workflow employee.update rejects > 50 departmentIds with 400', JSON.stringify(rWorkflow51));
+
+    const rWorkflow50 = await call(workflow, db.P.caller_owner, {
+      action: 'employee.update', userId: db.P.victim, departmentIds: depts50
+    });
+    ok(rWorkflow50.status === 200, 'workflow employee.update accepts <= 50 departmentIds', JSON.stringify(rWorkflow50));
+  }
+}
+
+section('A18 chat reaction XSS: reject markup server-side & escape client-side (P2-13)');
+{
+  const db = world();
+  const convId = db.uid();
+  const msgId = db.uid();
+  db.T.conversations.push({ id: convId, type: 'channel', is_archived: false });
+  db.T.messages.push({ id: msgId, conversation_id: convId, content: 'Test message', sender_id: db.P.caller_owner });
+
+  // 1. Server-side rejection of malicious characters
+  const badEmojis = [
+    '"><',
+    '<script>',
+    '\' onfocus=\'',
+    '" onfocus="',
+    '`',
+    '\\',
+    '&',
+    '<',
+    '>',
+    'hi world',
+    '\x00',
+    '\x1B'
+  ];
+  for (const bad of badEmojis) {
+    const r = await call(chat, db.P.caller_owner, { action: 'reaction.toggle', messageId: msgId, emoji: bad });
+    ok(r.status === 400 && /Invalid emoji/.test(r.body?.error ?? ''), `reaction.toggle rejects malicious emoji "${bad}" with 400`, JSON.stringify(r));
+  }
+
+  // 2. Server-side acceptance of legitimate emojis
+  const goodEmojis = ['👍', '❤️', '🎉', '🔥', '🚀', '👍🏽', '👨‍👩‍👧'];
+  for (const good of goodEmojis) {
+    const r = await call(chat, db.P.caller_owner, { action: 'reaction.toggle', messageId: msgId, emoji: good });
+    ok(r.status === 200, `reaction.toggle accepts valid emoji "${good}"`, JSON.stringify(r));
+  }
+
+  // 3. Client-side escaping of emoji attributes and element text
+  const helpers = await import(pathToFileURL(path.join(SB, '../js/utils/helpers.js')).href);
+  const escapeHTML = helpers.escapeHTML;
+
+  const maliciousReaction = { emoji: '"><img src=x onerror=alert(1)>', count: 1, names: ['Attacker'], mine: false };
+  // Exactly matching chat.js:817 template:
+  const rendered = `<button type="button" class="slk-react ${maliciousReaction.mine ? 'mine' : ''}" data-react="${msgId}" data-emoji="${escapeHTML(maliciousReaction.emoji)}" title="${escapeHTML(maliciousReaction.names.join(', '))}">${escapeHTML(maliciousReaction.emoji)} ${maliciousReaction.count}</button>`;
+
+  ok(!rendered.includes('"><img'), 'rendered reaction does not contain raw attribute breakout or tags');
+  ok(rendered.includes('data-emoji="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"'), 'data-emoji attribute is properly HTML entity-encoded');
+  ok(rendered.includes('&quot;&gt;&lt;img src=x onerror=alert(1)&gt; 1</button>'), 'emoji text is properly HTML entity-encoded');
+}
+
 
 // =====================================================================================================
 // Part B: real SQL (all migrations 001-021)
@@ -551,11 +825,11 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }
-ok(files.includes('020_atomic_role_replace.sql') && files.includes('021_auth_is_owner_privileges.sql'), 'migrations 020 and 021 exist as separate files');
+ok(files.includes('020_atomic_role_replace.sql') && files.includes('021_auth_is_owner_privileges.sql') && files.includes('026_client_asset_scope_and_path_binding.sql'), 'migrations 020, 021 and 026 exist as separate files');
 
 const U = {}; const nid = (n) => `00000000-0000-0000-0000-0000000001${String(n).padStart(2, '0')}`;
 await db.exec(`INSERT INTO public.roles (name, display_name, description, is_system, priority) VALUES ('ceo','CEO','test ceo role',false,2) ON CONFLICT (name) DO NOTHING;`);
@@ -928,6 +1202,94 @@ section('B6 last active super_admin guard, database level (migration 023)');
   ok((await attempt(`UPDATE public.profiles SET employment_status='suspended' WHERE id=$1`, [U.g2])) === 'ok' && (await active()) === 1, 'with another active super_admin the first can go');
   ok((await attempt(`DELETE FROM public.profiles WHERE id=$1`, [U.g4])).includes('last_super_admin'), 'and the new last one is protected');
   ok((await as('authenticated', 'own', `SELECT public.guard_last_super_admin()`)).error !== undefined, 'the guard function is not callable through the API');
+}
+
+section('B7 client asset ownership and department scoping (migration 026)');
+{
+  await db.exec(`UPDATE public.profiles SET employment_status='active' WHERE id IN ('${U.sa2}','${U.own}','${U.ceo}')`);
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/026_client_asset_scope_and_path_binding.sql'), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/026_client_asset_scope_and_path_binding.sql'), 'utf8')); // idempotent
+
+  // 1. Storage path binding trigger tests (P2-05)
+  // 1a. Insert with mismatched storage path prefix is rejected
+  const badPrefix = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('bad','bad',10,'PDF','${U.sa1}/bad.pdf','General','studio','${U.emp}')`);
+  ok(badPrefix.error && badPrefix.error.includes('Asset storage path must start with the uploader id'), 'insert with mismatched storage_path prefix is rejected', badPrefix.error);
+
+  // 1b. Insert without slash is rejected
+  const noSlash = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('bad','bad',10,'PDF','noslash.pdf','General','studio','${U.emp}')`);
+  ok(noSlash.error && noSlash.error.includes('Asset storage path must start with the uploader id'), 'insert with no slash in storage_path is rejected', noSlash.error);
+
+  // 1c. Insert with matching uploader folder succeeds
+  const goodIns = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('good','good',10,'PDF','${U.emp}/good.pdf','General','studio','${U.emp}') RETURNING id`);
+  ok(goodIns.rows?.length === 1, 'insert with matching uploader prefix succeeds', JSON.stringify(goodIns));
+  const goodId = goodIns.rows?.[0]?.id;
+
+  // 1d. Storage path is immutable on update
+  const pathUpdate = await as('authenticated', 'emp', `UPDATE public.assets SET storage_path='${U.emp}/changed.pdf' WHERE id='${goodId}'`);
+  ok(pathUpdate.error && pathUpdate.error.includes('Asset storage path cannot be changed'), 'updating storage_path is rejected by the trigger', pathUpdate.error);
+
+  // 1e. Updating other fields succeeds leaving storage_path intact
+  const nameUpdate = await as('authenticated', 'emp', `UPDATE public.assets SET name='renamed' WHERE id='${goodId}'`);
+  ok(nameUpdate.error === undefined, 'updating other fields succeeds');
+  const checkRow = await as('authenticated', 'emp', `SELECT name, storage_path FROM public.assets WHERE id='${goodId}'`);
+  ok(checkRow.rows?.[0]?.name === 'renamed' && checkRow.rows?.[0]?.storage_path === `${U.emp}/good.pdf`, 'name changed while storage_path remained intact');
+
+  // 2. Client-scoped assets tests (P2-04)
+  // Setup: cliA is assigned to finDept (where fm is). cliB is assigned to otherDept (where emp is).
+  // Insert asset for Client A uploaded by fm (visibility = 'studio'):
+  const aClientA = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('client-a-deck','a.pdf',100,'PDF','${U.fm}/client-a-deck.pdf','Clients','studio','${cliA}','${U.fm}') RETURNING id`)).rows[0].id;
+
+  // Insert asset for Client B uploaded by emp (visibility = 'studio'):
+  const aClientB = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('client-b-deck','b.pdf',100,'PDF','${U.emp}/client-b-deck.pdf','Clients','studio','${cliB}','${U.emp}') RETURNING id`)).rows[0].id;
+
+  // 2a. fm (in finDept) can see Client A's asset
+  const fmSeeA = await as('authenticated', 'fm', `SELECT id FROM public.assets WHERE id='${aClientA}'`);
+  ok(fmSeeA.rows?.length === 1, 'staff in client department (fm) sees Client A asset');
+
+  // 2b. emp (in otherDept, outside Client A) CANNOT see Client A's asset (even though visibility = 'studio')
+  const empSeeA = await as('authenticated', 'emp', `SELECT id FROM public.assets WHERE id='${aClientA}'`);
+  ok(empSeeA.rows?.length === 0, 'cross-department isolation: staff outside client department (emp) cannot see Client A asset');
+
+  // 2c. Direct object query by id by emp returns 0 rows
+  const empDirect = await as('authenticated', 'emp', `SELECT * FROM public.assets WHERE id='${aClientA}'`);
+  ok(empDirect.rows?.length === 0, 'direct SELECT by id of client asset outside user departments returns nothing');
+
+  // 2d. emp (in otherDept) CAN see Client B's asset (since otherDept is assigned to Client B)
+  const empSeeB = await as('authenticated', 'emp', `SELECT id FROM public.assets WHERE id='${aClientB}'`);
+  ok(empSeeB.rows?.length === 1, 'staff in client department (emp) sees Client B asset');
+
+  // 2e. fm (in finDept, outside Client B) CANNOT see Client B's asset
+  const fmSeeB = await as('authenticated', 'fm', `SELECT id FROM public.assets WHERE id='${aClientB}'`);
+  ok(fmSeeB.rows?.length === 0, 'cross-department isolation: fm cannot see Client B asset');
+
+  // 2f. Executives (own, sa2, ceo) can see ALL client assets
+  for (const exec of ['own', 'sa2', 'ceo']) {
+    const seeA = await as('authenticated', exec, `SELECT id FROM public.assets WHERE id='${aClientA}'`);
+    const seeB = await as('authenticated', exec, `SELECT id FROM public.assets WHERE id='${aClientB}'`);
+    ok(seeA.rows?.length === 1 && seeB.rows?.length === 1, `executive ${exec} sees all client assets regardless of department`);
+  }
+
+  // 2g. Uploader access preserved: if emp uploaded an asset for cliA, emp can still see it
+  const aClientAByEmp = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('client-a-by-emp','a.pdf',100,'PDF','${U.emp}/client-a-by-emp.pdf','Clients','studio','${cliA}','${U.emp}') RETURNING id`)).rows[0].id;
+  const empSeeOwnUpload = await as('authenticated', 'emp', `SELECT id FROM public.assets WHERE id='${aClientAByEmp}'`);
+  ok(empSeeOwnUpload.rows?.length === 1, 'uploader access preserved: creator sees own upload even outside client department');
+
+  // 2h. Non-client studio assets remain visible to all staff
+  const aStudioPlain = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('studio-guide','g.pdf',10,'PDF','${U.own}/studio-guide.pdf','General','studio','${U.own}') RETURNING id`)).rows[0].id;
+  for (const u of ['emp', 'fm', 'gm', 'own']) {
+    const seeStudio = await as('authenticated', u, `SELECT id FROM public.assets WHERE id='${aStudioPlain}'`);
+    ok(seeStudio.rows?.length === 1, `non-client studio asset is visible to ${u}`);
+  }
+
+  // 2i. Confidential finance files remain executive-only
+  const aConfidentialClient = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('client-a-contract','c.pdf',10,'PDF','${U.own}/client-a-contract.pdf','Contracts','studio','${cliA}','${U.own}') RETURNING id`)).rows[0].id;
+  ok((await as('authenticated', 'fm', `SELECT id FROM public.assets WHERE id='${aConfidentialClient}'`)).rows?.length === 0, 'confidential finance client asset is invisible to fm');
+  ok((await as('authenticated', 'emp', `SELECT id FROM public.assets WHERE id='${aConfidentialClient}'`)).rows?.length === 0, 'confidential finance client asset is invisible to emp');
+  ok((await as('authenticated', 'own', `SELECT id FROM public.assets WHERE id='${aConfidentialClient}'`)).rows?.length === 1, 'confidential finance client asset is visible to executive');
+
+  // 2j. Unauthorized insertion for client that caller cannot see is rejected
+  const unauthClientInsert = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('sneak','s.pdf',10,'PDF','${U.emp}/sneak.pdf','Clients','studio','${cliA}','${U.emp}')`);
+  ok(unauthClientInsert.error !== undefined, 'inserting an asset attached to a client the caller cannot see is rejected by RLS');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });
