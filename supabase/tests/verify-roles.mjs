@@ -531,57 +531,109 @@ section('A15 race losers are reported as 409 (database guard from migration 023)
   ok(r.status === 409 && /linked records/.test(r.body?.error ?? ''), 'an ordinary delete failure keeps the original linked-records message', JSON.stringify(r));
 }
 
-section('A16 role consistency guard: no undeclared role authorization lists in Edge Functions (P2-01)');
-{
-  const functionsDir = process.env.ARC01_FUNCTIONS_DIR || path.join(SB, 'functions');
-  const KNOWN_ROLES = new Set([
-    'super_admin', 'owner', 'ceo', 'general_manager', 'finance_manager',
-    'accountant', 'hr_manager', 'department_manager', 'team_leader',
-    'project_manager', 'employee', 'client'
-  ]);
-  const roleRegex = new RegExp(`['"](${[...KNOWN_ROLES].join('|')})['"]`, 'g');
-
+// The scanner is a function so that the SAME code runs on the real Edge Functions and on planted fixtures.
+const ROLE_NAMES = ['super_admin', 'owner', 'ceo', 'general_manager', 'finance_manager', 'accountant', 'hr_manager', 'department_manager', 'team_leader', 'project_manager', 'employee', 'client'];
+const ROLE_ALT = ROLE_NAMES.join('|');
+const ROLE_LIT = new RegExp('["\'`](' + ROLE_ALT + ')["\'`]', 'g');
+const ROLE_KEY = new RegExp('(?:^|[,{\\s])["\']?(' + ROLE_ALT + ')["\']?\\s*:\\s*([^,\\n}]+)', 'g');
+const EXEC_NAMES = ['super_admin', 'owner', 'ceo'];
+/** Finds hard-coded role AUTHORIZATION structures in TypeScript source:
+ *   array   : [...] holding two or more distinct role names (single- or multi-line)
+ *   chain   : one statement joining two or more distinct role names with ||
+ *   map     : { role: <non-string value>, role: ... } with two or more role keys (display-label maps whose values are all
+ *             plain strings are data, not authorization, and are ignored)
+ * Comments are removed first. A single role name (caller.has("hr_manager"), .eq("name","super_admin")) is never flagged. */
+function scanRoleAuthorization(source) {
+  const src = source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:\\"'`])\/\/[^\n]*/g, '$1 ');
+  const distinct = (t) => [...new Set([...t.matchAll(ROLE_LIT)].map((m) => m[1]))];
+  const found = [];
+  for (const m of src.matchAll(/\[([^\[\]]*)\]/g)) { const r = distinct(m[1]); if (r.length >= 2) found.push({ kind: 'array', roles: r }); }
+  for (const stmt of src.split(/[;{}]/)) { if (stmt.includes('||')) { const r = distinct(stmt); if (r.length >= 2) found.push({ kind: 'chain', roles: r }); } }
+  for (const m of src.matchAll(/\{([^{}]*)\}/g)) {
+    const keys = [...m[1].matchAll(ROLE_KEY)];
+    const names = new Set(keys.map((k) => k[1]));
+    const nonString = keys.some((k) => !/^\s*(["'`])[^"'`]*\1\s*$/.test(k[2]));
+    if (names.size >= 2 && nonString) found.push({ kind: 'map', roles: [...names] });
+  }
+  return found;
+}
+/** Scans every .ts file under a functions directory. `_shared/auth.ts` holds the canonical definitions and is skipped.
+ *  Documented exception: broadcast/index.ts may hold ONE array that is exactly the executive set. */
+function scanFunctionsDir(dir) {
   const violations = [];
   const walk = (d) => {
     for (const item of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, item.name);
-      if (item.isDirectory()) {
-        walk(p);
-      } else if (item.isFile() && item.name.endsWith('.ts')) {
-        const rel = path.relative(functionsDir, p).replace(/\\/g, '/');
-        if (rel === '_shared/auth.ts') continue; // canonical role definitions live here
-
-        const content = fs.readFileSync(p, 'utf8');
-        // Match array literals [...]
-        const arrayMatches = content.matchAll(/\[([^\]\n]{2,300})\]/g);
-        for (const m of arrayMatches) {
-          const inner = m[1];
-          const matchedRoles = [...inner.matchAll(roleRegex)].map((r) => r[1]);
-          if (matchedRoles.length >= 2) {
-            // Approved documented role lists outside _shared/auth.ts:
-            // broadcast SENDER_ROLES (must equal EXECUTIVE_ROLES)
-            if (rel === 'broadcast/index.ts' && inner.includes('owner') && inner.includes('ceo') && inner.includes('super_admin')) {
-              continue;
-            }
-            violations.push(`${rel}: [${matchedRoles.join(', ')}] in "${inner.trim()}"`);
-          }
-        }
+      if (item.isDirectory()) { walk(p); continue; }
+      if (!item.name.endsWith('.ts')) continue;
+      const rel = path.relative(dir, p).replace(/\\/g, '/');
+      if (rel === '_shared/auth.ts') continue;
+      for (const f of scanRoleAuthorization(fs.readFileSync(p, 'utf8'))) {
+        const isExecOnly = f.kind === 'array' && f.roles.length === EXEC_NAMES.length && EXEC_NAMES.every((r) => f.roles.includes(r));
+        if (rel === 'broadcast/index.ts' && isExecOnly) continue;
+        violations.push(`${rel}: ${f.kind} [${f.roles.join(', ')}]`);
       }
     }
   };
-  walk(functionsDir);
-  ok(violations.length === 0, 'no undeclared hard-coded role authorization lists in Edge Functions', violations.join('; '));
+  walk(dir);
+  return violations;
+}
 
-  // Verify that an unauthorized new role list would be caught:
-  const sample = 'const ALLOWED = ["super_admin", "finance_manager"];';
-  const sampleRoles = [...sample.matchAll(roleRegex)].map((r) => r[1]);
-  ok(sampleRoles.length === 2 && sampleRoles.includes('super_admin') && sampleRoles.includes('finance_manager'), 'guard regex detects new hardcoded role arrays');
+section('A16 role consistency guard: no undeclared role authorization lists in Edge Functions (P2-01)');
+{
+  const functionsDir = process.env.ARC01_FUNCTIONS_DIR || path.join(SB, 'functions');
+  const violations = scanFunctionsDir(functionsDir);
+  ok(violations.length === 0, 'no undeclared hard-coded role authorization structures in the real Edge Functions', violations.join('; '));
+  ok(fs.readdirSync(functionsDir, { withFileTypes: true }).filter((d) => d.isDirectory() && fs.existsSync(path.join(functionsDir, d.name, 'index.ts'))).length >= 12, 'the scan covers every function directory (12+ found)');
 
-  // Verify legitimate non-authorization role usages are not flagged as role lists:
-  const benignSingle = 'caller.has("hr_manager")';
-  ok([...benignSingle.matchAll(roleRegex)].length === 1, 'single role checks are not flagged as role lists');
-  const benignQuery = '.eq("name", "super_admin")';
-  ok([...benignQuery.matchAll(roleRegex)].length === 1, 'single query filter is not flagged as role list');
+  // the scanner itself, on planted fixtures (the same function that scans the real code)
+  const must = {
+    'single-line role array': ['const ALLOWED = ["super_admin", "finance_manager"];', 'array'],
+    'multi-line role array': ['const ALLOWED = [\n  "owner",\n  "ceo",\n  "general_manager",\n];', 'array'],
+    'multi-line array with single quotes': ["const R = [\n 'hr_manager',\n 'accountant'\n];", 'array'],
+    'authorization || chain': ['if (caller.has("finance_manager") || caller.has("accountant")) { run(); }', 'chain'],
+    'chain across lines': ['const ok = c.roles.includes("owner")\n  || c.roles.includes("ceo");', 'chain'],
+    'object map with boolean values': ['const CAN = { super_admin: true, owner: true, employee: false };', 'map'],
+    'object map with quoted keys and array values': ['const SCOPES = { "owner": ["a"], "hr_manager": ["b"] };', 'map'],
+    'tier map with numbers': ['const T = {\n  super_admin: 0,\n  owner: 1,\n};', 'map'],
+  };
+  for (const [name, [code, kind]] of Object.entries(must)) {
+    const r = scanRoleAuthorization(code);
+    ok(r.some((f) => f.kind === kind), `scanner detects: ${name}`, JSON.stringify(r));
+  }
+  const benign = {
+    'single role check': 'if (caller.has("hr_manager")) { go(); }',
+    'single role in a query': 'admin.from("roles").select("id").eq("name", "super_admin")',
+    'one role repeated with &&': 'if (a.includes("super_admin") && role.name !== "super_admin") { x(); }',
+    'display-label map (all values are plain strings)': 'const LABELS = { super_admin: "Super Admin", owner: "Owner / CEO", employee: "Employee" };',
+    'display labels, quoted keys': 'const L = { "hr_manager": "HR Manager", "finance_manager": "Finance Manager" };',
+    'business data row with one role field': 'const row = { role: "employee", name: "Sam", status: "active" };',
+    'sentence mentioning roles': 'throw new HttpError(403, "Only a super_admin or owner may do this");',
+    'role names in a comment': '// ["owner", "ceo"] are the executives\n/* owner || ceo */\nconst x = 1;',
+    'spread plus one literal': 'userIdsWithRoles(admin, [...ADMIN_ROLES, "hr_manager"]);',
+    'capitalised display array': 'const labels = ["Owner", "CEO", "Super Admin"];',
+    '|| default value': 'const r = body.role || "employee";',
+  };
+  for (const [name, code] of Object.entries(benign)) {
+    const r = scanRoleAuthorization(code);
+    ok(r.length === 0, `scanner ignores: ${name}`, JSON.stringify(r));
+  }
+
+  // the directory walker on a planted tree: catches new lists, honours the one documented exception, skips auth.ts
+  const plant = fs.mkdtempSync(path.join(os.tmpdir(), 'rolescan-'));
+  const put = (rel, text) => { const f = path.join(plant, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); };
+  put('_shared/auth.ts', 'export const ROLE_TIER = { super_admin: 0, owner: 0, ceo: 0 }; export const E = ["super_admin", "owner", "ceo"];');
+  put('broadcast/index.ts', 'const SENDER_ROLES = ["owner", "ceo", "super_admin"];');
+  put('good/index.ts', 'const labels = { owner: "Owner", ceo: "CEO" };');
+  ok(scanFunctionsDir(plant).length === 0, 'walker: auth.ts is skipped, the documented broadcast executive array is allowed, display labels are ignored');
+  put('broadcast/index.ts', 'const SENDER_ROLES = ["owner", "ceo", "super_admin", "general_manager"];');
+  ok(scanFunctionsDir(plant).some((v) => v.startsWith('broadcast/index.ts')), 'walker: the broadcast exception does NOT cover a list with an extra role');
+  put('broadcast/index.ts', 'const SENDER_ROLES = ["owner", "ceo", "super_admin"];');
+  put('newfn/index.ts', 'const MAY = [\n "finance_manager",\n "accountant",\n];');
+  ok(scanFunctionsDir(plant).some((v) => v.startsWith('newfn/index.ts')), 'walker: a new function with a multi-line role list is reported');
+  put('newfn/index.ts', 'if (c.has("hr_manager") || c.has("finance_manager")) { go(); }');
+  ok(scanFunctionsDir(plant).some((v) => v.includes('chain')), 'walker: a new authorization || chain is reported');
+  fs.rmSync(plant, { recursive: true, force: true });
 }
 
 section('A17 request body hardening & payload streaming limits (P2-10, P2-11)');
@@ -790,24 +842,102 @@ section('A18 chat reaction XSS: reject markup server-side & escape client-side (
     ok(r.status === 200, `reaction.toggle accepts valid emoji "${good}"`, JSON.stringify(r));
   }
 
-  // 3. Client-side escaping of emoji attributes and element text
-  const helpers = await import(pathToFileURL(path.join(SB, '../js/utils/helpers.js')).href);
-  const escapeHTML = helpers.escapeHTML;
+  // 3. Client-side rendering: the module chat.js really calls (js/utils/reactions.js), not a copied template
+  const reactions = await import(pathToFileURL(path.join(SB, '../js/utils/reactions.js')).href);
+  const unesc = (t) => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&');
+  const attr = (html, name) => { const m = html.match(new RegExp(name + '="([^"]*)"')); return m ? unesc(m[1]) : null; };
+  const evil = ['"><img src=x onerror=alert(1)>', "' onfocus='alert(1)", '<script>alert(1)</script>', '" style="x:y" a="', '&quot;<b>'];
+  for (const e of evil) {
+    const html = reactions.reactionButtonHTML(msgId + '"><i>', { emoji: e, count: 3, names: ['A"><b>x', "O'Neil"], mine: true });
+    const parts = html.match(/^(<button[^>]*>)([^<]*)(<\/button>)$/);   // an injected '>' or '<' would break this shape
+    const shape = parts && parts[1].replace(/="[^"]*"/g, '=""');
+    ok(!!parts && shape === '<button type="" class="" data-react="" data-emoji="" title="">', `rendered chip for ${JSON.stringify(e)} is exactly one button with the five expected attributes and plain text (nothing injected)`, html);
+    ok(attr(html, 'data-emoji') === e, `data-emoji round-trips exactly (entity-encoded, not interpreted): ${JSON.stringify(e)}`);
+    ok((html.match(/<button/g) || []).length === 1 && (html.match(/<\/button>/g) || []).length === 1, 'exactly one button element is produced');
+  }
+  const legit = ['👍', '❤️', '🎉', '👍🏽', '👨‍👩‍👧', '🏳️‍🌈', '1️⃣', '🇪🇬', '🧑🏿‍🤝‍🧑🏻'];
+  for (const e of legit) {
+    const html = reactions.reactionButtonHTML(msgId, { emoji: e, count: 2, names: ['Sam'], mine: false });
+    ok(attr(html, 'data-emoji') === e && html.includes('>' + e + ' 2</button>'), `legitimate emoji stays intact in attribute and text: ${e}`);
+  }
+  const picker = reactions.quickEmojiHTML(['👍', '"><x']);
+  ok(picker.includes('data-e="👍">👍</button>') && !picker.includes('"><x') && picker.includes('&quot;&gt;&lt;x'), 'the quick-reaction picker escapes too');
+  // chat.js itself must keep using these helpers and must not interpolate an emoji raw
+  const chatSrc = fs.readFileSync(path.join(SB, '../js/modules/chat/chat.js'), 'utf8');
+  ok(/import \{ reactionButtonHTML, quickEmojiHTML \} from '..\/..\/utils\/reactions\.js'/.test(chatSrc) && chatSrc.includes('reactionButtonHTML(m.id, r)') && chatSrc.includes('quickEmojiHTML(QUICK_EMOJI)'), 'chat.js renders reactions and the picker through the tested module');
+  ok(!/\$\{r\.emoji\}/.test(chatSrc) && !/data-emoji="\$\{(?!escapeHTML)/.test(chatSrc) && !/data-e="\$\{(?!escapeHTML)/.test(chatSrc), 'chat.js has no raw emoji interpolation left');
 
-  const maliciousReaction = { emoji: '"><img src=x onerror=alert(1)>', count: 1, names: ['Attacker'], mine: false };
-  // Exactly matching chat.js:817 template:
-  const rendered = `<button type="button" class="slk-react ${maliciousReaction.mine ? 'mine' : ''}" data-react="${msgId}" data-emoji="${escapeHTML(maliciousReaction.emoji)}" title="${escapeHTML(maliciousReaction.names.join(', '))}">${escapeHTML(maliciousReaction.emoji)} ${maliciousReaction.count}</button>`;
-
-  ok(!rendered.includes('"><img'), 'rendered reaction does not contain raw attribute breakout or tags');
-  ok(rendered.includes('data-emoji="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"'), 'data-emoji attribute is properly HTML entity-encoded');
-  ok(rendered.includes('&quot;&gt;&lt;img src=x onerror=alert(1)&gt; 1</button>'), 'emoji text is properly HTML entity-encoded');
 }
 
 
+section('A19 JSON limits count BYTES (multi-byte UTF-8) and a misleading Content-Length cannot widen the limit');
+{
+  const { readJson } = httpMod;
+  const LIMIT = 1000;
+  const req = (body, headers = {}) => new Request('http://t/', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
+  const bytesOf = (o) => new TextEncoder().encode(JSON.stringify(o)).byteLength;
+  const run = async (body, headers) => { try { return { v: await readJson(req(body, headers), LIMIT) }; } catch (e) { return { s: e.status, m: e.message }; } };
+  const stream = (chunks) => new ReadableStream({ start(c) { for (const x of chunks) c.enqueue(x); c.close(); } });
+  const sreq = (chunks, headers = {}) => new Request('http://t/', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: stream(chunks), duplex: 'half' });
+  const srun = async (chunks, headers) => { try { return { v: await readJson(sreq(chunks, headers), LIMIT) }; } catch (e) { return { s: e.status, m: e.message }; } };
+
+  // exact boundary with ASCII
+  const exact = JSON.stringify({ t: 'a'.repeat(LIMIT - 8) });
+  ok(exact.length === LIMIT && (await run(exact)).v?.t.length === LIMIT - 8, 'body of exactly the limit (bytes) is accepted');
+  ok((await run(JSON.stringify({ t: 'a'.repeat(LIMIT - 7) }))).s === 413, 'one byte over the limit is refused with 413');
+
+  // multi-byte: characters (UTF-16 units) stay far below the limit while bytes cross it
+  const cases = [
+    ['2-byte (e-acute)', 'é', 480, 500],
+    ['3-byte (CJK)', '你', 330, 340],
+    ['4-byte (emoji, 2 UTF-16 units each)', '😀', 240, 260],
+    ['2-byte (Arabic)', 'ع', 480, 500],
+  ];
+  for (const [label, ch, below, above] of cases) {
+    const lo = { t: ch.repeat(below) }, hi = { t: ch.repeat(above) };
+    ok(bytesOf(lo) <= LIMIT && JSON.stringify(hi).length < LIMIT && bytesOf(hi) > LIMIT, `fixture sanity (${label}): the over-limit body has fewer than ${LIMIT} characters but more than ${LIMIT} bytes`, `${JSON.stringify(hi).length} chars / ${bytesOf(hi)} bytes`);
+    const a = await run(JSON.stringify(lo)), b = await run(JSON.stringify(hi));
+    ok(a.v?.t === lo.t, `${label}: just below the byte limit is accepted and decoded intact`, JSON.stringify(a).slice(0, 80));
+    ok(b.s === 413, `${label}: above the byte limit is refused with 413 (a character-counting check would have let it through)`, JSON.stringify(b).slice(0, 80));
+    const enc = new TextEncoder().encode(JSON.stringify(hi));
+    const c = await srun([enc.slice(0, 500), enc.slice(500)]);
+    ok(c.s === 413, `${label}: the same over-limit body sent as a stream (no Content-Length) is refused with 413`);
+  }
+  // a multi-byte character split across two chunks must decode correctly
+  const split = new TextEncoder().encode(JSON.stringify({ t: 'é你😀' }));
+  const cut = split.indexOf(0xC3) + 1;   // between the two bytes of é
+  ok((await srun([split.slice(0, cut), split.slice(cut)])).v?.t === 'é你😀', 'a multi-byte character split across chunks is decoded correctly');
+  ok((await srun([new Uint8Array([0x7b, 0xff, 0x7d])])).s === 400, 'invalid UTF-8 is refused with 400, not decoded with replacement characters');
+
+  // misleading Content-Length
+  const big = new TextEncoder().encode(JSON.stringify({ t: 'x'.repeat(5000) }));
+  const bigChunks = [big.slice(0, 2000), big.slice(2000, 4000), big.slice(4000)];
+  ok((await srun(bigChunks, { 'content-length': '10' })).s === 413, 'Content-Length understating the body (10) cannot bypass the streaming limit');
+  ok((await srun(bigChunks, { 'content-length': '-5' })).s === 413, 'negative Content-Length cannot bypass the streaming limit');
+  ok((await srun(bigChunks, { 'content-length': 'abc' })).s === 413, 'non-numeric Content-Length cannot bypass the streaming limit');
+  ok((await srun(bigChunks, { 'content-length': '0' })).s === 413, 'Content-Length 0 with a large body cannot bypass the streaming limit');
+  const small = new TextEncoder().encode(JSON.stringify({ a: 1 }));
+  ok((await srun([small], { 'content-length': '999999' })).s === 413, 'an over-limit Content-Length is refused up front even when the real body is small');
+  ok((await srun([small], { 'content-length': String(small.byteLength) })).v?.a === 1, 'an honest Content-Length with a small body is accepted');
+  ok((await srun([small], { 'content-length': '1' })).v?.a === 1, 'a small body is still accepted when the header understates it but the real body is within the limit');
+  // early stop: the reader is cancelled and not drained when the stream is oversized and the header lies
+  let pulled = 0, cancelled = false;
+  const endless = new ReadableStream({ pull(c) { pulled++; c.enqueue(new Uint8Array(512)); }, cancel() { cancelled = true; } });
+  let eres; try { await readJson(new Request('http://t/', { method: 'POST', headers: { 'content-length': '10' }, body: endless, duplex: 'half' }), LIMIT); } catch (e) { eres = e; }
+  ok(eres?.status === 413 && cancelled && pulled <= 5, 'a lying Content-Length plus an endless stream: refused with 413, the stream is cancelled after a few chunks', `pulled=${pulled}`);
+  // Finance keeps its own limit
+  const fin = JSON.stringify({ items: Array.from({ length: 60 }, (_, i) => ({ d: 'é'.repeat(1500), q: 1, i })) });
+  const finBytes = new TextEncoder().encode(fin).byteLength;
+  let finOk = false, def413 = false;
+  try { await readJson(req(fin), 200_000); finOk = finBytes < 200_000; } catch { /* */ }
+  try { await readJson(req(fin), 32_768); } catch (e) { def413 = e.status === 413; }
+  ok(finBytes > 32_768 && finBytes < 200_000 && finOk && def413, 'a 32 KB-200 KB multi-byte body passes the finance limit and fails the default one');
+}
+
 // =====================================================================================================
-// Part B: real SQL (all migrations 001-021)
+// Part B: real SQL (all migrations 001-027)
 // =====================================================================================================
-section('B migrations 001-025 on in-process Postgres');
+section('B migrations 001-027 on in-process Postgres');
 const db = new PGlite();
 await db.exec(`
 CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
@@ -825,11 +955,11 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025', '026'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026', '027'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }
-ok(files.includes('020_atomic_role_replace.sql') && files.includes('021_auth_is_owner_privileges.sql') && files.includes('026_client_asset_scope_and_path_binding.sql'), 'migrations 020, 021 and 026 exist as separate files');
+ok(files.includes('020_atomic_role_replace.sql') && files.includes('021_auth_is_owner_privileges.sql') && files.includes('026_client_asset_scope_and_path_binding.sql') && files.includes('027_plan_asset_integrity_and_asset_ownership_guard.sql'), 'migrations 020, 021, 026 and 027 exist as separate files');
 
 const U = {}; const nid = (n) => `00000000-0000-0000-0000-0000000001${String(n).padStart(2, '0')}`;
 await db.exec(`INSERT INTO public.roles (name, display_name, description, is_system, priority) VALUES ('ceo','CEO','test ceo role',false,2) ON CONFLICT (name) DO NOTHING;`);
@@ -1235,16 +1365,24 @@ section('B7 client asset ownership and department scoping (migration 026)');
   ok(checkRow.rows?.[0]?.name === 'renamed' && checkRow.rows?.[0]?.storage_path === `${U.emp}/good.pdf`, 'name changed while storage_path remained intact');
 
   // 2. Client-scoped assets tests (P2-04)
-  // Setup: cliA is assigned to finDept (where fm is). cliB is assigned to otherDept (where emp is).
+  // Setup (superuser fixtures): Client A belongs to finDept only (fm, acc are in it); Client B belongs to otherDept only.
+  // Client B had NO department link before, so the earlier "department staff see it" assertion could only pass through the
+  // uploader exception. It is linked here, and the checks below use a NON-uploader in each department.
+  await db.exec(`SET session_replication_role = replica`);
+  await db.query(`INSERT INTO public.client_departments(client_id, department_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [cliB, otherDept]);
+  await db.query(`UPDATE public.profiles SET department_id=$1 WHERE id=$2`, [otherDept, U.dm]);
+  await db.exec(`SET session_replication_role = origin`);
   // Insert asset for Client A uploaded by fm (visibility = 'studio'):
   const aClientA = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('client-a-deck','a.pdf',100,'PDF','${U.fm}/client-a-deck.pdf','Clients','studio','${cliA}','${U.fm}') RETURNING id`)).rows[0].id;
 
   // Insert asset for Client B uploaded by emp (visibility = 'studio'):
   const aClientB = (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('client-b-deck','b.pdf',100,'PDF','${U.emp}/client-b-deck.pdf','Clients','studio','${cliB}','${U.emp}') RETURNING id`)).rows[0].id;
 
-  // 2a. fm (in finDept) can see Client A's asset
+  // 2a. Client A's asset was uploaded by fm. The uploader sees it (exception), and so does a NON-uploader in the client's department (acc).
   const fmSeeA = await as('authenticated', 'fm', `SELECT id FROM public.assets WHERE id='${aClientA}'`);
-  ok(fmSeeA.rows?.length === 1, 'staff in client department (fm) sees Client A asset');
+  ok(fmSeeA.rows?.length === 1, 'the uploader (fm) sees their Client A asset');
+  const accSeeA = await as('authenticated', 'acc', `SELECT id FROM public.assets WHERE id='${aClientA}'`);
+  ok(accSeeA.rows?.length === 1, 'a NON-uploader in the client\'s department (acc, Finance dept) sees the Client A asset through department scoping');
 
   // 2b. emp (in otherDept, outside Client A) CANNOT see Client A's asset (even though visibility = 'studio')
   const empSeeA = await as('authenticated', 'emp', `SELECT id FROM public.assets WHERE id='${aClientA}'`);
@@ -1254,9 +1392,11 @@ section('B7 client asset ownership and department scoping (migration 026)');
   const empDirect = await as('authenticated', 'emp', `SELECT * FROM public.assets WHERE id='${aClientA}'`);
   ok(empDirect.rows?.length === 0, 'direct SELECT by id of client asset outside user departments returns nothing');
 
-  // 2d. emp (in otherDept) CAN see Client B's asset (since otherDept is assigned to Client B)
+  // 2d. Client B's asset was uploaded by emp. dm is a NON-uploader who is in otherDept, the department Client B now belongs to.
+  const dmSeeB = await as('authenticated', 'dm', `SELECT id FROM public.assets WHERE id='${aClientB}'`);
+  ok(dmSeeB.rows?.length === 1, 'a NON-uploader in Client B\'s department (dm) sees the Client B asset through department scoping');
   const empSeeB = await as('authenticated', 'emp', `SELECT id FROM public.assets WHERE id='${aClientB}'`);
-  ok(empSeeB.rows?.length === 1, 'staff in client department (emp) sees Client B asset');
+  ok(empSeeB.rows?.length === 1, 'the uploader (emp) sees their own Client B asset');
 
   // 2e. fm (in finDept, outside Client B) CANNOT see Client B's asset
   const fmSeeB = await as('authenticated', 'fm', `SELECT id FROM public.assets WHERE id='${aClientB}'`);
@@ -1290,6 +1430,198 @@ section('B7 client asset ownership and department scoping (migration 026)');
   // 2j. Unauthorized insertion for client that caller cannot see is rejected
   const unauthClientInsert = await as('authenticated', 'emp', `INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,client_id,uploaded_by) VALUES ('sneak','s.pdf',10,'PDF','${U.emp}/sneak.pdf','Clients','studio','${cliA}','${U.emp}')`);
   ok(unauthClientInsert.error !== undefined, 'inserting an asset attached to a client the caller cannot see is rejected by RLS');
+}
+
+section('B8 migration 027 + client-asset authorization matrix (plan-asset integrity, ownership guard, legacy data, Storage)');
+{
+  const q = (u, sql, params) => as('authenticated', u, sql, params);
+  const snap = async (sql) => JSON.stringify((await db.query(sql)).rows);
+  const rep = async (fn) => { await db.exec('SET session_replication_role = replica'); try { return await fn(); } finally { await db.exec('SET session_replication_role = origin'); } };
+  const mkUser = async (k, role, dept) => {
+    U[k] = nid(++n);
+    await db.query(`INSERT INTO auth.users(id,email) VALUES ($1,$2)`, [U[k], k + '@x.com']);
+    await db.query(`INSERT INTO public.profiles(id,full_name,email,employment_status,department_id) VALUES ($1,$2,$3,'active',$4)`, [U[k], k, k + '@x.com', dept ?? null]);
+    await db.query(`INSERT INTO public.user_roles(user_id,role_id) SELECT $1,id FROM public.roles WHERE name=$2`, [U[k], role]);
+    if (dept) await db.query(`INSERT INTO public.user_departments(user_id,department_id,is_primary) VALUES ($1,$2,true)`, [U[k], dept]);
+  };
+  await mkUser('gmIn', 'general_manager', finDept);   // general_manager WITH access to Client A (Finance dept)
+  await mkUser('sDept', 'employee', finDept);         // plain employee in the client's department, never an uploader
+  await mkUser('plEd', 'employee', null);             // creator of Plan P
+  await mkUser('victim2', 'employee', null);          // owner of a private file
+  await mkUser('doomed', 'employee', null);           // will be deleted (foreign key action ON DELETE SET NULL)
+
+  // ------------------------------------------------------------------ legacy fixtures, created BEFORE migration 027
+  const planP = (await db.query(`INSERT INTO public.content_plans(title, created_by, department_id) VALUES ('Plan P', $1, $2) RETURNING id`, [U.plEd, finDept])).rows[0].id;
+  const legacyAsset = await rep(async () => (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('legacy-file','old.pdf',10,'PDF','legacy-import/old-file.pdf','General','studio',$1) RETURNING id`, [U.emp])).rows[0].id);
+  const mkPlanAsset = (path, by, file = 'x.png') => rep(async () => (await db.query(`INSERT INTO public.content_post_assets(plan_id,storage_path,file_name,file_type,file_size,position,uploaded_by) VALUES ($1,$2,$3,'image/png',1,1,$4) RETURNING id`, [planP, path, file, by])).rows[0].id);
+  const legacyNull1 = await mkPlanAsset('legacy-import/orphan1.png', null, 'o1.png');
+  const legacyNull2 = await mkPlanAsset('legacy-import/orphan2.png', null, 'o2.png');
+  const dataSnap = async () => (await snap(`SELECT * FROM public.assets ORDER BY id`)) + (await snap(`SELECT * FROM public.content_post_assets ORDER BY id`));
+  const before = await dataSnap();
+  ok(JSON.parse(await snap(`SELECT count(*)::int c FROM public.content_post_assets WHERE uploaded_by IS NULL`))[0].c === 2, 'fixture: two legacy plan assets with a NULL owner and non-conforming paths exist before 027');
+
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/027_plan_asset_integrity_and_asset_ownership_guard.sql'), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/027_plan_asset_integrity_and_asset_ownership_guard.sql'), 'utf8')); // idempotent
+  await db.exec(fs.readFileSync(path.join(SB, 'migrations/026_client_asset_scope_and_path_binding.sql'), 'utf8'));            // 026 re-run on top of 027: still idempotent
+  ok(before === (await dataSnap()), 'legacy data: applying 027 (twice) and re-running 026 rewrote and deleted nothing (assets and plan assets identical)');
+
+  // ================================================================== M1: content_post_assets
+  const pa = (path_, by) => `INSERT INTO public.content_post_assets(plan_id,storage_path,file_name,file_type,file_size,position,uploaded_by) VALUES ('${planP}','${path_}','p.png','image/png',1,1,${by ? `'${by}'` : 'NULL'}) RETURNING id`;
+  const ownPath = `${U.plEd}/plans/${planP}/ok.png`;
+  const ins1 = await q('plEd', pa(ownPath, U.plEd));
+  ok(ins1.rows?.length === 1, 'M1 normal creation: the plan creator adds a visual under their own plan folder', JSON.stringify(ins1));
+  const paId = ins1.rows?.[0]?.id;
+  const upd = async (u, set, id = paId) => q(u, `UPDATE public.content_post_assets SET ${set} WHERE id='${id}' RETURNING id`);
+  ok((await upd('plEd', `layout='{"x":10,"y":10,"w":50,"h":50,"fit":"cover","z":1}'::jsonb, position=7`)).rows?.length === 1, 'M1 normal metadata update (layout, position) by the plan creator works');
+  ok((await upd('sDept', `position=8`)).rows?.length === 1, 'M1 authorized editor: a department member of the plan can update metadata');
+  ok((await upd('gmIn', `position=9`)).rows?.length === 1, 'M1 authorized editor: an administrator can update metadata');
+  ok((await upd('emp', `position=1`)).rows?.length === 0, 'M1 unauthorized user (not creator, not in the plan\'s department, not admin): update affects 0 rows');
+  const secretPath = `${U.victim2}/secret-uuid.pdf`;
+  const att = [
+    ['change uploaded_by to another user', `uploaded_by='${U.sDept}'`, /uploader cannot be changed/],
+    ['set uploaded_by = NULL', `uploaded_by=NULL`, /uploader cannot be changed/],
+    ['change storage_path', `storage_path='${U.plEd}/plans/${planP}/other.png'`, /storage path cannot be changed/],
+    ['plant another user\'s Storage path', `storage_path='${secretPath}'`, /storage path cannot be changed/],
+    ['the original bypass: uploaded_by = NULL together with a foreign storage_path', `uploaded_by=NULL, storage_path='${secretPath}'`, /storage path cannot be changed/],
+    ['move to another plan', `plan_id='${crypto.randomUUID()}'`, /another plan|violates foreign key|cannot move/],
+  ];
+  for (const [label, set, re] of att) { const r = await upd('plEd', set); ok(r.error !== undefined && re.test(r.error), `M1 attempt refused: ${label}`, JSON.stringify(r)); }
+  const row = (await db.query(`SELECT storage_path, uploaded_by FROM public.content_post_assets WHERE id=$1`, [paId])).rows[0];
+  ok(row.storage_path === ownPath && row.uploaded_by === U.plEd, 'M1 after all attempts the row still has its original path and owner');
+  const insBad = await q('plEd', pa(secretPath, U.plEd));
+  ok(insBad.error !== undefined, 'M1 inserting a row that points at another user\'s path is refused (path CHECK)', insBad.error);
+  const insNull = await q('plEd', pa(`legacy-import/new.png`, null));
+  ok(insNull.error !== undefined, 'M1 inserting a NULL-owner row through the API is refused', insNull.error);
+  let opNull = ''; try { await db.query(pa(`legacy-import/op.png`, null)); } catch (e) { opNull = e.message; }
+  ok(/needs an uploader/.test(opNull), 'M1 a NULL-owner insert is refused even for a superuser session (the trigger, not only RLS)', opNull);
+  let opSet = ''; try { await db.query(`UPDATE public.content_post_assets SET uploaded_by=NULL WHERE id='${paId}'`); } catch (e) { opSet = e.message; }
+  ok(/uploader cannot be changed/.test(opSet), 'M1 nulling the owner of a live user is refused even for a superuser session', opSet);
+
+  // Storage: after every attempt the attacker still cannot read the victim's private object, but plan visuals stay readable by staff
+  await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,uploaded_by) VALUES ('secret','secret.pdf',1,'PDF',$1,'Docs','private',$2)`, [secretPath, U.victim2]);
+  await db.query(`INSERT INTO storage.objects(bucket_id,name,owner_id) VALUES ('studio-assets',$1,$2),('studio-assets',$3,$4)`, [secretPath, U.victim2, ownPath, U.plEd]);
+  const names = async (u, list) => (await q(u, `SELECT name FROM storage.objects WHERE name = ANY($1::text[])`, [list])).rows?.map((r) => r.name).sort().join(',');
+  ok(!(await names('plEd', [secretPath, ownPath])).includes('secret-uuid'), 'M1 Storage: the plan editor still cannot read the victim\'s private object after planting attempts');
+  ok((await names('emp', [ownPath])) === ownPath, 'M1 Storage: legitimate plan visuals stay readable by staff (no broader and no narrower access)');
+
+  // legacy NULL-owner rows: not re-owned, not rewritten, still editable for metadata and deletable by editors
+  ok((await upd('plEd', `position=4`, legacyNull1)).rows?.length === 1, 'M1 legacy NULL-owner row: a plan editor can still change metadata (position)');
+  ok((await upd('plEd', `layout='{"x":1}'::jsonb`, legacyNull1)).rows?.length === 1, 'M1 legacy NULL-owner row: layout update works');
+  const l1 = await upd('plEd', `uploaded_by='${U.plEd}'`, legacyNull1);
+  ok(l1.error !== undefined && /uploader cannot be changed/.test(l1.error), 'M1 legacy NULL-owner row cannot be claimed by an editor', l1.error);
+  const l2 = await upd('plEd', `storage_path='${ownPath}x'`, legacyNull1);
+  ok(l2.error !== undefined && /storage path cannot be changed/.test(l2.error), 'M1 legacy NULL-owner row: its path cannot be changed');
+  ok((await upd('emp', `position=2`, legacyNull1)).rows?.length === 0, 'M1 legacy NULL-owner row: an unauthorized user still cannot touch it');
+  const del = await q('plEd', `DELETE FROM public.content_post_assets WHERE id='${legacyNull2}' RETURNING id`);
+  ok(del.rows?.length === 1, 'M1 legacy NULL-owner row: an editor can still delete it (replace by re-uploading)');
+  const lrow = (await db.query(`SELECT storage_path, uploaded_by FROM public.content_post_assets WHERE id=$1`, [legacyNull1])).rows[0];
+  ok(lrow.uploaded_by === null && lrow.storage_path === 'legacy-import/orphan1.png', 'M1 legacy row keeps its NULL owner and original path');
+
+  // foreign key action: deleting a user still works and sets the owner to NULL (the one allowed change)
+  const doomedPath = `${U.doomed}/plans/${planP}/d.png`;
+  const doomedAsset = await mkPlanAsset(doomedPath, U.doomed, 'd.png');
+  let delErr = ''; try { await db.query(`DELETE FROM auth.users WHERE id=$1`, [U.doomed]); } catch (e) { delErr = e.message; }
+  const after = (await db.query(`SELECT uploaded_by, storage_path FROM public.content_post_assets WHERE id=$1`, [doomedAsset])).rows[0];
+  ok(delErr === '' && after && after.uploaded_by === null && after.storage_path === doomedPath, 'M1 deleting a user (ON DELETE SET NULL) is not blocked: the plan asset survives with a NULL owner and the same path', delErr);
+
+  // ================================================================== M2: client assets, full matrix
+  const A_ = ['sDept', 'fm', 'dm', 'emp', 'gmIn', 'gm', 'own', 'ceo', 'sa2'];
+  const EX = { own: 1, ceo: 1, sa2: 1 };
+  const mkAsset = async (name, o) => (await db.query(`INSERT INTO public.assets(name,file_name,file_size,file_type,storage_path,folder,visibility,department_id,client_id,uploaded_by,finance_confidential) VALUES ($1,$1,10,'PDF',$2,'Clients',$3,$4,$5,$6,$7) RETURNING id`,
+    [name, `${U[o.by]}/${name}.pdf`, o.vis, o.dept ?? null, o.client === undefined ? cliA : o.client, U[o.by], !!o.fin])).rows[0].id;
+  const sees = async (u, id) => (await q(u, `SELECT id FROM public.assets WHERE id=$1`, [id])).rows?.length === 1;
+  const expectSee = async (label, id, exp) => { for (const u of A_) { const got = await sees(u, id); ok(got === !!exp[u], `SELECT ${label}: ${u} ${exp[u] ? 'sees' : 'does not see'} it`, `got ${got}`); } };
+
+  // uploader = fm (in the client's department)
+  const aStudio = await mkAsset('mx-studio', { by: 'fm', vis: 'studio' });
+  const aDeptIn = await mkAsset('mx-dept-in', { by: 'fm', vis: 'department', dept: finDept });
+  const aDeptOut = await mkAsset('mx-dept-out', { by: 'fm', vis: 'department', dept: otherDept });
+  const aPrivate = await mkAsset('mx-private', { by: 'fm', vis: 'private' });
+  await expectSee('client asset, studio', aStudio, { ...EX, fm: 1, sDept: 1, gmIn: 1 });
+  await expectSee('client asset, department = the client\'s department', aDeptIn, { ...EX, fm: 1, sDept: 1, gmIn: 1 });
+  await expectSee('client asset, department = ANOTHER department (visibility does not override client scoping, and department visibility still applies)', aDeptOut, { ...EX, fm: 1, gmIn: 1 });
+  await expectSee('client asset, private', aPrivate, { ...EX, fm: 1, gmIn: 1 });
+  // uploader = emp, who is OUTSIDE the client's department (models someone who moved department or lost access)
+  const bStudio = await mkAsset('mx-up-studio', { by: 'emp', vis: 'studio' });
+  const bPrivate = await mkAsset('mx-up-private', { by: 'emp', vis: 'private' });
+  const bDept = await mkAsset('mx-up-dept', { by: 'emp', vis: 'department', dept: finDept });
+  await expectSee('uploader outside the client\'s department, studio (documented exception: uploader keeps access)', bStudio, { ...EX, emp: 1, fm: 1, sDept: 1, gmIn: 1 });
+  await expectSee('uploader outside the client\'s department, private', bPrivate, { ...EX, emp: 1, gmIn: 1 });
+  await expectSee('uploader outside the client\'s department, department visibility', bDept, { ...EX, emp: 1, fm: 1, sDept: 1, gmIn: 1 });
+  // asset without a client and a confidential asset
+  const nStudio = await mkAsset('mx-noclient', { by: 'emp', vis: 'studio', client: null });
+  await expectSee('studio asset without a client (existing behaviour preserved)', nStudio, Object.fromEntries(A_.map((u) => [u, 1])));
+  const fin = await mkAsset('mx-confidential', { by: 'emp', vis: 'studio', fin: true });
+  await expectSee('finance-confidential client asset (executives only; the uploader and the client\'s department do not count)', fin, { ...EX });
+
+  // UPDATE / DELETE
+  const mut = async (kind, u, id) => (await q(u, kind === 'update' ? `UPDATE public.assets SET description='t-${u}' WHERE id=$1 RETURNING id` : `DELETE FROM public.assets WHERE id=$1 RETURNING id`, [id])).rows?.length === 1;
+  const WRITE = { ...EX, fm: 1, gmIn: 1 };   // uploader, executives, general_manager WITH client access
+  for (const u of A_) { const got = await mut('update', u, aStudio); ok(got === !!WRITE[u], `UPDATE client asset (studio, uploaded by fm): ${u} ${WRITE[u] ? 'may' : 'may not'}`, `got ${got}`); }
+  for (const u of A_) { const got = await mut('update', u, aDeptIn); ok(got === !!WRITE[u], `UPDATE client asset (department-visible): ${u} ${WRITE[u] ? 'may' : 'may not'} (department staff who did not upload cannot edit)`, `got ${got}`); }
+  for (const u of A_) { const id = await mkAsset('del-' + u, { by: 'fm', vis: 'studio' }); const got = await mut('delete', u, id); ok(got === !!WRITE[u], `DELETE client asset: ${u} ${WRITE[u] ? 'may' : 'may not'}`, `got ${got}`); }
+  ok(await mut('update', 'emp', bStudio) && await mut('delete', 'emp', await mkAsset('del-up', { by: 'emp', vis: 'studio' })), 'UPDATE and DELETE: the uploader outside the department keeps write access to their own client uploads (documented exception)');
+  ok(!(await mut('update', 'emp', aStudio)), 'UPDATE: the same outside employee cannot edit somebody else\'s client asset');
+
+  // ownership and client_id cannot be used to bypass the rules (migration 027)
+  const X = await mkAsset('mx-bypass', { by: 'fm', vis: 'studio' });
+  const row_ = async () => (await db.query(`SELECT uploaded_by, client_id FROM public.assets WHERE id=$1`, [X])).rows[0];
+  const tryU = async (u, set) => q(u, `UPDATE public.assets SET ${set} WHERE id='${X}' RETURNING id`);
+  let r;
+  r = await tryU('fm', `client_id='${cliB}'`);
+  ok(r.error && /cannot move a file/.test(r.error), 'uploader cannot re-point their client asset to a client they cannot see', r.error);
+  r = await tryU('fm', `client_id=NULL`);
+  ok(r.error && /detach/.test(r.error), 'uploader cannot detach a client asset (that would make it studio-wide)', r.error);
+  r = await tryU('fm', `uploaded_by='${U.sDept}'`);
+  ok(r.error && /ownership/.test(r.error), 'uploader cannot hand the file to someone else', r.error);
+  r = await tryU('gmIn', `uploaded_by='${U.sDept}'`);
+  ok(r.error && /ownership/.test(r.error), 'a general_manager (even with client access) cannot transfer ownership', r.error);
+  r = await tryU('gmIn', `client_id='${cliB}'`);
+  ok(r.error && /cannot move a file/.test(r.error), 'a general_manager cannot move a file to a client they cannot see', r.error);
+  r = await tryU('gmIn', `client_id=NULL`);
+  ok(r.error && /detach/.test(r.error), 'a general_manager cannot detach a client file', r.error);
+  r = await tryU('dm', `client_id='${cliB}'`);
+  ok(r.rows?.length === 0 || r.error !== undefined, 'a user with no write access cannot re-point it either');
+  const keep = await row_();
+  ok(keep.uploaded_by === U.fm && keep.client_id === cliA, 'after every refused attempt the owner and client are unchanged');
+  r = await tryU('own', `uploaded_by='${U.sDept}'`);
+  ok(r.rows?.length === 1 && (await row_()).uploaded_by === U.sDept, 'an executive can transfer ownership (documented: the new owner gets the uploader exception)');
+  ok(await mut('update', 'sDept', X), 'consequence of the transfer: the new owner can now edit the file');
+  await tryU('own', `uploaded_by='${U.fm}'`);
+  r = await tryU('own', `client_id=NULL`);
+  ok(r.rows?.length === 1 && await sees('dm', X), 'an executive can detach a client asset; it then becomes an ordinary studio asset (dm sees it)');
+  r = await tryU('own', `client_id='${cliA}'`);
+  ok(r.rows?.length === 1 && !(await sees('dm', X)) && (await row_()).client_id === cliA, 'an executive can attach it back; client scoping applies again');
+  const E1 = await mkAsset('mx-attach', { by: 'emp', vis: 'studio', client: null });
+  r = await q('emp', `UPDATE public.assets SET client_id='${cliA}' WHERE id='${E1}' RETURNING id`);
+  ok(r.error && /cannot move a file/.test(r.error), 'attaching a file to a client the uploader cannot see is refused');
+  r = await q('emp', `UPDATE public.assets SET client_id='${cliB}' WHERE id='${E1}' RETURNING id`);
+  ok(r.rows?.length === 1, 'attaching a file to a client the uploader CAN see (Client B, their department) is allowed');
+  await db.query(`SELECT set_config('request.jwt.claim.sub','',false)`);
+  let opErr = ''; try { await db.query(`UPDATE public.assets SET uploaded_by='${U.sDept}', client_id=NULL WHERE id='${X}'`); } catch (e) { opErr = e.message; }
+  ok(opErr === '', 'an operator session without an end-user (service role / SQL editor) is not blocked by the guard', opErr);
+
+  // legacy asset with a non-conforming path
+  ok((await q('emp', `UPDATE public.assets SET name='legacy-renamed', description='ok' WHERE id='${legacyAsset}' RETURNING id`)).rows?.length === 1, 'legacy asset (path does not start with the uploader id): metadata can still be edited');
+  const lp = await q('emp', `UPDATE public.assets SET storage_path='${U.emp}/new.pdf' WHERE id='${legacyAsset}' RETURNING id`);
+  ok(lp.error && /cannot be changed/.test(lp.error), 'legacy asset: its path still cannot be changed');
+  ok((await db.query(`SELECT storage_path FROM public.assets WHERE id=$1`, [legacyAsset])).rows[0].storage_path === 'legacy-import/old-file.pdf', 'legacy asset keeps its original non-conforming path (never rewritten)');
+
+  // ---------------------------------------------------------------- Storage objects for client assets
+  const objNames = { studio: `${U.fm}/mx-studio.pdf`, private: `${U.fm}/mx-private.pdf`, deptOut: `${U.fm}/mx-dept-out.pdf` };
+  for (const nme of Object.values(objNames)) await db.query(`INSERT INTO storage.objects(bucket_id,name,owner_id) VALUES ('studio-assets',$1,$2)`, [nme, U.fm]);
+  const AW = `DROP POLICY "studio_assets_read" ON storage.objects; CREATE POLICY "studio_assets_read" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'studio-assets' AND EXISTS (SELECT 1 FROM public.assets a WHERE a.storage_path = name));`;
+  const INTENDED = AW.replace('a.storage_path = name', 'a.storage_path = objects.name');
+  const sees2 = async (u, nme) => (await q(u, `SELECT name FROM storage.objects WHERE name=$1`, [nme])).rows?.length === 1;
+  await db.exec(AW);
+  let anyAsWritten = false; for (const u of A_) for (const nme of Object.values(objNames)) if (await sees2(u, nme)) anyAsWritten = true;
+  ok(!anyAsWritten, 'Storage, policy AS WRITTEN in migration 007: nobody (not even executives) can read a client asset object (fails closed; the 007 name-binding defect)');
+  await db.exec(INTENDED);
+  const expectObj = async (label, nme, exp) => { for (const u of A_) { const got = await sees2(u, nme); ok(got === !!exp[u], `Storage object (${label}), policy in its INTENDED form: ${u} ${exp[u] ? 'reads' : 'cannot read'} it`, `got ${got}`); } };
+  await expectObj('client asset, studio', objNames.studio, { ...EX, fm: 1, sDept: 1, gmIn: 1 });
+  await expectObj('client asset, private', objNames.private, { ...EX, fm: 1, gmIn: 1 });
+  await expectObj('client asset, department of another department', objNames.deptOut, { ...EX, fm: 1, gmIn: 1 });
+  console.log('  NOT TESTED HERE (needs staging): the real Supabase Storage API (signed URL creation, bucket settings, upload limits), and whether the live storage.objects policy matches migration 007 as written or its intended form.');
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

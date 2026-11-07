@@ -17,6 +17,7 @@ import { Permissions } from '../../permissions/permission-service.js';
 import { formDialog, confirmDialog } from '../../ui/dialogs.js';
 import { escapeHTML, getInitials, getAccentHex } from '../../utils/helpers.js';
 import { linkify } from '../../utils/linkify.js';
+import { reactionButtonHTML, quickEmojiHTML } from '../../utils/reactions.js';
 import { ASSIGNEE_SELECT, assigneeOptionsHTML, selectedDeptId } from '../../utils/assignees.js';
 import { Notifications } from '../../services/notification-service.js';
 import { PAGE_SIZE } from '../../ui/pagination.js';
@@ -814,7 +815,7 @@ export class ChatModule {
             ${reply ? `<div class="slk-quote"><b>${escapeHTML(reply.sender?.full_name || 'Specialist')}</b> ${escapeHTML((reply.content || '').slice(0, 90))}</div>` : (m.reply_to_id ? '<div class="slk-quote">Original message</div>' : '')}
             ${body}
             ${reacts.length || !tmp ? `<div class="slk-reacts">
-              ${reacts.map(r => `<button type="button" class="slk-react ${r.mine ? 'mine' : ''}" data-react="${m.id}" data-emoji="${escapeHTML(r.emoji)}" title="${escapeHTML(r.names.join(', '))}">${escapeHTML(r.emoji)} ${r.count}</button>`).join('')}
+              ${reacts.map(r => reactionButtonHTML(m.id, r)).join('')}
               ${tmp ? '' : `<button type="button" class="slk-react slk-react-add" data-react-add="${m.id}" aria-label="Add reaction"><i data-lucide="smile-plus"></i></button>`}
             </div>` : ''}
           </div>
@@ -900,7 +901,7 @@ export class ChatModule {
     document.querySelectorAll('.slk-emoji-pop').forEach(p => p.remove());
     const pop = document.createElement('div');
     pop.className = 'slk-emoji-pop';
-    pop.innerHTML = QUICK_EMOJI.map(e => `<button type="button" data-e="${escapeHTML(e)}">${escapeHTML(e)}</button>`).join('');
+    pop.innerHTML = quickEmojiHTML(QUICK_EMOJI);
     anchor.parentElement.appendChild(pop);
     pop.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { pop.remove(); this.toggleReaction(anchor.dataset.reactAdd, b.dataset.e); }));
   }
