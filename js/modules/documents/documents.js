@@ -30,6 +30,8 @@ const TYPE_GROUPS = {
 const TYPE_LABEL = { image: 'Images', video: 'Video', audio: 'Audio', design: 'Design files', doc: 'Documents', archive: 'Archives', other: 'Other' };
 const TYPE_ICON = { image: 'image', video: 'film', audio: 'music', design: 'pen-tool', doc: 'file-text', archive: 'archive', other: 'file' };
 const MB = 1048576;
+// Each list is read newest-first and never more than this many rows at once ('Show more' reads the next slice).
+const DOC_SLICE = 400;
 
 const extOf = (name = '') => (name.includes('.') ? name.split('.').pop().toLowerCase() : '');
 const groupOf = (name) => {
@@ -42,6 +44,10 @@ export class DocumentsModule {
   constructor(app) {
     this.app = app;
     this.assets = [];        // unified list: studio assets + task deliverables
+    this.studioRows = [];    // the newest studio assets read so far
+    this.taskRows = [];      // the newest task deliverables read so far
+    this.cap = { asset: DOC_SLICE, task: DOC_SLICE };
+    this.totals = { asset: 0, task: 0 };
     this.projects = [];
     this.departments = [];
     this.thumbs = {};        // storage_path -> signed url (images)
@@ -91,6 +97,7 @@ export class DocumentsModule {
             <div class="empty-state-title">Loading vault files...</div>
           </div>
         </div>
+        <div id="docsNotice" class="text-2xs text-dim" style="padding: var(--space-2) 0;"></div>
         <div id="docsPager"></div>
       </div>
     `;
@@ -105,40 +112,64 @@ export class DocumentsModule {
 
     await this.loadDocuments();
     // everyone sees new uploads / deletions / edits as they happen
-    Realtime.watch(['assets', 'task_attachments'], () => this.loadDocuments());
+    // coalesced: one refresh per burst, and only the list whose table changed is read again
+    Realtime.watch(['assets', 'task_attachments'], (changed) => this.loadDocuments(changed));
   }
 
   // ------------------------------------------------------------ data
 
-  async loadDocuments() {
+  /**
+   * @param {Set<string>} [changed] tables that changed; only the matching list is read again ('*' / nothing = both).
+   * Each list is bounded: the newest `cap` rows plus the exact total, never the whole table.
+   */
+  async loadDocuments(changed) {
     const supabase = getSupabase();
     if (!supabase) return;
-
+    const both = !changed || changed.has('*') || !this.loadedOnce;
     try {
       const [assetsRes, taskRes] = await Promise.all([
-        supabase.from('assets')
-          .select('*, uploader:profiles!assets_uploaded_by_fkey(full_name), project:projects(name, code), department:departments(name)')
-          .order('created_at', { ascending: false }),
-        supabase.from('task_attachments')
-          .select('*, uploader:profiles!task_attachments_uploaded_by_fkey(full_name), task:tasks(title, task_number)')
-          .order('created_at', { ascending: false })
+        both || changed.has('assets')
+          ? supabase.from('assets')
+              .select('*, uploader:profiles!assets_uploaded_by_fkey(full_name), project:projects(name, code), department:departments(name)', { count: 'exact' })
+              .order('created_at', { ascending: false }).order('id', { ascending: true }).range(0, this.cap.asset - 1)
+          : null,
+        both || changed.has('task_attachments')
+          ? supabase.from('task_attachments')
+              .select('*, uploader:profiles!task_attachments_uploaded_by_fkey(full_name), task:tasks(title, task_number)', { count: 'exact' })
+              .order('created_at', { ascending: false }).order('id', { ascending: true }).range(0, this.cap.task - 1)
+          : null
       ]);
-
-      const studio = (assetsRes.data || []).map(a => ({
+      if (assetsRes) { this.studioRows = (assetsRes.data || []).map(a => ({
         ...a, source: 'asset', bucket: CONFIG.STORAGE_BUCKETS.STUDIO_ASSETS, displayName: a.name || a.file_name
-      }));
-      const task = (taskRes.data || []).map(t => ({
+      })); this.totals.asset = assetsRes.count ?? this.studioRows.length; }
+      if (taskRes) { this.taskRows = (taskRes.data || []).map(t => ({
         ...t, source: 'task', bucket: CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS, displayName: t.file_name,
         folder: t.task?.task_number ? `Task ${t.task.task_number}` : 'Task deliverables', visibility: 'task'
-      }));
-      this.assets = [...studio, ...task].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
+      })); this.totals.task = taskRes.count ?? this.taskRows.length; }
+      this.loadedOnce = true;
+      this.assets = [...this.studioRows, ...this.taskRows].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
       this.refreshFolderFilter();
+      this.renderNotice();
       this.renderDocs();
     } catch (err) {
       console.warn('Docs error:', err);
       this.renderDocs();
     }
+  }
+
+  /** When a list is longer than what has been read, say so and offer the next slice (search and filters cover what is loaded). */
+  renderNotice() {
+    const el = document.getElementById('docsNotice');
+    if (!el) return;
+    const more = (this.totals.asset > this.studioRows.length) || (this.totals.task > this.taskRows.length);
+    if (!more) { el.innerHTML = ''; return; }
+    const shown = this.studioRows.length + this.taskRows.length, total = this.totals.asset + this.totals.task;
+    el.innerHTML = `Showing the newest ${shown} of ${total} files. <button type="button" class="btn btn-secondary btn-sm" id="docsMore">Show ${DOC_SLICE} more</button>`;
+    document.getElementById('docsMore')?.addEventListener('click', async () => {
+      if (this.totals.asset > this.studioRows.length) this.cap.asset += DOC_SLICE;
+      if (this.totals.task > this.taskRows.length) this.cap.task += DOC_SLICE;
+      await this.loadDocuments();
+    });
   }
 
   /** Short-lived signed URLs for the images on this page only (batched per bucket). True if any were added. */

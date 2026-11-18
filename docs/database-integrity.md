@@ -75,3 +75,10 @@ Apply 035 after 034. **If 017 is ever re-run: re-apply 028, then 033, then 035**
 Rollback: statements in the header of 035 (no business data is touched; the history table is dropped only if it may be discarded).
 Still open (business decisions, not guessed): lead stage rules and conversion, budget model (`budgets` vs `money_figures`), retainer back-fill and inactive-client billing, expense claims by employees, opportunities, quotations, contracts, credit notes, payable invoices, USD legacy expenses, hand-typed budgets.
 Tests: `npm run test:integrity` section 17 (real PostgreSQL).
+
+## Phase 6 (migration 036): performance
+Apply 036 after 035. Details, measurements and the rollback are in `docs/performance-phase6.md`.
+* 143 policies were rewritten mechanically (`auth_is_*()` and `auth.uid()` evaluated once per statement instead of once per row; the tasks policy and the task-children policies no longer call `auth_can_view_task()` per row). No rule changed: `npm run test:perf` proves, for 17 users and anon, that every user sees byte-identical rows and every INSERT / UPDATE / DELETE has the same outcome.
+* The old helper functions are still there. **If 017 is ever re-run**, it re-creates the finance policies in their slower per-row form (correct, just slow): re-apply 036 afterwards (order 017 -> 028 -> 033 -> 035 -> 036).
+* New: `task_stats()`, `client_task_stats(date)` (SECURITY INVOKER, RLS decides what is counted), id-set helpers `auth_managed_department_ids()`, `auth_assigned_task_ids()`, `auth_managed_project_ids()`, and six `created_at DESC` indexes. No index was dropped (8 redundant ones are listed in the performance document for a separate clean-up).
+* Rollback: `supabase/maintenance/rollback-036.sql` (restores every original policy, drops the helpers, aggregates and indexes; no data is touched).

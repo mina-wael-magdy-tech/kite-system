@@ -1213,7 +1213,7 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033', '034', '035'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033', '034', '035', '036'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }

@@ -9,6 +9,7 @@ import { Toast } from '../../services/toast-service.js';
 import { Api } from '../../services/api.js';
 import { escapeHTML, formatDate } from '../../utils/helpers.js';
 import { formatTaskStatusBadge } from '../../utils/formatters.js';
+import { PAGE_SIZE, fetchPage, mountPager } from '../../ui/pagination.js';
 
 export class AdminModule {
   constructor(app) {
@@ -106,6 +107,7 @@ export class AdminModule {
                 </tbody>
               </table>
             </div>
+            <div id="adminTaskPager" style="padding: var(--space-3);"></div>
           </div>
         </div>
       </div>
@@ -123,14 +125,8 @@ export class AdminModule {
       const { data: emps } = await supabase.from('profiles').select('id, full_name, departments!profiles_department_id_fkey(name)');
       this.employees = emps || [];
 
-      // 2. Fetch All Tasks
-      const { data: tasks } = await supabase
-        .from('tasks')
-        .select('id, task_number, title, status, assigned_to, profiles!tasks_assigned_to_fkey(full_name)')
-        .order('created_at', { ascending: false });
-
-      this.tasks = tasks || [];
-      this.renderMasterTaskTable();
+      // 2. One page of tasks (the list keeps growing: never the whole table)
+      await this.loadTaskPage();
 
       // 3. Fetch Audit Logs
       const { data: logs } = await supabase
@@ -147,9 +143,26 @@ export class AdminModule {
     }
   }
 
+  async loadTaskPage() {
+    const supabase = getSupabase();
+    const res = await fetchPage(() => supabase
+      .from('tasks')
+      .select('id, task_number, title, status, assigned_to, profiles!tasks_assigned_to_fkey(full_name)', { count: 'exact' })
+      .order('created_at', { ascending: false }).order('id', { ascending: true }), this.taskPage || 1, PAGE_SIZE.table);
+    if (res.error) throw res.error;
+    this.tasks = res.rows;
+    this.taskPage = res.page;
+    this.taskTotal = res.total;
+    this.renderMasterTaskTable();
+  }
+
   renderMasterTaskTable() {
     const tbody = document.getElementById('adminTaskOverrideTable');
     if (!tbody) return;
+    mountPager(document.getElementById('adminTaskPager'), {
+      page: this.taskPage || 1, total: this.taskTotal || 0, size: PAGE_SIZE.table, label: 'tasks', top: tbody.closest('.card'),
+      onPage: async (n) => { this.taskPage = n; await this.loadTaskPage(); }
+    });
 
     if (this.tasks.length === 0) {
       tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No studio tasks found.</td></tr>`;

@@ -168,35 +168,51 @@ export class DashboardModule {
     `;
 
     await this.loadDashboardData();
-    Realtime.watch(['tasks', 'departments'], () => this.loadDashboardData()); // live updates for everyone
+    // live updates for everyone; the refresh is coalesced and re-reads only what the changed tables can affect
+    Realtime.watch(['tasks', 'departments'], (changed) => this.loadDashboardData(changed));
   }
 
-  async loadDashboardData() {
+  /**
+   * @param {Set<string>} [changed] tables that changed since the last refresh; '*' or nothing = refresh everything.
+   * Task counts come from ONE database call (task_stats(): grouped counts that Row Level Security scopes to this user)
+   * instead of a read of every task plus one count request per status.
+   */
+  async loadDashboardData(changed) {
     const supabase = getSupabase();
     if (!supabase) return;
+    const all = !changed || changed.has('*') || !this.dashLoaded;
+    const tasksChanged = all || changed.has('tasks');
+    const deptsChanged = all || changed.has('departments');
 
     try {
-      // 1. Fetch Task Counts & Recent Tasks
-      const { data: tasks } = await supabase
-        .from('tasks')
-        .select('*, profiles!tasks_assigned_to_fkey(full_name, department_id, departments!profiles_department_id_fkey(name))')
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      // 2. Exact counts (head requests; Row Level Security scopes each to what this user may see)
       const countOf = async (table, apply) => {
         const { count, error } = await apply(supabase.from(table).select('id', { count: 'exact', head: true }));
         if (error) throw error;
         return count ?? 0;
       };
-
-      const [projectCount, empCount, inProgress, underReview, completed] = await Promise.all([
-        countOf('projects', q => q.eq('status', 'active')),
-        countOf('profiles', q => q.eq('employment_status', 'active')),
-        countOf('tasks', q => q.eq('status', 'in_progress')),
-        countOf('tasks', q => q.eq('status', 'under_review')),
-        countOf('tasks', q => q.in('status', ['completed', 'approved']))
+      const [recent, stats, projectCount, empCount, depts] = await Promise.all([
+        tasksChanged
+          ? supabase.from('tasks')
+              .select('*, profiles!tasks_assigned_to_fkey(full_name, department_id, departments!profiles_department_id_fkey(name))')
+              .order('created_at', { ascending: false }).limit(20)
+          : null,
+        tasksChanged ? supabase.rpc('task_stats') : null,
+        all ? countOf('projects', q => q.eq('status', 'active')) : null,       // not affected by task / department changes
+        all ? countOf('profiles', q => q.eq('employment_status', 'active')) : null,
+        deptsChanged ? supabase.from('departments').select('id, name').order('name', { ascending: true }) : null
       ]);
+      if (recent?.error) throw recent.error;
+      if (stats?.error) throw stats.error;
+      if (stats) this.stats = stats.data || [];
+      if (depts?.data) this.deptList = depts.data;
+      if (projectCount !== null) this.projectCount = projectCount;
+      if (empCount !== null) this.empCount = empCount;
+      this.dashLoaded = true;
+
+      const n = (dim, key) => (this.stats || []).find(r => r.dimension === dim && r.key === key)?.n ?? 0;
+      const inProgress = n('status', 'in_progress');
+      const underReview = n('status', 'under_review');
+      const completed = n('status', 'completed') + n('status', 'approved');
 
       // Update KPI DOM elements
       const kpiActiveTasks = document.getElementById('kpiActiveTasks');
@@ -207,13 +223,14 @@ export class DashboardModule {
 
       if (kpiActiveTasks) kpiActiveTasks.textContent = String(inProgress + underReview);
       if (kpiActiveTasksSub) kpiActiveTasksSub.textContent = `${inProgress} in progress • ${completed} completed`;
-      if (kpiActiveProjects) kpiActiveProjects.textContent = String(projectCount);
+      if (kpiActiveProjects) kpiActiveProjects.textContent = String(this.projectCount ?? 0);
       if (kpiReviewTasks) kpiReviewTasks.textContent = String(underReview);
-      if (kpiEmployees) kpiEmployees.textContent = String(empCount);
+      if (kpiEmployees) kpiEmployees.textContent = String(this.empCount ?? 0);
 
       // Render Recent Tasks Table
+      const tasks = recent?.data;
       const tbody = document.getElementById('recentTasksTableBody');
-      if (tbody) {
+      if (recent && tbody) {
         if (!tasks || tasks.length === 0) {
           tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No active tasks found. Create one to begin.</td></tr>`;
         } else {
@@ -233,19 +250,27 @@ export class DashboardModule {
         }
       }
 
-      // Chart data: every task this user may see (Row Level Security), not just the latest 20
-      const [{ data: chartTasks }, { data: chartDepts }] = await Promise.all([
-        supabase.from('tasks').select('status, department_id').limit(5000),
-        supabase.from('departments').select('id, name').order('name', { ascending: true })
-      ]);
-      this.initCharts(chartTasks || [], chartDepts || []);
+      // Chart data: every task this user may see (Row Level Security), counted by the database
+      this.initCharts(this.stats || [], this.deptList || []);
     } catch (err) {
       console.warn('Dashboard fetch error:', err);
     }
   }
 
-  initCharts(tasks, departments) {
+  destroyCharts() {
+    Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch { /* already gone */ } });
+    this.charts = {};
+  }
+
+  dispose() { this.destroyCharts(); }
+
+  initCharts(stats, departments) {
     if (!window.Chart) return;
+    this.destroyCharts();   // a refresh redraws the charts: the old ones must be released first
+    const by = (dim) => Object.fromEntries(stats.filter(r => r.dimension === dim).map(r => [r.key, r.n]));
+    const statusN = by('status');
+    const activeByDept = by('active_department');
+    const sum = (...keys) => keys.reduce((a, k) => a + (statusN[k] || 0), 0);
 
     // Replace a chart with an honest message when there is nothing to plot
     const emptyState = (canvasId, message) => {
@@ -256,20 +281,19 @@ export class DashboardModule {
     };
 
     // 1. Active deliverables per department (real counts)
-    const active = tasks.filter(t => !['completed', 'approved', 'cancelled'].includes(t.status));
     const deptCtx = document.getElementById('deptWorkloadChart')?.getContext('2d');
     if (deptCtx) {
       const rows = departments
-        .map(d => ({ name: d.name, count: active.filter(t => t.department_id === d.id).length }))
+        .map(d => ({ name: d.name, count: activeByDept[d.id] || 0 }))
         .filter(r => r.count > 0);
-      const unassigned = active.filter(t => !t.department_id).length;
+      const unassigned = activeByDept[''] || 0;
       if (unassigned > 0) rows.push({ name: 'No department', count: unassigned });
 
       if (rows.length === 0) {
         emptyState('deptWorkloadChart', 'No active deliverables yet.');
       } else {
         const palette = ['226, 77, 71', '215, 159, 62', '251, 186, 72', '80, 185, 227', '152, 214, 234', '224, 27, 40', '18, 171, 227'];
-        new window.Chart(deptCtx, {
+        this.charts.dept = new window.Chart(deptCtx, {
           type: 'bar',
           data: {
             labels: rows.map(r => r.name),
@@ -299,15 +323,15 @@ export class DashboardModule {
     const statusCtx = document.getElementById('statusDonutChart')?.getContext('2d');
     if (statusCtx) {
       const counts = [
-        tasks.filter(t => t.status === 'todo' || t.status === 'backlog').length,
-        tasks.filter(t => t.status === 'in_progress' || t.status === 'changes_requested').length,
-        tasks.filter(t => t.status === 'under_review').length,
-        tasks.filter(t => t.status === 'completed' || t.status === 'approved').length
+        sum('todo', 'backlog'),
+        sum('in_progress', 'changes_requested'),
+        sum('under_review'),
+        sum('completed', 'approved')
       ];
       if (counts.every(c => c === 0)) {
         emptyState('statusDonutChart', 'No tasks yet.');
       } else {
-        new window.Chart(statusCtx, {
+        this.charts.status = new window.Chart(statusCtx, {
           type: 'doughnut',
           data: {
             labels: ['To Do', 'In Production', 'Under Review', 'Completed'],

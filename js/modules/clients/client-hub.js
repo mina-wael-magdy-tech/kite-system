@@ -109,37 +109,32 @@ export class ClientHubModule {
     window.lucide?.createIcons();
 
     await this.loadHub();
-    Realtime.watch(['clients', 'client_departments', 'projects', 'tasks', 'campaigns'], () => this.loadHub());
+    // coalesced: one refresh per burst; only the part the changed tables can affect is read again
+    Realtime.watch(['clients', 'client_departments', 'projects', 'tasks', 'campaigns'], (changed) => this.loadHub(changed));
   }
 
-  async loadHub() {
+  /**
+   * @param {Set<string>} [changed] tables that changed; a change that cannot affect the client list (tasks / projects /
+   * campaigns) only re-reads the per-client counts.
+   * The counts come from ONE database call (client_task_stats(): open / done / late tasks and active projects per client,
+   * scoped by Row Level Security) instead of reading every task, project and campaign into the browser.
+   */
+  async loadHub(changed) {
     const sb = this.supabase;
-    const [cl, dp, pr, tk] = await Promise.all([
-      sb.from('clients').select('*, client_departments(department_id)').order('company_name'),
-      sb.from('departments').select('id, name, code').order('name'),
-      sb.from('projects').select('id, client_id, status'),
-      sb.from('tasks').select('id, status, due_date, project_id, campaign_id')
+    const listChanged = !this.clients || !changed || changed.has('*') || changed.has('clients') || changed.has('client_departments');
+    const [cl, dp, st] = await Promise.all([
+      listChanged ? sb.from('clients').select('*, client_departments(department_id)').order('company_name') : null,
+      listChanged ? sb.from('departments').select('id, name, code').order('name') : null,
+      sb.rpc('client_task_stats', { p_today: todayISO() })
     ]);
-    if (cl.error) { Toast.error(cl.error.message, 'Could not load clients'); return; }
-    const camps = await sb.from('campaigns').select('id, client_id');
-    this.clients = cl.data || [];
-    this.departments = dp.data || [];
-    this.monthly = await Money.map('client_monthly'); // empty unless you are the owner / CEO
-
-    const projClient = new Map((pr.data || []).map(p => [p.id, p.client_id]));
-    const campClient = new Map((camps.data || []).map(c => [c.id, c.client_id]));
-    const today = todayISO();
-    this.stats = new Map();
-    const stat = (id) => { if (!this.stats.has(id)) this.stats.set(id, { open: 0, done: 0, projects: 0, late: 0 }); return this.stats.get(id); };
-    (pr.data || []).forEach(p => { if (p.client_id && !['completed', 'cancelled'].includes(p.status)) stat(p.client_id).projects++; });
-    (tk.data || []).forEach(t => {
-      const cid = projClient.get(t.project_id) || campClient.get(t.campaign_id);
-      if (!cid) return;
-      const s = stat(cid);
-      if (DONE.has(t.status)) s.done++;
-      else if (t.status !== 'cancelled') { s.open++; if (t.due_date && t.due_date.slice(0, 10) < today) s.late++; }
-    });
-
+    if (cl?.error) { Toast.error(cl.error.message, 'Could not load clients'); return; }
+    if (st.error) { Toast.error(st.error.message, 'Could not load client figures'); return; }
+    if (cl) {
+      this.clients = cl.data || [];
+      this.departments = dp?.data || [];
+      this.monthly = await Money.map('client_monthly'); // empty unless you are the owner / CEO
+    }
+    this.stats = new Map((st.data || []).map(r => [r.client_id, { open: r.open_count, done: r.done_count, projects: r.project_count, late: r.late_count }]));
     const sel = document.getElementById('chDept');
     if (sel) {
       sel.innerHTML = '<option value="all">All departments</option>' + this.departments.map(d => `<option value="${d.id}">${escapeHTML(d.name)}</option>`).join('');

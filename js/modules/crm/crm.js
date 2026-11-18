@@ -13,6 +13,9 @@ import { Money } from '../../services/money.js';
 import { formatLeadStageBadge } from '../../utils/formatters.js';
 import { PAGE_SIZE, pageSlice, mountPager } from '../../ui/pagination.js';
 
+// The pipeline reads the newest deals, never more than this many at once ('Show more' reads the next slice).
+const LEAD_SLICE = 500;
+
 export class CrmModule {
   constructor(app) {
     this.app = app;
@@ -22,6 +25,8 @@ export class CrmModule {
     this.fType = 'all';
     this.fDept = 'all';
     this.leads = [];
+    this.leadCap = LEAD_SLICE;
+    this.leadTotal = 0;
   }
 
   async render(container, query) {
@@ -52,6 +57,7 @@ export class CrmModule {
             <span class="badge badge-emerald font-bold" id="pipelineTotalVal">Pipeline: EGP 0</span>
           </div>
 
+          <div id="pipelineNotice" class="text-2xs text-dim" style="padding-bottom: var(--space-2);"></div>
           <div id="pipelineContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); overflow-x: auto; padding-bottom: var(--space-2);">
             <!-- Pipeline columns populated dynamically -->
           </div>
@@ -108,7 +114,8 @@ export class CrmModule {
     document.getElementById('clientDeptFilter')?.addEventListener('change', (e) => { this.fDept = e.target.value; this.clientPage = 1; this.renderClientsTable(); });
 
     await this.loadCrmData();
-    Realtime.watch(['leads', 'clients', 'client_departments'], () => this.loadCrmData()); // live updates for everyone
+    // live updates for everyone; coalesced, and only what the changed tables can affect is read again
+    Realtime.watch(['leads', 'clients', 'client_departments'], (changed) => this.loadCrmData(changed));
 
     // A client's own page links here with ?edit=<id> to open the edit form.
     const editId = new URLSearchParams(query || '').get('edit');
@@ -118,36 +125,43 @@ export class CrmModule {
     }
   }
 
-  async loadCrmData() {
+  /** @param {Set<string>} [changed] tables that changed: a change to leads alone does not re-read the clients (and the reverse). */
+  async loadCrmData(changed) {
     const supabase = getSupabase();
     if (!supabase) return;
-
+    const all = !changed || changed.has('*') || !this.crmLoaded;
+    const clientsChanged = all || changed.has('clients') || changed.has('client_departments');
+    const leadsChanged = all || changed.has('leads');
     try {
-      // 1. Fetch Clients
-      const [{ data: clients }, { data: depts }] = await Promise.all([
-        supabase.from('clients').select('*, projects(id, name), client_departments(department_id)').order('company_name', { ascending: true }),
-        supabase.from('departments').select('id, name').order('name', { ascending: true })
-      ]);
-
-      this.clients = clients || [];
-      this.departments = depts || [];
-      this.monthly = await Money.map('client_monthly');
-      this.dealValues = await Money.map('lead_value');
-      const sel = document.getElementById('clientDeptFilter');
-      if (sel) {
-        sel.innerHTML = '<option value="all">All departments</option>' +
-          this.departments.map(d => `<option value="${escapeHTML(d.id)}">${escapeHTML(d.name)}</option>`).join('');
-        sel.value = this.fDept;
+      if (clientsChanged) {
+        // 1. Fetch Clients
+        const [{ data: clients }, { data: depts }] = await Promise.all([
+          supabase.from('clients').select('*, projects(id, name), client_departments(department_id)').order('company_name', { ascending: true }),
+          supabase.from('departments').select('id, name').order('name', { ascending: true })
+        ]);
+        this.clients = clients || [];
+        this.departments = depts || [];
+        this.monthly = await Money.map('client_monthly');
+        const sel = document.getElementById('clientDeptFilter');
+        if (sel) {
+          sel.innerHTML = '<option value="all">All departments</option>' +
+            this.departments.map(d => `<option value="${escapeHTML(d.id)}">${escapeHTML(d.name)}</option>`).join('');
+          sel.value = this.fDept;
+        }
       }
-
-      // 2. Fetch Leads / Opportunities
-      const { data: leads } = await supabase
-        .from('leads')
-        .select('*, client:clients(name, company_name)')
-        .order('created_at', { ascending: false });
-
-      this.leads = (leads || []).map(l => ({ ...l, value: this.dealValues.get(l.id) ?? 0 }));
-
+      if (leadsChanged) {
+        // 2. Fetch Leads / Opportunities: the newest slice plus the exact total
+        this.dealValues = await Money.map('lead_value');
+        const { data: leads, count } = await supabase
+          .from('leads')
+          .select('*, client:clients(name, company_name)', { count: 'exact' })
+          .order('created_at', { ascending: false }).order('id', { ascending: true })
+          .range(0, this.leadCap - 1);
+        this.leads = (leads || []).map(l => ({ ...l, value: this.dealValues.get(l.id) ?? 0 }));
+        this.leadTotal = count ?? this.leads.length;
+        this.renderLeadNotice();
+      }
+      this.crmLoaded = true;
       this.renderPipeline();
       this.renderClientsTable();
     } catch (err) {
@@ -155,6 +169,17 @@ export class CrmModule {
       this.renderPipeline();
       this.renderClientsTable();
     }
+  }
+
+  renderLeadNotice() {
+    const el = document.getElementById('pipelineNotice');
+    if (!el) return;
+    if (this.leadTotal <= this.leads.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `Showing the newest ${this.leads.length} of ${this.leadTotal} deals. <button type="button" class="btn btn-secondary btn-sm" id="leadsMore">Show ${LEAD_SLICE} more</button>`;
+    document.getElementById('leadsMore')?.addEventListener('click', async () => {
+      this.leadCap += LEAD_SLICE;
+      await this.loadCrmData(new Set(['leads']));
+    });
   }
 
   renderPipeline() {
