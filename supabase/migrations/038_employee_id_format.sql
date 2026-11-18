@@ -17,7 +17,7 @@
 --   SELECT employee_id FROM public.profiles WHERE employee_id !~ '^EMP-[0-9]{3,}$';              -- IDs that were typed by hand
 --   SELECT last_value, is_called FROM public.employee_id_seq;
 --
--- ROLLBACK:  psql -f supabase/maintenance/rollback-038.sql   (restores the old default, which truncates again from 1000)
+-- ROLLBACK:  psql -v ON_ERROR_STOP=1 -f supabase/maintenance/rollback-038.sql   (refuses, changing nothing, once an ID above 999 exists or the sequence is past 998)
 -- ====================================================================
 
 CREATE OR REPLACE FUNCTION public.format_employee_id(p_n BIGINT)

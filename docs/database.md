@@ -85,7 +85,7 @@ Identity & Profiles ───► Departments & Teams ───► Tasks & Projec
 The database holds **schema and access control only**. Business logic is in Edge Functions (see `docs/security.md` §4).
 
 - **`trg_set_updated_at`** (`003_updated_at.sql`): the only trigger. Sets `updated_at = NOW()` on update. Pure plumbing.
-- **`EMP-001`, `TSK-101` identifiers**: plain column `DEFAULT`s backed by sequences (`employee_id_seq`, `task_number_seq`) in `001_initial_schema.sql`. From migration 038 the employee ID default is `format_employee_id(nextval('employee_id_seq'))`: `EMP-001`...`EMP-999`, then `EMP-1000`, `EMP-1001` (never truncated; the old `LPAD(.., 3)` cut `1000` to `EMP-100`). Existing IDs are not rewritten. Rollback: `supabase/maintenance/rollback-038.sql`.
+- **`EMP-001`, `TSK-101` identifiers**: plain column `DEFAULT`s backed by sequences (`employee_id_seq`, `task_number_seq`) in `001_initial_schema.sql`. From migration 038 the employee ID default is `format_employee_id(nextval('employee_id_seq'))`: `EMP-001`...`EMP-999`, then `EMP-1000`, `EMP-1001` (never truncated; the old `LPAD(.., 3)` cut `1000` to `EMP-100`). Existing IDs are not rewritten. Rollback: `supabase/maintenance/rollback-038.sql` (refused once an ID above 999 exists).
 - **Task activity log, notifications, approvals, audit entries**: written by the `workflow` Edge Function. Clients have no write privilege on those tables.
 - **Profile creation**: done by `invite-employee` / `setup-admin` (there is no `auth.users` trigger; signups are disabled).
 - **Access-control predicates** (`auth_*` functions in `002_rls_policies.sql`): `SECURITY DEFINER`, `search_path = ''`, used only by RLS policies.

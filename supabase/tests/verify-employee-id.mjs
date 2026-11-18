@@ -124,14 +124,70 @@ try {
   const dupExplicit = await err(d2, "INSERT INTO public.profiles(id,full_name,email,employee_id) VALUES ($1,'X',$2,'EMP-90000')", [await newUser(d2), 'x2@x.test']);
   ok(dupExplicit?.code === '23505', 'an explicit duplicate is still refused by UNIQUE');
 
-  section('6. rollback and re-apply');
-  const rbBefore = (await d2.query("SELECT md5(string_agg(id::text||employee_id, ',' ORDER BY id)) h FROM public.profiles")).rows[0].h;
-  await d2.query(sql('maintenance/rollback-038.sql'));
-  ok(/lpad/i.test((await d2.query("SELECT column_default d FROM information_schema.columns WHERE table_schema='public' AND table_name='profiles' AND column_name='employee_id'")).rows[0].d), 'rollback restores the original default');
-  ok((await d2.query("SELECT to_regprocedure('public.format_employee_id(bigint)') f")).rows[0].f === null, 'rollback drops the formatter');
-  ok((await d2.query("SELECT md5(string_agg(id::text||employee_id, ',' ORDER BY id)) h FROM public.profiles")).rows[0].h === rbBefore, 'rollback touches no rows');
-  await d2.query(sql('migrations/038_employee_id_format.sql'));
-  ok(await newProfile(d2) === 'EMP-95002', 'applying 038 again works');
+  section('6. rollback: refused when it would be unsafe, allowed when it is not');
+  const mkdb = async (name) => {
+    await c0.query(`CREATE DATABASE ${name} ENCODING 'UTF8' TEMPLATE template0 LOCALE 'C'`);
+    const c = await connect(name); await c.query(STUBS.replace(/CREATE ROLE [^;]*;/g, ''));
+    for (const f of files.filter((x) => x < '038')) { await c.query(sql('migrations/' + f)); if (f.startsWith('005')) await c.query(sql('seed.sql')); }
+    await c.query(sql('migrations/038_employee_id_format.sql'));
+    return c;
+  };
+  const state = async (c) => ({
+    def: (await c.query("SELECT column_default d FROM information_schema.columns WHERE table_schema='public' AND table_name='profiles' AND column_name='employee_id'")).rows[0].d,
+    fn: (await c.query("SELECT to_regprocedure('public.format_employee_id(bigint)')::text f")).rows[0].f,
+    seq: JSON.stringify((await c.query('SELECT last_value, is_called FROM public.employee_id_seq')).rows[0]),
+    ids: (await c.query("SELECT md5(coalesce(string_agg(id::text||employee_id, ',' ORDER BY id), '')) h FROM public.profiles")).rows[0].h,
+  });
+  const same = (x, y) => x.def === y.def && x.fn === y.fn && x.seq === y.seq && x.ids === y.ids;
+  // node-pg sends the file as one query: after the exception the session sits in the aborted transaction (psql ends it at COMMIT); end it here
+  const rollback = async (c) => { const e = await err(c, sql('maintenance/rollback-038.sql')); if (e) await c.query('ROLLBACK'); return e; };
+
+  // A. an ID above 999 exists (the main database of this test has EMP-1000 ... and a sequence far past 999)
+  const sA = await state(d2);
+  const eA = await rollback(d2);
+  ok(eA && /rollback-038 refused/.test(eA.message) && /above 999/.test(eA.message) && /Keep migration 038/.test(eA.message), 'IDs above 999 exist: the rollback is refused with a clear message', eA?.message);
+  ok(/EMP-95\d{3}|EMP-9\d{4}/.test(eA?.message ?? ''), 'the message names the highest offending ID', eA?.message);
+  ok(same(sA, await state(d2)), 'the refused rollback left the default, formatter, sequence and every employee ID unchanged');
+  ok(!/lpad/i.test((await state(d2)).def) && (await state(d2)).fn !== null, 'so the 038 default and the formatter are still active');
+
+  // B. all IDs <= 999 and the sequence is low: the rollback succeeds
+  const d4 = await mkdb('kite4');
+  const made = []; for (let i = 0; i < 5; i++) made.push(await newProfile(d4));
+  ok(made.join() === 'EMP-001,EMP-002,EMP-003,EMP-004,EMP-005', 'setup: five employees with IDs below 1000');
+  const sB = await state(d4);
+  ok(await rollback(d4) === null, 'IDs all <= 999 and sequence low: the rollback succeeds');
+  const sB2 = await state(d4);
+  ok(/lpad/i.test(sB2.def) && sB2.fn === null, 'the original default is restored and the formatter is dropped');
+  ok(sB2.ids === sB.ids && sB2.seq === sB.seq, 'no employee ID was modified and the sequence was not reset or rewound');
+  ok(await rollback(d4) === null, 'the rollback can be run again (nothing left to undo)');
+  await d4.query(sql('migrations/038_employee_id_format.sql'));
+  ok(!/lpad/i.test((await state(d4)).def) && (await state(d4)).fn !== null, 'applying 038 again after the rollback restores the formatter and default');
+  ok(await newProfile(d4) === 'EMP-006', 'and the next employee continues at EMP-006');
+
+  // C. one hand-typed EMP-1000 with a low sequence: refused (the ID check alone is enough)
+  await d4.query("INSERT INTO auth.users(id,email) VALUES ('30000000-0000-4000-8000-000000000001','big@x.test')");
+  await d4.query("INSERT INTO public.profiles(id,full_name,email,employee_id) VALUES ('30000000-0000-4000-8000-000000000001','Big','big@x.test','EMP-1000')");
+  const sC = await state(d4);
+  const eC = await rollback(d4);
+  ok(eC && /EMP-1000/.test(eC.message) && /1 employee ID/.test(eC.message), 'a single EMP-1000 blocks the rollback and is named', eC?.message);
+  ok(same(sC, await state(d4)), '... leaving everything unchanged');
+  const eLead = await (async () => { await d4.query("UPDATE public.profiles SET employee_id='EMP-01000' WHERE id='30000000-0000-4000-8000-000000000001'"); const e = await rollback(d4); await d4.query("UPDATE public.profiles SET employee_id='EMP-1000' WHERE id='30000000-0000-4000-8000-000000000001'"); return e; })();
+  ok(eLead && /refused/.test(eLead.message), 'a zero-padded EMP-01000 is still a number above 999 and blocks the rollback');
+
+  // D. no ID above 999, but the sequence is already past 998: refused (the next insert would truncate and collide)
+  const d5 = await mkdb('kite5');
+  await newProfile(d5);
+  await setSeq(d5, 999);
+  const sD = await state(d5);
+  const eD = await rollback(d5);
+  ok(eD && /next employee ID number would be 1000/.test(eD.message), 'sequence at 999: the next ID would be 1000, so the rollback is refused', eD?.message);
+  ok(same(sD, await state(d5)), '... leaving everything unchanged');
+  await setSeq(d5, 998);
+  ok(await rollback(d5) === null, 'sequence at 998 (next ID is 999): the rollback is allowed');
+  ok(await newProfile(d5) === 'EMP-999', 'and the restored default still produces EMP-999 correctly');
+  ok((await d5.query('SELECT last_value FROM public.employee_id_seq')).rows[0].last_value == 999, 'the sequence is exactly where it was');
+  await d5.query(sql('migrations/038_employee_id_format.sql'));
+  ok(await newProfile(d5) === 'EMP-1000', 'after re-applying 038 the next employee is EMP-1000');
 
   section('7. the application: nothing assumes three digits');
   const jsFiles = []; const walk = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, f.name); if (f.isDirectory()) walk(p); else if (/\.(js|mjs|html)$/.test(f.name)) jsFiles.push(p); } };
