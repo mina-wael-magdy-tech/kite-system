@@ -10,7 +10,8 @@ import { Api } from '../../services/api.js';
 import { Money } from '../../services/money.js';
 import { escapeHTML, formatDate, formatCurrency } from '../../utils/helpers.js';
 import { formatExpenseStatusBadge } from '../../utils/formatters.js';
-import { loadBase, egp, fmt } from './fin-util.js';
+import { loadBase } from './fin-util.js';
+import { kpiTexts } from './currency-totals.mjs';
 import { InvoicesTab } from './tabs/invoices.js';
 import { ClientsTab } from './tabs/clients.js';
 import { SettingsTab } from './tabs/settings.js';
@@ -113,22 +114,14 @@ export class FinanceModule {
     const sb = getSupabase();
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     try {
-      const monthStart = new Date().toISOString().slice(0, 7) + '-01';
-      const [inv, pay] = await Promise.all([
-        sb.from('invoices').select('balance, status, currency').in('status', ['sent', 'partially_paid', 'overdue']),
-        sb.from('invoice_payments').select('amount, invoices(currency)').gte('paid_on', monthStart).is('reversed_at', null)
-      ]);
-      if (inv.error || pay.error) throw (inv.error || pay.error);
-      // Amounts in different currencies are NEVER added together: one total per currency ("EGP 1,000 · USD 50")
-      const byCurrency = (rows, amountKey, cur) => {
-        const m = new Map();
-        for (const r of rows || []) { const c = cur(r) || 'EGP'; m.set(c, (m.get(c) || 0) + (Number(r[amountKey]) || 0)); }
-        return m;
-      };
-      const show = (m) => (m.size === 0 ? egp(0) : [...m.entries()].sort().map(([c, v]) => `${c} ${fmt(v)}`).join(' · '));
-      set('kpiOutstanding', show(byCurrency(inv.data, 'balance', r => r.currency)));
-      set('kpiOverdue', show(byCurrency((inv.data || []).filter(i => i.status === 'overdue'), 'balance', r => r.currency)));
-      set('kpiCollected', show(byCurrency(pay.data, 'amount', r => r.invoices?.currency)));
+      // One database call: totals per currency on the STUDIO business month, with no 1000-row limit (migration 035).
+      // The function itself refuses anyone who is not an executive, and row-level security still applies.
+      const { data, error } = await sb.rpc('fin_kpis');
+      if (error) throw error;
+      const t = kpiTexts(data);
+      set('kpiOutstanding', t.outstanding);
+      set('kpiOverdue', t.overdue);
+      set('kpiCollected', t.collected);
     } catch (err) {
       console.warn('Finance KPIs:', err);
       ['kpiOutstanding', 'kpiOverdue', 'kpiCollected'].forEach(id => set(id, 'n/a'));
@@ -174,7 +167,7 @@ export class FinanceModule {
       const [{ data: depts }, res, pending] = await Promise.all([
         supabase.from('departments').select('id, name'),
         fetchPage(build, this.expensePage, PAGE_SIZE.table),
-        supabase.from('expenses').select('id', { count: 'exact', head: true }).in('status', ['submitted', 'draft'])
+        supabase.from('expenses').select('id', { count: 'exact', head: true }).eq('status', 'submitted')   // awaiting review: a draft is not yet submitted
       ]);
       if (seq !== this.expenseSeq) return;
       if (res.error) throw res.error;

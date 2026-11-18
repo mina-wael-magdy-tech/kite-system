@@ -63,3 +63,15 @@ re-run 033. `maintenance/remove-test-data.sql` switches the audit trigger off fo
 
 `npm run test:integrity` (real PostgreSQL, the whole chain 001 -> 033, concurrency, a legacy-data database), `npm run test:finance-concurrency`,
 `npm run test:concurrency` (Phase 1), `npm test` (RLS + roles, including the Edge Function behaviour).
+
+## Phase 5 (migration 035): business correctness
+Apply 035 after 034. **If 017 is ever re-run: re-apply 028, then 033, then 035** (035 re-creates `integrity_report()` with the 13 rows of 033 plus 4 new ones).
+| Change | Behaviour |
+|---|---|
+| `fin_kpis()`, `fin_client_balances()` | Outstanding, overdue, collected (studio month) and open balance per client, **per currency**, summed in the database (no 1000-row limit). SECURITY INVOKER: RLS applies, and the function refuses anyone who is not an executive (`auth_is_finance()`). No EXECUTE for PUBLIC / anon. |
+| `fin_invoice_links_guard` trigger | When an invoice's client, project, task or department is set or changed: the project and the task's project must belong to the same client, the task must belong to the invoice's project, the department must serve the client. Unverifiable links are allowed (project without a client, task without a project, client without departments). Retainer invoices are exempt from the department rule. Rows whose links do not change are never checked. `fin_invoice_link_drift()` lists legacy rows. |
+| `lead_stage_history` | Append-only: creation, stage change (from -> to) and deletion of a lead, with the actor's id and name (NULL when no signed-in person). Written by a trigger; UPDATE / DELETE / TRUNCATE are refused for everyone; readable by whoever can read the lead, administrators also read deleted leads. **No stage rule was added.** Not back-filled. |
+| Detectors (service role, read-only) | `fin_retainer_gaps()` (past months without a non-void invoice, from the later of plan start / plan creation month; nothing is back-filled), `crm_won_leads_without_client()`, `fin_project_invoicing_vs_budget()` (issued invoices before VAT, finance currency, above the project budget figure), `fin_invoice_link_drift()`. All appear in `integrity_report()`. |
+Rollback: statements in the header of 035 (no business data is touched; the history table is dropped only if it may be discarded).
+Still open (business decisions, not guessed): lead stage rules and conversion, budget model (`budgets` vs `money_figures`), retainer back-fill and inactive-client billing, expense claims by employees, opportunities, quotations, contracts, credit notes, payable invoices, USD legacy expenses, hand-typed budgets.
+Tests: `npm run test:integrity` section 17 (real PostgreSQL).

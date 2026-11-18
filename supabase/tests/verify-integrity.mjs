@@ -70,7 +70,7 @@ try {
     if (f.startsWith('005')) await db.query(sql('seed.sql'));
   }
   ok(chainOk && files.length >= 34 && files.includes('034_invitation_activation.sql'), `all ${files.length} migrations apply in order`);
-  for (const f of files.filter((x) => /^0(29|30|31|32|33|34)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
+  for (const f of files.filter((x) => /^0(29|30|31|32|33|34|35)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
   ok(notices.filter((m) => /NOT VALID|was NOT created/.test(m)).length === 0, 'a clean database raises no "NOT VALID / not created" notice', notices.filter((m) => /NOT VALID|NOT created/.test(m)).join(' | ').slice(0, 300));
 
   // fixtures ------------------------------------------------------------------------------------------------------------------
@@ -753,7 +753,7 @@ try {
     ok(noIdx.rows.length === 0, 'EVERY foreign key in the public schema has a supporting index', noIdx.rows.slice(0, 5).map((r) => r.t + '.' + r.conname).join(', '));
     ok(await count("SELECT count(*)::int c FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'idx_fk_%'") >= 40, 'migration 033 created the missing ones (idx_fk_*)');
     ok((await db.query("SELECT n FROM public.integrity_report() WHERE check_name LIKE 'foreign keys without%'")).rows[0].n == 0, 'integrity_report() agrees');
-    ok(await count("SELECT count(*)::int c FROM public.integrity_report()") === 13, 'integrity_report() lists its 13 detectors');
+    ok(await count("SELECT count(*)::int c FROM public.integrity_report()") === 17, 'integrity_report() lists its 17 detectors (13 from 033 + 4 from 035)');
     ok((await asUser(OWNER, 'SELECT * FROM public.integrity_report()')).error !== undefined, 'integrity_report() is not callable by a signed-in user');
     // F-24: app.migrating
     const cl = await client('MIG'); const inv = (await db.query(`SELECT public.fin_invoice_save($1,$2::jsonb) id`, [ADMIN, JSON.stringify({ client_id: cl, items: [{ description_en: 'x', quantity: 1, unit_price: 100, vat_rate: 0 }] })])).rows[0].id;
@@ -807,6 +807,8 @@ try {
     ok(await nPay() === 1 && await data() === d0, '... one overload, no data changed');
     const live = (await db.query('SELECT count(*)::int c FROM public.fin_reconcile_invoices()')).rows[0].c;
     ok(live === 0, '... and reconcile is clean', String(live));
+    await db.query(sql('migrations/035_phase5_business_correctness.sql'));        // documented rule: 035 goes last (it re-creates integrity_report())
+    ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 17 && await defs() === good, '... then 035 last restores the 17-row report and leaves the protected finance functions untouched');
   }
 
 
@@ -988,6 +990,209 @@ try {
   }
 
 
+  // ================================================================== 17. Phase 5 (migration 035)
+  section('17. Phase 5 (migration 035): studio-month KPIs, invoice link consistency, lead history, read-only detectors');
+  {
+    const asRole = async (role, q, p = []) => {      // a role with no user (anon): nothing is committed
+      const c = await connect('kite');
+      try { await c.query('BEGIN'); await c.query(`SET LOCAL ROLE ${role}`); const r = await tryq(c, q, p); await c.query('ROLLBACK'); return r; }
+      finally { await c.end(); }
+    };
+    const one = async (q, p = []) => (await db.query(q, p)).rows[0];
+    const save = (actor, o) => db.query('SELECT public.fin_invoice_save($1,$2::jsonb) id', [actor, JSON.stringify(o)]).then((r) => r.rows[0].id);
+    const saveE = (actor, o) => tryq(db, 'SELECT public.fin_invoice_save($1,$2::jsonb) id', [actor, JSON.stringify(o)]);
+    const item = (price = 100) => [{ description_en: 'Work', quantity: 1, unit_price: price, vat_rate: 0 }];
+    const iso = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10));
+    const sm = async (add) => iso((await one("SELECT ((public.studio_today() - (extract(day FROM public.studio_today())::int - 1)) + ($1 || ' month')::interval)::date::text d", [String(add)])).d);
+    const snapshot = async () => JSON.stringify(await one(`SELECT (SELECT count(*) FROM public.invoices) a, (SELECT count(*) FROM public.leads) b, (SELECT count(*) FROM public.retainer_plans) c,
+      (SELECT coalesce(sum(total),0) FROM public.invoices) d, (SELECT count(*) FROM public.invoice_payments) e, (SELECT count(*) FROM public.money_figures) f`));
+
+    // ---- P5-02 invoice links ------------------------------------------------------------------------------------------------
+    const cA = await client('LA'), cB = await client('LB');
+    const proj = async (code, cl) => (await db.query('INSERT INTO public.projects(code,name,client_id) VALUES ($1,$1,$2) RETURNING id', [code + Math.random().toString(36).slice(2, 7), cl])).rows[0].id;
+    const pA = await proj('PA', cA), pB = await proj('PB', cB), pN = await proj('PN', null);
+    const task = async (pr) => (await db.query("INSERT INTO public.tasks(title,created_by,project_id) VALUES ('t',$1,$2) RETURNING id", [ADMIN, pr])).rows[0].id;
+    const tA = await task(pA), tB = await task(pB), tN = await task(null);
+    const dep = async (n) => (await db.query('INSERT INTO public.departments(name) VALUES ($1) RETURNING id', [n + Math.random()])).rows[0].id;
+    const d1 = await dep('D1'), d2 = await dep('D2');
+    await db.query('INSERT INTO public.client_departments(client_id,department_id) VALUES ($1,$2)', [cA, d1]);
+    const base = (o) => ({ client_id: cA, kind: 'project', items: item(), ...o });
+    let r = await saveE(OWNER, base({ project_id: pB }));
+    ok(!!r.error && /project belongs to a different client/.test(r.error), 'P5-02: a project of another client is refused', r.error);
+    ok(!(await saveE(OWNER, base({ project_id: pA }))).error, 'P5-02: the client\'s own project is accepted');
+    ok(!(await saveE(OWNER, base({ project_id: pN }))).error, 'P5-02: a project with no client cannot be verified and is allowed');
+    r = await saveE(OWNER, base({ task_id: tB }));
+    ok(!!r.error && /different client/.test(r.error), 'P5-02: a task of another client\'s project is refused', r.error);
+    ok(!(await saveE(OWNER, base({ task_id: tA }))).error, 'P5-02: a task of the client\'s own project is accepted');
+    ok(!(await saveE(OWNER, base({ task_id: tN }))).error, 'P5-02: a task with no project is allowed');
+    r = await saveE(OWNER, base({ project_id: pA, task_id: await task(pN) }));
+    ok(!!r.error && /different project/.test(r.error), 'P5-02: a task of another project than the invoice\'s project is refused', r.error);
+    r = await saveE(OWNER, base({ department_id: d2 }));
+    ok(!!r.error && /department does not serve/.test(r.error), 'P5-02: a department that does not serve the client is refused', r.error);
+    ok(!(await saveE(OWNER, base({ department_id: d1 }))).error, 'P5-02: a department that serves the client is accepted');
+    ok(!(await saveE(OWNER, { client_id: cB, kind: 'project', items: item(), department_id: d2 })).error, 'P5-02: a client with no department list cannot be verified and is allowed');
+    ok(!(await saveE(OWNER, base({ kind: 'retainer', department_id: d2 }))).error, 'P5-02: a retainer invoice is exempt from the department rule (the department comes from the plan)');
+    const edit = await save(OWNER, base({ project_id: pA }));
+    r = await saveE(OWNER, { ...base({ project_id: pB }), id: edit });
+    ok(!!r.error && (await one('SELECT project_id p FROM public.invoices WHERE id=$1', [edit])).p === pA, 'P5-02: editing a draft cannot move it onto another client\'s project (nothing changed)', r.error);
+    r = await tryq(db, "INSERT INTO public.invoices(invoice_number,client_id,project_id,type,status,due_date) VALUES ('DRAFT-zz1',$1,$2,'receivable','draft',current_date)", [cA, pB]);
+    ok(!!r.error && /different client/.test(r.error), 'P5-02: a raw INSERT is refused too (the rule lives in the database, not in the Edge Function)', r.error);
+    // a legacy row that breaks the rule must never block payments, issue, status refresh
+    const leg = await save(OWNER, base({ project_id: pA }));
+    await db.query('ALTER TABLE public.invoices DISABLE TRIGGER fin_invoice_links_guard');
+    await db.query('UPDATE public.invoices SET project_id=$1 WHERE id=$2', [pB, leg]);
+    await db.query('ALTER TABLE public.invoices ENABLE TRIGGER fin_invoice_links_guard');
+    ok((await db.query('SELECT invoice_id FROM public.fin_invoice_link_drift() WHERE invoice_id=$1', [leg])).rows.length === 1, 'P5-02: fin_invoice_link_drift() lists the legacy row');
+    const legNo = await tryq(db, 'SELECT public.fin_invoice_issue($1,$2) n', [OWNER, leg]);
+    const legPay = await tryq(db, "SELECT public.fin_payment_add($1,$2,10,current_date,'cash',NULL,NULL,gen_random_uuid()) p", [OWNER, leg]);
+    ok(!legNo.error && !legPay.error, 'P5-02: a legacy row can still be issued and paid (only a change of its links is checked)', legNo.error || legPay.error);
+    ok(!(await tryq(db, "UPDATE public.invoices SET notes='n' WHERE id=$1", [leg])).error, '... and its other columns can still change');
+
+    // ---- P5-01 KPIs ------------------------------------------------------------------------------------------------------------
+    const cK = await client('LK');
+    const jpy = async (price, o = {}) => { const id = await save(OWNER, { client_id: cK, kind: 'adhoc', items: item(price), ...o }); await db.query("UPDATE public.invoices SET currency='JPY' WHERE id=$1", [id]); await db.query('SELECT public.fin_invoice_issue($1,$2)', [OWNER, id]); return id; };
+    const pay = (inv, amt, on) => db.query('SELECT public.fin_payment_add($1,$2,$3,$4::date,$5,NULL,NULL,gen_random_uuid()) p', [OWNER, inv, amt, on, 'cash']).then((x) => x.rows[0].p);
+    const today = iso((await one('SELECT public.studio_today()::text d')).d);
+    const prevEnd = iso((await one('SELECT ((public.studio_today() - (extract(day FROM public.studio_today())::int - 1)) - 1)::text d')).d);   // last day of the previous studio month
+    const invA = await jpy(1000); await pay(invA, 300, today); await pay(invA, 100, prevEnd); const rev = await pay(invA, 50, today);
+    await db.query('SELECT public.fin_payment_reverse($1,$2,$3)', [OWNER, rev, 'test']);
+    const invO = await jpy(400, { issue_date: '2020-01-01', due_date: '2020-02-01' });
+    ok((await one('SELECT status s FROM public.invoices WHERE id=$1', [invO])).s === 'overdue', 'KPI fixture: the old invoice is overdue');
+    const kp = async (user) => (await asUser(user, 'SELECT metric, currency, amount::text a FROM public.fin_kpis()'));
+    const kv = (res, m, c) => { const x = (res.rows || []).find((y) => y.metric === m && y.currency === c); return x ? Number(x.a) : null; };
+    let k = await kp(OWNER);
+    ok(!k.error, 'P5-01: an executive (owner) can call fin_kpis()', k.error);
+    ok(kv(k, 'outstanding', 'JPY') === 1000 && kv(k, 'overdue', 'JPY') === 400, 'P5-01: outstanding / overdue are summed per currency in the database', JSON.stringify(k.rows));
+    ok(kv(k, 'collected', 'JPY') === 300, 'P5-01: "collected" = payments of the STUDIO month only; last month\'s payment and the reversed one are excluded', JSON.stringify(k.rows));
+    const oracle = (await db.query(`SELECT i.currency, sum(i.balance)::text s FROM public.invoices i WHERE i.status IN ('sent','partially_paid','overdue') GROUP BY 1`)).rows;
+    ok(oracle.every((o) => kv(k, 'outstanding', o.currency) === Number(o.s)), 'P5-01: outstanding agrees with the invoices for every currency');
+    ok(kv((await kp(ADMIN)), 'outstanding', 'JPY') === 1000, 'P5-01: a super administrator is an executive too');
+    for (const [who, label] of [[E1, 'an employee'], [HR, 'an HR manager']]) {
+      const x = await kp(who); ok(!!x.error && /Finance access is limited/.test(x.error), `P5-01: ${label} is refused by fin_kpis()`, x.error);
+      const y = await asUser(who, 'SELECT * FROM public.fin_client_balances()'); ok(!!y.error && /Finance access is limited/.test(y.error), `P5-01: ${label} is refused by fin_client_balances()`, y.error);
+    }
+    for (const fn of ['fin_kpis()', 'fin_client_balances()']) {
+      const x = await asRole('anon', `SELECT * FROM public.${fn}`); ok(!!x.error && /permission denied/.test(x.error), `P5-01: anon cannot execute ${fn}`, x.error);
+    }
+    const meta = (await db.query("SELECT proname, prosecdef FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('fin_kpis','fin_client_balances')")).rows;
+    ok(meta.length === 2 && meta.every((m) => m.prosecdef === false), 'P5-01: both are SECURITY INVOKER (row-level security still applies, nothing is bypassed)');
+    ok(!((await db.query("SELECT has_function_privilege('public','public.fin_kpis()','EXECUTE') a, has_function_privilege('anon','public.fin_client_balances()','EXECUTE') b")).rows[0].a)
+       && !((await db.query("SELECT has_function_privilege('anon','public.fin_client_balances()','EXECUTE') b")).rows[0].b), 'P5-01: PUBLIC and anon hold no EXECUTE privilege');
+    // more than 1000 open invoices: the database sums them all
+    await db.query('BEGIN'); await db.query("SET LOCAL app.migrating = 'on'");
+    await db.query(`INSERT INTO public.invoices(invoice_number,client_id,type,status,due_date,currency,amount,tax,subtotal,vat_amount,total,net_receivable,balance)
+      SELECT 'LIM-' || g, $1, 'receivable', 'sent', current_date + 30, 'KRW', 1, 0, 1, 0, 1, 1, 1 FROM generate_series(1, 1200) g`, [cK]);
+    await db.query('COMMIT');
+    k = await kp(OWNER);
+    ok(kv(k, 'outstanding', 'KRW') === 1200, 'P5-01: 1200 open invoices are all counted (no 1000-row limit)', JSON.stringify(kv(k, 'outstanding', 'KRW')));
+    const cb = await asUser(OWNER, 'SELECT client_id, currency, balance::text b FROM public.fin_client_balances()');
+    const cbv = (c, cur) => { const x = (cb.rows || []).find((y) => y.client_id === c && y.currency === cur); return x ? Number(x.b) : null; };
+    ok(cbv(cK, 'JPY') === 1000 && cbv(cK, 'KRW') === 1200, 'P5-09: a client\'s open balance comes back per currency, never mixed', JSON.stringify(cb.rows?.filter((y) => y.client_id === cK)));
+    ok(!(cb.rows || []).some((y) => Number(y.b) <= 0), 'P5-09: only open balances are listed');
+    // the browser helpers
+    const ct = await import(pathToFileURL(path.join(SB, '..', 'js', 'modules', 'finance', 'currency-totals.mjs')).href);
+    ok(ct.formatTotals(new Map()) === 'EGP 0.00', 'P5-09: no balance shows EGP 0.00');
+    ok(ct.formatTotals(ct.totalsByCurrency([{ currency: 'USD', amount: 50 }, { currency: 'EGP', amount: 1000 }, { currency: 'EGP', amount: 0.5 }])) === 'EGP 1,000.50 · USD 50.00', 'P5-09: currencies are listed separately and never added together');
+    ok(ct.kpiTexts([{ metric: 'outstanding', currency: 'EGP', amount: '12.5' }]).overdue === 'EGP 0.00' && ct.kpiTexts([{ metric: 'collected', currency: 'JPY', amount: '3' }]).collected === 'JPY 3.00', 'P5-01: the KPI texts are built from the database rows');
+    const bb = ct.balancesByClient([{ client_id: 'x', currency: 'EGP', balance: '5' }, { client_id: 'x', currency: 'USD', balance: '2' }, { client_id: 'y', currency: null, balance: '1' }]);
+    ok(bb.get('x').size === 2 && bb.get('y').get('EGP') === 1, 'P5-09: balances are grouped per client and currency');
+    // P5-08: pending claims = submitted only
+    const fin = fs.readFileSync(path.join(SB, '..', 'js', 'modules', 'finance', 'finance.js'), 'utf8');
+    ok(/\.eq\('status', 'submitted'\)/.test(fin) && !/in\('status', \['submitted', 'draft'\]\)/.test(fin), 'P5-08: the pending-approvals count no longer includes drafts');
+    ok(/rpc\('fin_kpis'\)/.test(fin) && !/toISOString\(\)\.slice\(0, 7\)/.test(fin), 'P5-01: the KPIs use the database function, not the browser (UTC) month');
+
+    // ---- P5-04 lead stage history -------------------------------------------------------------------------------------------------
+    const hist = (id) => db.query('SELECT event, from_stage, to_stage, actor_id, actor_label FROM public.lead_stage_history WHERE lead_id=$1 ORDER BY changed_at, id', [id]).then((x) => x.rows);
+    const mk = await asUser(ADMIN, "INSERT INTO public.leads(title,stage,created_by) VALUES ('Deal',  'new', $1) RETURNING id", [ADMIN]);
+    const L1 = mk.rows?.[0]?.id;
+    ok(!!L1, 'P5-04: a manager creates a lead as before', mk.error);
+    let h = await hist(L1);
+    ok(h.length === 1 && h[0].event === 'created' && h[0].to_stage === 'new' && h[0].from_stage === null && h[0].actor_id === ADMIN && h[0].actor_label === 'admin', 'P5-04: creation is recorded with the person and their name', JSON.stringify(h));
+    ok(!(await asUser(ADMIN, "UPDATE public.leads SET stage='won' WHERE id=$1", [L1])).error, 'P5-04: no stage rule was added: new -> won is still allowed');
+    ok(!(await asUser(ADMIN, "UPDATE public.leads SET stage='new' WHERE id=$1", [L1])).error, 'P5-04: ... and won -> new is still allowed (rules are a business decision)');
+    await asUser(ADMIN, "UPDATE public.leads SET title='Deal 2', notes='x' WHERE id=$1", [L1]);
+    await asUser(ADMIN, "UPDATE public.leads SET stage='new' WHERE id=$1", [L1]);
+    h = await hist(L1);
+    ok(h.length === 3 && h[1].event === 'stage_changed' && h[1].from_stage === 'new' && h[1].to_stage === 'won' && h[2].from_stage === 'won' && h[2].to_stage === 'new', 'P5-04: every real stage change is recorded in order; edits that keep the stage, and a stage set to itself, are not', JSON.stringify(h));
+    await db.query("UPDATE public.leads SET stage='lost' WHERE id=$1", [L1]);
+    h = await hist(L1);
+    ok(h[3].actor_id === null && h[3].actor_label === null, 'P5-04: a change made without a signed-in person has no actor (never invented)');
+    const L2 = (await db.query("INSERT INTO public.leads(title,stage,assigned_to) VALUES ('Mine','new',$1) RETURNING id", [E2])).rows[0].id;
+    const vis = async (u, id) => (await asUser(u, 'SELECT count(*)::int n FROM public.lead_stage_history WHERE lead_id=$1', [id])).rows?.[0]?.n;
+    ok(await vis(E2, L2) === 1 && await vis(E1, L2) === 0 && await vis(E1, L1) === 0, 'P5-04 RLS: the history is visible to whoever can see the lead and to nobody else');
+    ok(await vis(ADMIN, L2) === 1 && await vis(ADMIN, L1) === 4, 'P5-04 RLS: an administrator sees it all');
+    ok(!!(await asRole('anon', 'SELECT * FROM public.lead_stage_history')).error, 'P5-04 RLS: anon cannot read it');
+    for (const [who, q, nm] of [[ADMIN, "INSERT INTO public.lead_stage_history(lead_id,event) VALUES (gen_random_uuid(),'created')", 'insert'], [ADMIN, "UPDATE public.lead_stage_history SET to_stage='x'", 'update'], [ADMIN, 'DELETE FROM public.lead_stage_history', 'delete'], [E2, "INSERT INTO public.lead_stage_history(lead_id,event) VALUES (gen_random_uuid(),'created')", 'insert (employee)']]) {
+      const x = await asUser(who, q); ok(!!x.error && /permission denied/.test(x.error), `P5-04: a signed-in user cannot ${nm} history rows`, x.error);
+    }
+    for (const [q, nm] of [["UPDATE public.lead_stage_history SET to_stage='x'", 'UPDATE'], ['DELETE FROM public.lead_stage_history', 'DELETE'], ['TRUNCATE public.lead_stage_history', 'TRUNCATE']]) {
+      const x = await tryq(db, q); ok(!!x.error && /append-only/.test(x.error), `P5-04: ${nm} is refused even for the database owner`, x.error);
+    }
+    const hadH = await count('SELECT count(*)::int c FROM public.lead_stage_history');
+    await asUser(ADMIN, 'DELETE FROM public.leads WHERE id=$1', [L1]);
+    h = await hist(L1);
+    ok(h.length === 5 && h[4].event === 'deleted' && h[4].from_stage === 'lost' && h[4].actor_id === ADMIN, 'P5-04: deleting a lead is recorded and the history of the deleted lead survives', JSON.stringify(h[4]));
+    ok(await count('SELECT count(*)::int c FROM public.lead_stage_history') === hadH + 1, '... nothing else was removed');
+    ok(await vis(E2, L1) === 0 && await vis(ADMIN, L1) === 5, 'P5-04 RLS: only an administrator still reads the history of a deleted lead');
+    ok(!(await db.query("SELECT column_name FROM information_schema.columns WHERE table_name='lead_stage_history'")).rows.some((c) => /value|amount/.test(c.column_name)), 'P5-04: the history never stores the (owner-only) deal value');
+
+    // ---- P5-05 retainer gaps (read-only) -----------------------------------------------------------------------------------------
+    const cR = await client('LR');
+    const plan = async (name, start, extra = '') => { const id = (await db.query('INSERT INTO public.retainer_plans(client_id,name,monthly_fee,start_date) VALUES ($1,$2,500,$3) RETURNING id', [cR, name + Math.random(), start])).rows[0].id;
+      await db.query("UPDATE public.retainer_plans SET created_at = $2::date + 3 WHERE id=$1", [id, start]); if (extra) await db.query(extra, [id]); return id; };
+    const m3 = await sm(-3), m2 = await sm(-2), m1 = await sm(-1), m0 = await sm(0);
+    const P = await plan('Gap', m3);
+    const gaps = async (id) => (await db.query('SELECT month::text m FROM public.fin_retainer_gaps() WHERE plan_id=$1 ORDER BY month', [id])).rows.map((x) => x.m);
+    ok(JSON.stringify(await gaps(P)) === JSON.stringify([m3, m2, m1]), 'P5-05: three past months without an invoice are reported; the current month is not a gap yet', JSON.stringify(await gaps(P)));
+    await db.query('SELECT public.fin_retainer_generate($1,$2::date)', [OWNER, m2]);
+    ok(JSON.stringify(await gaps(P)) === JSON.stringify([m3, m1]), 'P5-05: a billed month is no longer a gap');
+    const inv2 = (await db.query('SELECT id FROM public.invoices WHERE retainer_plan_id=$1 AND period_month=$2::date', [P, m2])).rows[0].id;
+    await db.query('SELECT public.fin_invoice_void($1,$2,$3)', [OWNER, inv2, 'test']);
+    ok((await gaps(P)).includes(m2), 'P5-05: a voided invoice does not count as billing');
+    const Pend = await plan('Ended', m3, `UPDATE public.retainer_plans SET end_date = '${m2}'::date + 20 WHERE id=$1`);
+    ok(JSON.stringify(await gaps(Pend)) === JSON.stringify([m3, m2]), 'P5-05: months after the plan\'s end date are not gaps', JSON.stringify(await gaps(Pend)));
+    const Pin = await plan('Off', m3, 'UPDATE public.retainer_plans SET is_active=false WHERE id=$1');
+    ok((await gaps(Pin)).length === 0, 'P5-05: an inactive plan reports nothing');
+    const Pnew = await plan('New', m0);
+    ok((await gaps(Pnew)).length === 0, 'P5-05: a plan that starts this month has no past month to miss');
+    // created later than it started: months before the plan existed are not "missed"
+    const Plate = (await db.query('INSERT INTO public.retainer_plans(client_id,name,monthly_fee,start_date) VALUES ($1,$2,500,$3) RETURNING id', [cR, 'Late' + Math.random(), m3])).rows[0].id;
+    ok((await gaps(Plate)).length === 0, 'P5-05: a plan that starts in the past but was created today has no missed month (it is only reported from the month it was created)');
+
+    // ---- P5-06 detectors: read-only, service role only ---------------------------------------------------------------------------
+    await db.query("INSERT INTO public.leads(title,stage,client_id) VALUES ('Won-no-client','won',NULL), ('Won-with-client','won',$1)", [cA]);
+    ok((await db.query("SELECT title FROM public.crm_won_leads_without_client() WHERE title LIKE 'Won-%'")).rows.map((x) => x.title).join() === 'Won-no-client', 'P5-06: only a won lead WITHOUT a client is listed');
+    const cP = await client('LP'); const pBud = await proj('PBUD', cP);
+    await db.query("INSERT INTO public.money_figures(entity,entity_id,amount) VALUES ('project_budget',$1,100)", [pBud]);
+    const invP = await save(OWNER, { client_id: cP, kind: 'project', project_id: pBud, items: item(150) });
+    const inBud = () => db.query('SELECT budget::text b, invoiced::text i FROM public.fin_project_invoicing_vs_budget() WHERE project_id=$1', [pBud]).then((x) => x.rows);
+    ok((await inBud()).length === 0, 'P5-06: a DRAFT invoice does not count against the project budget');
+    await db.query('SELECT public.fin_invoice_issue($1,$2)', [OWNER, invP]);
+    ok(JSON.stringify(await inBud()) === JSON.stringify([{ b: '100.00', i: '150.00' }]), 'P5-06: issued invoices above the budget figure are listed (before VAT)', JSON.stringify(await inBud()));
+    await db.query("UPDATE public.money_figures SET amount=150 WHERE entity='project_budget' AND entity_id=$1", [pBud]);
+    ok((await inBud()).length === 0, 'P5-06: invoicing equal to the budget is not listed');
+    const rep = Object.fromEntries((await db.query('SELECT check_name, n FROM public.integrity_report()')).rows.map((x) => [x.check_name, num(x.n)]));
+    ok(Object.keys(rep).length === 17, 'P5-06: integrity_report() lists 17 detectors (13 + 4 new)', String(Object.keys(rep).length));
+    ok(rep['won leads without a client'] >= 1 && rep['past retainer months without an invoice (active plans)'] >= 3 && rep['invoices linked to a project / task / department of another client'] >= 1, 'P5-06: the new rows count what the detectors find', JSON.stringify(rep));
+    for (const fn of ['fin_retainer_gaps()', 'crm_won_leads_without_client()', 'fin_project_invoicing_vs_budget()', 'fin_invoice_link_drift()', 'integrity_report()']) {
+      const a = await asUser(OWNER, `SELECT * FROM public.${fn}`); const b = await asRole('anon', `SELECT * FROM public.${fn}`);
+      ok(!!a.error && /permission denied/.test(a.error) && !!b.error, `P5-06: ${fn} is callable only by the service role`, a.error);
+    }
+    const s0 = await snapshot();
+    for (const fn of ['fin_retainer_gaps', 'crm_won_leads_without_client', 'fin_project_invoicing_vs_budget', 'fin_invoice_link_drift', 'integrity_report']) await db.query(`SELECT * FROM public.${fn}()`);
+    ok(await snapshot() === s0, 'P5-06: running every detector changes no invoice, payment, lead, plan or figure');
+    const ro = (await db.query("SELECT proname, provolatile FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname IN ('fin_retainer_gaps','crm_won_leads_without_client','fin_project_invoicing_vs_budget','fin_invoice_link_drift','integrity_report','fin_kpis','fin_client_balances')")).rows;
+    ok(ro.length === 7 && ro.every((x) => x.provolatile === 's'), 'every new read function is declared STABLE (the database refuses writes inside it)');
+
+    // ---- re-run rule + idempotency ------------------------------------------------------------------------------------------------
+    const before = await snapshot();
+    ok(!(await tryq(db, sql('migrations/035_phase5_business_correctness.sql'))).error, '035 can be run twice');
+    ok(await snapshot() === before && await count('SELECT count(*)::int c FROM public.integrity_report()') === 17, '... changes no data and keeps 17 detectors');
+    await db.query(sql('migrations/017_finance_invoicing.sql')); await db.query(sql('migrations/028_finance_integrity.sql')); await db.query(sql('migrations/033_database_hygiene.sql'));
+    ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 13, 'documented rule: re-running 033 restores the 13-row report ...');
+    await db.query(sql('migrations/035_phase5_business_correctness.sql'));
+    ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 17 && (await saveE(OWNER, base({ project_id: pB }))).error !== undefined, '... and re-applying 035 last brings back 17 detectors; the link guard was never removed by 017');
+  }
   console.log(`\n${passed} passed, ${failed} failed`);
 } catch (e) { failed++; console.log('SCRIPT ERROR', e); }
 finally {

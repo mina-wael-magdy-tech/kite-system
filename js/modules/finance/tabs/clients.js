@@ -10,12 +10,13 @@ import { Toast } from '../../../services/toast-service.js';
 import { formDialog } from '../../../ui/dialogs.js';
 import { escapeHTML } from '../../../utils/helpers.js';
 import { egp, day, today, clientLabel } from '../fin-util.js';
+import { balancesByClient, formatTotals } from '../currency-totals.mjs';
 
 export class ClientsTab {
   constructor(shell) {
     this.shell = shell;
     this.plans = [];
-    this.balances = new Map();   // client_id -> open balance
+    this.balances = new Map();   // client_id -> Map(currency -> open balance)
     this.filter = { q: '', type: 'all' };
   }
 
@@ -43,11 +44,10 @@ export class ClientsTab {
     const sb = getSupabase();
     const [plans, inv] = await Promise.all([
       sb.from('retainer_plans').select('*, department:departments(name)').order('created_at', { ascending: false }),
-      sb.from('invoices').select('client_id, balance, status').in('status', ['sent', 'partially_paid', 'overdue'])
+      sb.rpc('fin_client_balances')   // open balance per client AND currency, summed in the database (migration 035)
     ]);
     this.plans = plans.data || [];
-    this.balances = new Map();
-    (inv.data || []).forEach(i => this.balances.set(i.client_id, (this.balances.get(i.client_id) || 0) + Number(i.balance)));
+    this.balances = balancesByClient(inv.error ? [] : inv.data);
     this.render();
   }
 
@@ -66,12 +66,12 @@ export class ClientsTab {
     el.innerHTML = `<div class="fin-cards">${rows.map(c => {
       const b = billing.get(c.id);
       const plans = this.plans.filter(p => p.client_id === c.id);
-      const owed = this.balances.get(c.id) || 0;
+      const owed = this.balances.get(c.id);   // Map(currency -> open balance) or undefined
       return `<div class="card entity-card">
         <div class="card-header"><div>
           <span class="badge ${b ? (b.billing_type === 'retainer' ? 'badge-indigo' : 'badge-sky') : 'badge-slate'}">${b ? (b.billing_type === 'retainer' ? 'Retainer' : 'On-demand') : 'No billing profile'}</span>
           <div class="card-title" style="margin-top:6px">${escapeHTML(clientLabel(c))}</div></div>
-          ${owed > 0 ? `<span class="badge badge-amber" title="Open balance">${egp(owed)}</span>` : ''}</div>
+          ${owed && owed.size ? `<span class="badge badge-amber" title="Open balance (one total per currency)">${escapeHTML(formatTotals(owed))}</span>` : ''}</div>
         <div class="card-body" style="display:flex; flex-direction:column; gap: var(--space-2)">
           <div class="text-2xs text-muted">${b?.tax_registration_no ? `Tax ID ${escapeHTML(b.tax_registration_no)} · ` : ''}Withholding ${b?.withholding_rate != null ? Number(b.withholding_rate) + '%' : 'default'} · terms ${b?.payment_terms_days ?? 'default'} days</div>
           ${plans.map(p => `<div class="fin-plan ${p.is_active ? '' : 'inactive'}">
