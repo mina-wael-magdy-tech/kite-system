@@ -13,7 +13,8 @@
     "test:phase4": "node verify-frontend.mjs && node verify-drive.mjs",
     "test:perf": "node verify-perf.mjs",
     "test:requests": "node verify-requests.mjs",
-    "test:background": "node verify-background.mjs"
+    "test:background": "node verify-background.mjs",
+    "test:employee-id": "node verify-employee-id.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.14"

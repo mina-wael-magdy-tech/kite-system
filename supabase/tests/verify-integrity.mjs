@@ -70,7 +70,7 @@ try {
     if (f.startsWith('005')) await db.query(sql('seed.sql'));
   }
   ok(chainOk && files.length >= 34 && files.includes('034_invitation_activation.sql'), `all ${files.length} migrations apply in order`);
-  for (const f of files.filter((x) => /^0(29|30|31|32|33|34|35|36|37)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
+  for (const f of files.filter((x) => /^0(29|30|31|32|33|34|35|36|37|38)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
   ok(notices.filter((m) => /NOT VALID|was NOT created/.test(m)).length === 0, 'a clean database raises no "NOT VALID / not created" notice', notices.filter((m) => /NOT VALID|NOT created/.test(m)).join(' | ').slice(0, 300));
 
   // fixtures ------------------------------------------------------------------------------------------------------------------
