@@ -84,31 +84,37 @@ serveJson(async (req) => {
 
   // Claim the send FIRST (migration 032): the same requestId can only be recorded once, so a double click / retry never notifies twice.
   const requestId = body.requestId === undefined || body.requestId === null || body.requestId === "" ? null : uuid(body.requestId, "requestId");
-  const { data: claim, error: claimErr } = await admin.from("broadcasts").insert({
-    sender_id: caller.id, title, message, link, audience_type: audience, audience_label: label.slice(0, 200), recipient_count: 0, request_id: requestId,
-  }).select("id").single();
-  if (claimErr) {
-    if (claimErr.code === "23505" && requestId) {
-      const { data: prev } = await admin.from("broadcasts").select("recipient_count, completed_at").eq("request_id", requestId).maybeSingle();
-      return json(req, { success: true, duplicate: true, status: prev?.completed_at ? "sent" : "processing", recipients: prev?.recipient_count ?? 0 });
-    }
-    console.error("broadcast claim failed:", claimErr.message);   // history is not essential: still send
+  // One atomic claim (migration 037). A repeated request id with the same sender and content RESUMES an unfinished broadcast: every
+  // notification carries the key broadcast:<id>, so people who already received it are skipped. If the claim cannot be made we stop:
+  // sending without a claim would be unrecoverable and could duplicate.
+  const { data: claimRows, error: claimErr } = await admin.rpc("broadcast_claim", {
+    p_sender: caller.id, p_title: title, p_message: message, p_link: link, p_audience_type: audience, p_label: label, p_request: requestId,
+  });
+  const claim = Array.isArray(claimRows) ? claimRows[0] : claimRows;
+  if (claimErr || !claim?.broadcast_id) {
+    console.error("broadcast claim failed:", claimErr?.message);
+    throw new HttpError(500, "The announcement could not be recorded, so it was not sent. Please try again.");
+  }
+  if (claim.state === "conflict") throw new HttpError(409, "This request id was already used for a different announcement");
+  if (claim.state === "done") {
+    const { data: prev } = await admin.from("broadcasts").select("recipient_count").eq("id", claim.broadcast_id).maybeSingle();
+    return json(req, { success: true, duplicate: true, status: "sent", recipients: prev?.recipient_count ?? 0 });
   }
 
-  // in-app notification + push, a few at a time; only notifications that were really stored are counted
-  let delivered = 0;
+  const dedupeKey = `broadcast:${claim.broadcast_id}`;
   for (let i = 0; i < ids.length; i += 10) {
-    const results = await Promise.all(ids.slice(i, i + 10).map((userId) =>
-      notify(admin, { userId, type: "announcement", title, content: message, link: link ?? undefined, metadata: { sender_id: caller.id } })
+    await Promise.all(ids.slice(i, i + 10).map((userId) =>
+      notify(admin, { userId, type: "announcement", title, content: message, link: link ?? undefined, metadata: { sender_id: caller.id }, dedupeKey })
     ));
-    delivered += results.filter(Boolean).length;
   }
-  if (claim?.id) {
-    const { error } = await admin.from("broadcasts").update({ recipient_count: delivered, completed_at: new Date().toISOString() }).eq("id", claim.id);
-    if (error) console.error("broadcast history update failed:", error.message);
+  // the notification rows are the truth: this counts them and closes the broadcast (safe to repeat)
+  const { data: delivered, error: finErr } = await admin.rpc("broadcast_finish", { p_id: claim.broadcast_id });
+  if (finErr) {
+    console.error("broadcast finish failed:", finErr.message);
+    throw new HttpError(500, "The announcement was delivered but could not be closed. Send the same request again to finish it.");
   }
-  await audit(admin, { userId: caller.id, action: "BROADCAST_SENT", entityType: "broadcasts", newData: { audience, label, count: delivered, intended: ids.length, title } }, req);
-  return json(req, { success: true, recipients: delivered });
+  await audit(admin, { userId: caller.id, action: "BROADCAST_SENT", entityType: "broadcasts", newData: { audience, label, count: delivered, intended: ids.length, title, resumed: claim.state === "resume" } }, req);
+  return json(req, { success: true, recipients: delivered, ...(claim.state === "resume" ? { resumed: true } : {}) });
 });
 
 function list(v: unknown, field: string): unknown[] {

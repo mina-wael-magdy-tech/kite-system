@@ -82,3 +82,14 @@ Apply 036 after 035. Details, measurements and the rollback are in `docs/perform
 * The old helper functions are still there. **If 017 is ever re-run**, it re-creates the finance policies in their slower per-row form (correct, just slow): re-apply 036 afterwards (order 017 -> 028 -> 033 -> 035 -> 036).
 * New: `task_stats()`, `client_task_stats(date)` (SECURITY INVOKER, RLS decides what is counted), id-set helpers `auth_managed_department_ids()`, `auth_assigned_task_ids()`, `auth_managed_project_ids()`, and six `created_at DESC` indexes. No index was dropped (8 redundant ones are listed in the performance document for a separate clean-up).
 * Rollback: `supabase/maintenance/rollback-036.sql` (restores every original policy, drops the helpers, aggregates and indexes; no data is touched).
+
+## Phase 7 (migration 037): background processing and data lifecycle
+Apply 037 after 036 (after 035 at the latest: it re-creates `integrity_report()`, now 19 rows). Details, cron set-up, verification queries and
+the rollback are in `docs/background-jobs.md`.
+* `due_digest_batch()` / `publish_digest_batch()`: set-based, keyset-paged digest candidates (no 1,000-row cap); the same eligibility as before.
+* `job_runs` ledger with `job_run_start / _progress / _finish`, `job_status()`, `job_missed_runs(age, expected jobs)`, `job_stuck_runs(age)`: read-only, no built-in threshold or alert.
+* `broadcast_claim()` / `broadcast_finish()`: atomic claim, resume, per-recipient dedupe key (no stale-claim takeover).
+* `storage_cleanup_requeue()` (+ history table `storage_cleanup_requeues`), `storage_cleanup_prune_candidates(age)`, `storage_orphans(age)`: the 029 queue functions are untouched; nothing is deleted.
+* `fin_retainer_drafts_unreviewed()`; the "drafts ready" alert has a per-month dedupe key.
+* Rollback: `supabase/maintenance/rollback-037.sql`. Tests: `npm run test:background`.
+* Re-run rule: after 017 the order is 028 -> 033 -> 035 -> 036 -> 037.

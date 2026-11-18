@@ -600,9 +600,9 @@ section('A21 Phase 3: history protection, atomic department / expense / reaction
   ok(/record_has_history/.test(td) && /409/.test(td), '... and "has history" is a clear 409, not a 500');
   ok(!/from\("user_departments"\)\s*\.(delete|insert|upsert)/.test(wfSrc), 'workflow: no separate user_departments delete / insert remains');
   ok(/drive_link_begin/.test(kdSrc) && /drive_link_complete/.test(kdSrc) && !/from\("client_drive_links"\)\.upsert/.test(kdSrc), 'kite-drive: link creation records an intent first and completes link + intent together (no blind upsert)');
-  ok(bcSrc.indexOf('.from("broadcasts").insert') > 0 && bcSrc.indexOf('.from("broadcasts").insert') < bcSrc.indexOf('notify(admin'), 'broadcast: the send is claimed (recorded) BEFORE anyone is notified');
+  ok(bcSrc.indexOf('broadcast_claim') > 0 && bcSrc.indexOf('broadcast_claim') < bcSrc.indexOf('notify(admin'), 'broadcast: the send is claimed (recorded) BEFORE anyone is notified');
   ok(/content_plan_client_feedback/.test(cpSrc) && !/from\("content_plans"\)\.update/.test(cpSrc) && !/from\("content_feedback"\)\.insert/.test(cpSrc), 'client-preview: approval + evidence are ONE SQL call (no separate update / insert)');
-  ok(/dedupeKey: `due_digest:/.test(drSrc) && /dedupeKey: `publish_reminder:/.test(drSrc) && /drainStorageCleanup/.test(drSrc), 'due-reminders: one digest per person per day is enforced by a dedupe key; the daily job also drains the storage queue');
+  ok(/dedupeKey: `\$\{key\}:\$\{today\}`/.test(drSrc) && /"due_digest", "due_digest"/.test(drSrc) && /"publish_reminder", "publish_reminder"/.test(drSrc) && /drainStorageCleanup/.test(drSrc), 'due-reminders: one digest per person per day is enforced by a dedupe key; the daily job also drains the storage queue');
 }
 
 section('A13 retainer-billing (cron): recipients');
@@ -1213,7 +1213,7 @@ CREATE FUNCTION realtime.topic() RETURNS text LANGUAGE sql AS $$ select null::te
 GRANT USAGE ON SCHEMA realtime TO authenticated;`);
 const files = fs.readdirSync(path.join(SB, 'migrations')).sort();
 for (const f of files) {
-  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033', '034', '035', '036'].some((p) => f.startsWith(p))) continue;
+  if (['020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033', '034', '035', '036', '037'].some((p) => f.startsWith(p))) continue;
   try { await db.exec(fs.readFileSync(path.join(SB, 'migrations', f), 'utf8')); } catch (e) { ok(false, 'migration ' + f + ' applies', e.message.slice(0, 120)); }
   if (f.startsWith('005')) await db.exec(fs.readFileSync(path.join(SB, 'seed.sql'), 'utf8'));
 }

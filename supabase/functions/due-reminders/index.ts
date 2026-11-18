@@ -1,16 +1,28 @@
 // PULSE STUDIO OS — Edge Function: due-reminders  (scheduled)
 //
-// Once a day, tells each person which of their tasks are overdue, due today or due tomorrow
-// (in-app notification + push). Idempotent: a person gets at most one digest per day.
+// Once a day:
+//   1. housekeeping FIRST (so a slow digest can never skip it): removes files whose database rows were deleted (migration 029)
+//      and marks invitations past their 7 days as expired (migration 034),
+//   2. tells each person which of their tasks are overdue, due today or due tomorrow, and which posts they have to publish
+//      (in-app notification + push).
+//
+// Idempotent and resumable (migration 037): the candidates come from due_digest_batch() / publish_digest_batch(), which never return
+// a person who already has today's digest. The digest runs in batches of BATCH people inside a time budget; when the budget is used up
+// the run ends as "partial" and the next run (or a manual re-run) continues with the people who are still missing.
+// Every run is recorded in job_runs.
 //
 // Not callable by users: it requires the CRON_SECRET in the `x-cron-secret` header.
-// Schedule it from Supabase Dashboard → Integrations → Cron (HTTP request), daily, e.g. 07:00 Cairo time.
+// Schedule it from Supabase Dashboard → Integrations → Cron (HTTP request), daily, e.g. 07:00 Cairo time (docs/background-jobs.md).
 //
 //   supabase secrets set CRON_SECRET=<long random string>  REMINDER_TZ=Africa/Cairo
+//   optional: JOB_TIME_BUDGET_MS (default 90000): stop starting new batches after this many milliseconds
 
 import { HttpError, json, serveJson } from "../_shared/http.ts";
 import { adminClient, audit, notify } from "../_shared/auth.ts";
 import { drainStorageCleanup } from "../_shared/storage-cleanup.ts";
+import { startJobRun } from "../_shared/jobs.ts";
+
+const BATCH = 200;
 
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
@@ -26,6 +38,8 @@ function dateInZone(tz: string, plusDays = 0): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(base);
 }
 
+interface Candidate { user_id: string; late_count: number; today_count: number; tomorrow_count: number; first_label: string }
+
 serveJson(async (req) => {
   const secret = Deno.env.get("CRON_SECRET") ?? "";
   if (secret.length < 24) throw new HttpError(503, "Reminders are disabled: CRON_SECRET (min 24 chars) is not configured");
@@ -33,107 +47,77 @@ serveJson(async (req) => {
 
   const tz = Deno.env.get("REMINDER_TZ") ?? "Africa/Cairo";
   const today = dateInZone(tz), tomorrow = dateInZone(tz, 1);
+  const budgetMs = Math.max(1000, Number(Deno.env.get("JOB_TIME_BUDGET_MS") ?? 90_000) || 90_000);
+  const startedAt = Date.now();
   const admin = adminClient();
+  const run = await startJobRun(admin, "due-reminders");
+  const checkpoint: Record<string, unknown> = { today };
 
-  const { data: tasks, error } = await admin.from("tasks")
-    .select("id, task_number, title, due_date, assigned_to, status")
-    .not("assigned_to", "is", null)
-    .not("status", "in", "(completed,approved,cancelled,backlog)")
-    .lte("due_date", tomorrow);
-  if (error) throw error;
-
-  // one digest per person
-  const byUser = new Map<string, { overdue: string[]; today: string[]; tomorrow: string[] }>();
-  for (const t of tasks ?? []) {
-    const d = byUser.get(t.assigned_to) ?? { overdue: [], today: [], tomorrow: [] };
-    const label = `${t.task_number} ${t.title}`;
-    if (t.due_date < today) d.overdue.push(label);
-    else if (t.due_date === today) d.today.push(label);
-    else d.tomorrow.push(label);
-    byUser.set(t.assigned_to, d);
-  }
-
-  // skip people already reminded in the last 20 hours (safe to re-run)
-  const since = new Date(Date.now() - 20 * 3_600_000).toISOString();
-  const { data: already } = await admin.from("notifications").select("user_id").eq("type", "due_digest").gte("created_at", since);
-  const done = new Set((already ?? []).map((r: { user_id: string }) => r.user_id));
-
-  // only active people
-  const { data: active } = await admin.from("profiles").select("id").in("id", [...byUser.keys()]).eq("employment_status", "active");
-  const activeIds = new Set((active ?? []).map((p: { id: string }) => p.id));
-
-  let notified = 0;
-  for (const [userId, d] of byUser) {
-    if (done.has(userId) || !activeIds.has(userId)) continue;
-    const parts = [
-      d.overdue.length ? `${d.overdue.length} overdue` : "",
-      d.today.length ? `${d.today.length} due today` : "",
-      d.tomorrow.length ? `${d.tomorrow.length} due tomorrow` : "",
-    ].filter(Boolean);
-    const first = [...d.overdue, ...d.today, ...d.tomorrow][0];
-    // dedupeKey: the DATABASE allows one digest per person per day, so two overlapping runs cannot both send (migration 032)
-    const sent = await notify(admin, {
-      userId, type: "due_digest",
-      title: "Your deadlines",
-      content: `${parts.join(", ")}. Next: ${first}`,
-      link: "#calendar",
-      dedupeKey: `due_digest:${today}`,
-    });
-    if (sent) notified++;
-  }
-
-  // ---- social posts the person has to publish (content plans) ----
-  const { data: posts } = await admin.from("content_posts")
-    .select("id, plan_id, title, post_date, post_time, publisher_id, content_plans(title)")
-    .not("publisher_id", "is", null)
-    .neq("status", "published")
-    .not("post_date", "is", null)
-    .lte("post_date", tomorrow);
-
-  const byPublisher = new Map<string, { late: string[]; today: string[]; tomorrow: string[]; planId: string }>();
-  for (const p of posts ?? []) {
-    const d = byPublisher.get(p.publisher_id) ?? { late: [], today: [], tomorrow: [], planId: p.plan_id };
-    // deno-lint-ignore no-explicit-any
-    const label = `${p.title}${(p as any).content_plans?.title ? ` (${(p as any).content_plans.title})` : ""}${p.post_time ? ` ${String(p.post_time).slice(0, 5)}` : ""}`;
-    if (p.post_date < today) d.late.push(label);
-    else if (p.post_date === today) d.today.push(label);
-    else d.tomorrow.push(label);
-    byPublisher.set(p.publisher_id, d);
-  }
-  const { data: alreadyPub } = await admin.from("notifications").select("user_id").eq("type", "publish_reminder").gte("created_at", since);
-  const donePub = new Set((alreadyPub ?? []).map((r: { user_id: string }) => r.user_id));
-  const { data: activePub } = await admin.from("profiles").select("id").in("id", [...byPublisher.keys()]).eq("employment_status", "active");
-  const activePubIds = new Set((activePub ?? []).map((p: { id: string }) => p.id));
-
-  let publishNotified = 0;
-  for (const [userId, d] of byPublisher) {
-    if (donePub.has(userId) || !activePubIds.has(userId)) continue;
-    const parts = [
-      d.today.length ? `${d.today.length} to publish today` : "",
-      d.late.length ? `${d.late.length} overdue` : "",
-      d.tomorrow.length ? `${d.tomorrow.length} tomorrow` : "",
-    ].filter(Boolean);
-    const first = [...d.today, ...d.late, ...d.tomorrow][0];
-    const sent = await notify(admin, {
-      userId, type: "publish_reminder",
-      title: "Posts to publish",
-      content: `${parts.join(", ")}. Next: ${first}`,
-      link: "#calendar",
-      dedupeKey: `publish_reminder:${today}`,
-    });
-    if (sent) publishNotified++;
-  }
-
-  // files whose database rows were deleted: remove them now, retry the ones that failed earlier (migration 029)
-  const cleanup = await drainStorageCleanup(admin, 200);
-
-  // invitations past their 7 days are marked expired (migration 034); a failure here must not stop the reminders
-  let invitationsExpired = 0;
   try {
-    const { data } = await admin.rpc("invitations_expire_pending");
-    invitationsExpired = typeof data === "number" ? data : 0;
-  } catch (err) { console.error("invitation expiry sweep failed:", err); }
+    // ---- 1. housekeeping first; neither step can stop the other or the digest ----
+    // files whose database rows were deleted: remove them now, retry the ones that failed earlier (migration 029)
+    const cleanup = await drainStorageCleanup(admin, 200);
 
-  await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: { notified, publishNotified, today, tz, storageCleanup: cleanup, invitationsExpired } });
-  return json(req, { success: true, notified, publishNotified, today, storageCleanup: cleanup, invitationsExpired });
+    // invitations past their 7 days are marked expired (migration 034)
+    let invitationsExpired = 0;
+    try {
+      const { data } = await admin.rpc("invitations_expire_pending");
+      invitationsExpired = typeof data === "number" ? data : 0;
+    } catch (err) { console.error("invitation expiry sweep failed:", err); }
+    checkpoint.housekeeping = "done";
+    await run.progress(checkpoint);
+
+    // ---- 2. digests, in bounded batches ----
+    let partial = false;
+    const runDigest = async (rpc: "due_digest_batch" | "publish_digest_batch", type: "due_digest" | "publish_reminder", key: string): Promise<number> => {
+      let after: string | null = null;
+      let sentCount = 0;
+      for (;;) {
+        if (Date.now() - startedAt > budgetMs) { partial = true; break; }
+        const { data, error } = await admin.rpc(rpc, { p_today: today, p_tomorrow: tomorrow, p_after: after, p_limit: BATCH });
+        if (error) throw new Error(`${rpc} failed: ${error.message}`);
+        const rows = (data ?? []) as Candidate[];
+        if (!rows.length) break;
+        for (const r of rows) {
+          const parts = type === "due_digest"
+            ? [
+              r.late_count ? `${r.late_count} overdue` : "",
+              r.today_count ? `${r.today_count} due today` : "",
+              r.tomorrow_count ? `${r.tomorrow_count} due tomorrow` : "",
+            ]
+            : [
+              r.today_count ? `${r.today_count} to publish today` : "",
+              r.late_count ? `${r.late_count} overdue` : "",
+              r.tomorrow_count ? `${r.tomorrow_count} tomorrow` : "",
+            ];
+          // dedupeKey: the DATABASE allows one digest per person per day, so two overlapping runs cannot both send (migration 032)
+          const sent = await notify(admin, {
+            userId: r.user_id, type,
+            title: type === "due_digest" ? "Your deadlines" : "Posts to publish",
+            content: `${parts.filter(Boolean).join(", ")}. Next: ${r.first_label}`,
+            link: "#calendar",
+            dedupeKey: `${key}:${today}`,
+          });
+          if (sent) sentCount++;
+          after = r.user_id;
+        }
+        checkpoint[`${type}_after`] = after;
+        checkpoint[`${type}_sent`] = sentCount;
+        await run.progress(checkpoint);
+        if (rows.length < BATCH) break;
+      }
+      return sentCount;
+    };
+
+    const notified = await runDigest("due_digest_batch", "due_digest", "due_digest");
+    const publishNotified = await runDigest("publish_digest_batch", "publish_reminder", "publish_reminder");
+
+    const summary = { notified, publishNotified, today, tz, storageCleanup: cleanup, invitationsExpired, partial };
+    await audit(admin, { userId: null, action: "DUE_REMINDERS_SENT", entityType: "tasks", newData: summary });
+    await run.finish(partial ? "partial" : "succeeded", summary);
+    return json(req, { success: true, ...summary });
+  } catch (err) {
+    await run.finish("failed", { ...checkpoint }, (err as Error)?.message ?? "failed");
+    throw err;
+  }
 });

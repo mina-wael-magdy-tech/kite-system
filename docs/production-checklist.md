@@ -42,6 +42,10 @@ For each of: admin, department manager, employee A, employee B, HR, finance, sus
 - [ ] Assign yourself a task from another account: a push arrives and tapping it opens Tasks
 - [ ] iPhone: installed to Home Screen before enabling notifications
 - [ ] Daily Cron job created for `due-reminders` (header `x-cron-secret`)
+- [ ] Daily Cron job created for `retainer-billing` (same headers; without it no retainer draft is created and no invoice becomes overdue)
+- [ ] Migration `037` applied BEFORE the Edge Functions `due-reminders`, `retainer-billing`, `broadcast`, `workflow` are deployed
+- [ ] `SELECT * FROM public.job_status();` shows both jobs with a recent `succeeded` run (queries and set-up: `docs/background-jobs.md`)
+- [ ] Kite Drive cleanup: checked on Hostinger that `api/_chunks`, `_zips`, `_thumbs` hold no stale files (cleanup runs only when an upload starts; see `docs/background-jobs.md` section 5)
 - [ ] Sign out on a shared device and confirm that device no longer receives your alerts
 
 ## 5. Re-verify the access model after any change to policies

@@ -21,6 +21,7 @@ import { activeRoleNames, adminClient, ADMIN_ROLES, assertCanGrantRole, assertCa
 import * as v from "../_shared/validate.ts";
 import { isAllowedPushEndpoint, pushConfigured, sendPush } from "../_shared/push.ts";
 import { drainStorageCleanup } from "../_shared/storage-cleanup.ts";
+import { mayRunStorageCleanup } from "../_shared/authz.ts";
 
 const PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 const TASK_STATUSES = [
@@ -74,7 +75,10 @@ serveJson(async (req) => {
     case "expense.decide": return json(req, await expenseDecide(req, admin, caller, body));
     case "expense.submit": return json(req, await expenseSubmit(req, admin, caller, body));
     case "expense.pay": return json(req, await expensePay(req, admin, caller, body));
-    case "storage.cleanup": return json(req, { success: true, ...(await drainStorageCleanup(admin, 100)) });
+    case "storage.cleanup":
+      // deletes files with the service role: active administrators only (Phase 7)
+      if (!mayRunStorageCleanup(caller.status, caller.roles, ADMIN_ROLES)) throw new HttpError(403, "Only an administrator can run the storage clean-up");
+      return json(req, { success: true, ...(await drainStorageCleanup(admin, 100)) });
     case "leave.decide": return json(req, await leaveDecide(req, admin, caller, body));
     case "task.comment": return json(req, await taskComment(admin, caller, body));
     case "task.file_added": return json(req, await taskFileAdded(admin, caller, body));
@@ -288,6 +292,7 @@ async function expenseDecide(req: Request, admin: SupabaseClient, caller: Caller
   await notify(admin, {
     userId: exp.submitted_by, type: "expense_decision",
     title: `Expense ${decision}`, content: exp.title, link: "#finance",
+    dedupeKey: `expense_decision:${expenseId}:${decision}`,   // a claim is decided once
   });
   await audit(admin, { userId: caller.id, action: `EXPENSE_${decision.toUpperCase()}`, entityType: "expenses", entityId: expenseId, oldData: { status: "submitted" }, newData: { status: decision } }, req);
   return { success: true, status: decision };
@@ -345,6 +350,7 @@ async function leaveDecide(req: Request, admin: SupabaseClient, caller: Caller, 
   await notify(admin, {
     userId: lr.user_id, type: "leave_decision",
     title: `Leave request ${decision}`, content: notes ?? `Your leave request was ${decision}.`, link: "#hr",
+    dedupeKey: `leave_decision:${leaveId}`,   // a request is decided once (pending -> decided)
   });
   await audit(admin, { userId: caller.id, action: `LEAVE_${decision.toUpperCase()}`, entityType: "leave_requests", entityId: leaveId, oldData: { status: "pending" }, newData: { status: decision } }, req);
   return { success: true, status: decision };
@@ -423,6 +429,7 @@ async function taskDelete(req: Request, admin: SupabaseClient, caller: Caller, b
     await notify(admin, {
       userId, type: "task_deleted", title: `Task removed: ${task.task_number}`,
       content: `${who} deleted “${task.title}”`, link: "#tasks",
+      dedupeKey: `task_deleted:${taskId}`,   // a task is deleted once
     });
   }
   await drainStorageCleanup(admin);   // best effort; anything that fails stays queued and is retried by the daily job
@@ -566,6 +573,7 @@ async function taskComment(admin: SupabaseClient, caller: Caller, b: Record<stri
     await notify(admin, {
       userId, type: "task_comment", title: `${who} commented on ${task.task_number}`,
       content: preview, link: "#tasks", metadata: { task_id: taskId },
+      dedupeKey: `task_comment:${comment.id}`,   // the comment row is the event
     });
   }
   return { success: true, id: comment.id };
@@ -603,6 +611,7 @@ async function leaveSubmitted(admin: SupabaseClient, caller: Caller, b: Record<s
     await notify(admin, {
       userId, type: "leave_request", title: "Leave request to review",
       content: `${who}: ${lr.total_days} day(s), ${lr.start_date} → ${lr.end_date}`, link: "#hr",
+      dedupeKey: `leave_request:${leaveId}`,   // fires only within 10 minutes of creating the row; a repeat is the same event
     });
   }
   return { success: true };
@@ -621,6 +630,7 @@ async function expenseSubmitted(admin: SupabaseClient, caller: Caller, b: Record
     await notify(admin, {
       userId, type: "expense_request", title: "Expense claim to approve",
       content: `${who}: ${ex.title} (${ex.currency} ${ex.amount})`, link: "#finance",
+      dedupeKey: `expense_request:${expenseId}`,   // same event, same key
     });
   }
   return { success: true };

@@ -70,7 +70,7 @@ try {
     if (f.startsWith('005')) await db.query(sql('seed.sql'));
   }
   ok(chainOk && files.length >= 34 && files.includes('034_invitation_activation.sql'), `all ${files.length} migrations apply in order`);
-  for (const f of files.filter((x) => /^0(29|30|31|32|33|34|35|36)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
+  for (const f of files.filter((x) => /^0(29|30|31|32|33|34|35|36|37)_/.test(x))) { const r = await tryq(db, sql('migrations/' + f)); ok(!r.error, `${f} can be run twice`, r.error); }
   ok(notices.filter((m) => /NOT VALID|was NOT created/.test(m)).length === 0, 'a clean database raises no "NOT VALID / not created" notice', notices.filter((m) => /NOT VALID|NOT created/.test(m)).join(' | ').slice(0, 300));
 
   // fixtures ------------------------------------------------------------------------------------------------------------------
@@ -753,7 +753,7 @@ try {
     ok(noIdx.rows.length === 0, 'EVERY foreign key in the public schema has a supporting index', noIdx.rows.slice(0, 5).map((r) => r.t + '.' + r.conname).join(', '));
     ok(await count("SELECT count(*)::int c FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'idx_fk_%'") >= 40, 'migration 033 created the missing ones (idx_fk_*)');
     ok((await db.query("SELECT n FROM public.integrity_report() WHERE check_name LIKE 'foreign keys without%'")).rows[0].n == 0, 'integrity_report() agrees');
-    ok(await count("SELECT count(*)::int c FROM public.integrity_report()") === 17, 'integrity_report() lists its 17 detectors (13 from 033 + 4 from 035)');
+    ok(await count("SELECT count(*)::int c FROM public.integrity_report()") === 19, 'integrity_report() lists its 19 detectors (13 from 033 + 4 from 035 + 2 from 037)');
     ok((await asUser(OWNER, 'SELECT * FROM public.integrity_report()')).error !== undefined, 'integrity_report() is not callable by a signed-in user');
     // F-24: app.migrating
     const cl = await client('MIG'); const inv = (await db.query(`SELECT public.fin_invoice_save($1,$2::jsonb) id`, [ADMIN, JSON.stringify({ client_id: cl, items: [{ description_en: 'x', quantity: 1, unit_price: 100, vat_rate: 0 }] })])).rows[0].id;
@@ -809,6 +809,8 @@ try {
     ok(live === 0, '... and reconcile is clean', String(live));
     await db.query(sql('migrations/035_phase5_business_correctness.sql'));        // documented rule: 035 goes last (it re-creates integrity_report())
     ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 17 && await defs() === good, '... then 035 last restores the 17-row report and leaves the protected finance functions untouched');
+    await db.query(sql('migrations/037_background_jobs.sql'));                     // documented rule: 037 goes after 035 (it re-creates integrity_report() with 19 rows)
+    ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 19, '... and 037 after it brings the 19-row report back');
   }
 
 
@@ -1172,7 +1174,7 @@ try {
     await db.query("UPDATE public.money_figures SET amount=150 WHERE entity='project_budget' AND entity_id=$1", [pBud]);
     ok((await inBud()).length === 0, 'P5-06: invoicing equal to the budget is not listed');
     const rep = Object.fromEntries((await db.query('SELECT check_name, n FROM public.integrity_report()')).rows.map((x) => [x.check_name, num(x.n)]));
-    ok(Object.keys(rep).length === 17, 'P5-06: integrity_report() lists 17 detectors (13 + 4 new)', String(Object.keys(rep).length));
+    ok(Object.keys(rep).length === 19, 'P5-06 / P7: integrity_report() lists 19 detectors (13 + 4 from Phase 5 + 2 from Phase 7)', String(Object.keys(rep).length));
     ok(rep['won leads without a client'] >= 1 && rep['past retainer months without an invoice (active plans)'] >= 3 && rep['invoices linked to a project / task / department of another client'] >= 1, 'P5-06: the new rows count what the detectors find', JSON.stringify(rep));
     for (const fn of ['fin_retainer_gaps()', 'crm_won_leads_without_client()', 'fin_project_invoicing_vs_budget()', 'fin_invoice_link_drift()', 'integrity_report()']) {
       const a = await asUser(OWNER, `SELECT * FROM public.${fn}`); const b = await asRole('anon', `SELECT * FROM public.${fn}`);
@@ -1192,6 +1194,8 @@ try {
     ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 13, 'documented rule: re-running 033 restores the 13-row report ...');
     await db.query(sql('migrations/035_phase5_business_correctness.sql'));
     ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 17 && (await saveE(OWNER, base({ project_id: pB }))).error !== undefined, '... and re-applying 035 last brings back 17 detectors; the link guard was never removed by 017');
+    await db.query(sql('migrations/037_background_jobs.sql'));
+    ok(await count('SELECT count(*)::int c FROM public.integrity_report()') === 19, '... and 037 after 035 brings the report to 19 rows (Phase 7)');
   }
   console.log(`\n${passed} passed, ${failed} failed`);
 } catch (e) { failed++; console.log('SCRIPT ERROR', e); }

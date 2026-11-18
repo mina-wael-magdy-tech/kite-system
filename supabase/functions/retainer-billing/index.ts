@@ -13,6 +13,7 @@
 
 import { HttpError, json, serveJson } from "../_shared/http.ts";
 import { adminClient, EXECUTIVE_ROLES, notify, userIdsWithRoles } from "../_shared/auth.ts";
+import { startJobRun } from "../_shared/jobs.ts";
 
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
@@ -32,19 +33,36 @@ serveJson(async (req) => {
   const month = `${today.slice(0, 7)}-01`;
 
   const admin = adminClient();
-  const { data: created, error } = await admin.rpc("fin_retainer_generate", { p_actor: null, p_month: month });
-  if (error) { console.error("retainer generate failed:", error.message); throw new Error("retainer generate failed"); }
-  const { data: overdue, error: e2 } = await admin.rpc("fin_mark_overdue");
-  if (e2) console.error("mark overdue failed:", e2.message);
+  const run = await startJobRun(admin, "retainer-billing");
+  try {
+    const { data: created, error } = await admin.rpc("fin_retainer_generate", { p_actor: null, p_month: month });
+    if (error) { console.error("retainer generate failed:", error.message); throw new Error("retainer generate failed"); }
+    const { data: overdue, error: e2 } = await admin.rpc("fin_mark_overdue");
+    if (e2) console.error("mark overdue failed:", e2.message);
 
-  if ((created ?? 0) > 0) {
-    const people = await userIdsWithRoles(admin, EXECUTIVE_ROLES); // Finance data is executive-only
-    await Promise.all(people.map((userId) => notify(admin, {
-      userId, type: "invoice_drafts",
-      title: "Retainer invoices ready to review",
-      content: `${created} draft invoice${created === 1 ? "" : "s"} created for ${month.slice(0, 7)}. Review and send them.`,
-      link: "#finance",
-    })));
+    // "Drafts ready" alert: one per person per month (dedupe key). If this run created nothing but earlier drafts of the month are
+    // still waiting, the alert is sent now in case an earlier run could not send it (a repeat is blocked by the key).
+    let drafts = created ?? 0;
+    if (drafts === 0) {
+      const { data: waiting } = await admin.from("invoices").select("id")
+        .eq("kind", "retainer").eq("status", "draft").eq("period_month", month);
+      drafts = (waiting ?? []).length;
+    }
+    if (drafts > 0) {
+      const people = await userIdsWithRoles(admin, EXECUTIVE_ROLES); // Finance data is executive-only
+      await Promise.all(people.map((userId) => notify(admin, {
+        userId, type: "invoice_drafts",
+        title: "Retainer invoices ready to review",
+        content: `${drafts} draft invoice${drafts === 1 ? "" : "s"} created for ${month.slice(0, 7)}. Review and send them.`,
+        link: "#finance",
+        dedupeKey: `invoice_drafts:${month.slice(0, 7)}`,
+      })));
+    }
+    const summary = { month, created: created ?? 0, markedOverdue: overdue ?? 0, overdueError: e2 ? e2.message : null };
+    await run.finish(e2 ? "partial" : "succeeded", summary);
+    return json(req, { success: true, month, created: created ?? 0, markedOverdue: overdue ?? 0 });
+  } catch (err) {
+    await run.finish("failed", { month }, (err as Error)?.message ?? "failed");
+    throw err;
   }
-  return json(req, { success: true, month, created: created ?? 0, markedOverdue: overdue ?? 0 });
 });

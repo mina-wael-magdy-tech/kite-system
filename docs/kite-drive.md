@@ -81,3 +81,6 @@ The browser sends the token in the `X-Drive-Token` header for every call (thumbn
 | Every Drive file link gives a 500 error | Hostinger rejected `uploads/.htaccess`: delete it and report the error |
 
 To stop the connection at once, delete `api/config.php` on Hostinger. Drive itself carries on working.
+
+## Cleanup schedule (Phase 7 note)
+The API removes unfinished uploads, old ZIPs and old thumbnails only when someone starts an upload (`remove_stale_uploads()` in `api/index.php`); there is no cron entry point and nothing records when it last ran. `api/_log/actions.log` is never rotated. No Hostinger cron exists to set up yet: adding a protected cleanup entry point (or accepting request-driven cleanup) is an open decision. How to check the server by hand: `docs/background-jobs.md` section 5.
