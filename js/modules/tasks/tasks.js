@@ -882,7 +882,8 @@ export class TasksModule {
       const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
       if (!CONFIG.ALLOWED_FILE_EXTENSIONS.includes(ext)) { Toast.error(`“${file.name}”: .${ext || '?'} files are not allowed`, 'Upload rejected'); continue; }
       if (!file.size || file.size > CONFIG.MAX_TASK_FILE_SIZE_BYTES) { Toast.error(`“${file.name}” must be under ${Math.round(CONFIG.MAX_TASK_FILE_SIZE_BYTES / 1048576)} MB`, 'Upload rejected'); continue; }
-      const path = `${taskId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.\-]+/g, '_').slice(-120)}`;
+      // <task_id>/<uploader_id>-<file_uuid>-<name>: the uploader id in the path is what Storage RLS and migration 039 check
+      const path = `${taskId}/${this.app.currentUser.id}-${crypto.randomUUID()}-${file.name.replace(/[^\w.\-]+/g, '_').slice(-120)}`;
       try {
         const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
         if (upErr) throw upErr;

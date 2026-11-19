@@ -590,7 +590,7 @@ export class DocumentsModule {
 
     if (taskId) {
       const bucket = CONFIG.STORAGE_BUCKETS.TASK_ATTACHMENTS;
-      const path = `${taskId}/${crypto.randomUUID()}-${safeName}`;
+      const path = `${taskId}/${me}-${crypto.randomUUID()}-${safeName}`; // uploader-bound (migration 039)
       const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, { upsert: false, contentType });
       if (upErr) throw upErr;
       const { error: rowErr } = await supabase.from('task_attachments').insert({

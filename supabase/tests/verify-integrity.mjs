@@ -197,11 +197,12 @@ try {
   {
     const q = (where = '') => count(`SELECT count(*)::int c FROM public.storage_cleanup_queue WHERE done_at IS NULL ${where}`);
     const task = (await db.query("INSERT INTO public.tasks(title,created_by) VALUES ('att',$1) RETURNING id", [ADMIN])).rows[0].id;
-    const att = (await db.query("INSERT INTO public.task_attachments(task_id,file_name,file_size,file_type,storage_path,uploaded_by) VALUES ($1,'a.png',1,'image/png','u/att1.png',$2) RETURNING id", [task, ADMIN])).rows[0].id;
+    const attPath = `${task}/${ADMIN}-bbbbbbbb-1111-4222-8333-000000000001-att1.png`;   // uploader-bound path (migration 039)
+    const att = (await db.query("INSERT INTO public.task_attachments(task_id,file_name,file_size,file_type,storage_path,uploaded_by) VALUES ($1,'a.png',1,'image/png',$3,$2) RETURNING id", [task, ADMIN, attPath])).rows[0].id;
     await db.query('BEGIN'); await db.query('DELETE FROM public.task_attachments WHERE id=$1', [att]); await db.query('ROLLBACK');
     ok(await q() === 0 && await count('SELECT count(*)::int c FROM public.task_attachments WHERE id=$1', [att]) === 1, 'a rolled-back delete queues nothing and keeps the row (the file is not touched)');
     await db.query('DELETE FROM public.task_attachments WHERE id=$1', [att]);
-    const row = (await db.query("SELECT bucket, path, source FROM public.storage_cleanup_queue WHERE path='u/att1.png'")).rows[0];
+    const row = (await db.query("SELECT bucket, path, source FROM public.storage_cleanup_queue WHERE path=$1", [attPath])).rows[0];
     ok(row && row.bucket === 'task-attachments' && row.source === 'task_attachments', 'deleting the row queues its file (bucket task-attachments) in the same transaction', JSON.stringify(row));
     // cascade: plan -> assets
     const plan = (await db.query("INSERT INTO public.content_plans(title,created_by) VALUES ('pl',$1) RETURNING id", [ADMIN])).rows[0].id;
@@ -849,7 +850,8 @@ try {
     await L.query("INSERT INTO public.content_post_assets(plan_id,post_id,storage_path,file_name,file_type,file_size,uploaded_by) VALUES ($1,$2,$3,'f','image/png',1,$4)", [pA, postB, `${own}/plans/${pA}/mismatch.png`, own]);       // plan A's visual on plan B's post
     await L.query("INSERT INTO public.audit_logs(user_id,action,entity_type) VALUES ($1,'OLD_EVENT','x')", [emp]);
     const tk = (await L.query("INSERT INTO public.tasks(title,created_by) VALUES ('old task',$1) RETURNING id", [own])).rows[0].id;
-    await L.query("INSERT INTO public.task_attachments(task_id,file_name,file_size,file_type,storage_path,uploaded_by) VALUES ($1,'a',1,'x','legacy/path.png',$2)", [tk, own]);
+    const legacyPath = `${tk}/cccccccc-1111-4222-8333-000000000001-path.png`;   // canonical legacy format: still queued on delete
+    await L.query("INSERT INTO public.task_attachments(task_id,file_name,file_size,file_type,storage_path,uploaded_by) VALUES ($1,'a',1,'x',$3,$2)", [tk, own, legacyPath]);
 
     const NEWCOLS = ['user_id', 'actor_id', 'actor_label', 'paid_at', 'paid_by', 'approved_at', 'dedupe_key', 'request_id', 'completed_at'];
     const TABLES = ['profiles', 'attendance_records', 'leave_requests', 'leave_types', 'expenses', 'expense_approvals', 'budgets', 'money_figures', 'user_departments', 'invitations', 'content_plans', 'content_posts', 'content_post_assets',
@@ -876,7 +878,7 @@ try {
     const q = await L.query("SELECT bucket, path FROM public.storage_cleanup_queue");
     ok(q.rows.length === 0, 'the migration queued NO file (only future deletes are queued)');
     await L.query('DELETE FROM public.task_attachments WHERE task_id=$1', [tk]);
-    ok((await L.query("SELECT count(*)::int c FROM public.storage_cleanup_queue WHERE path='legacy/path.png'")).rows[0].c === 1, 'deleting a LEGACY attachment row now queues its file');
+    ok((await L.query("SELECT count(*)::int c FROM public.storage_cleanup_queue WHERE path=$1", [legacyPath])).rows[0].c === 1, 'deleting a LEGACY attachment row now queues its file');
     const goodUser = await mk(9);
     ok(!(await tryq(L, "INSERT INTO public.attendance_records(user_id,check_in) VALUES ($1, now())", [goodUser])).error, 'a new check-in works on the legacy database');
     ok(!(await tryq(L, "INSERT INTO public.leave_requests(user_id,leave_type_id,start_date,end_date,total_days,reason) VALUES ($1,$2,'2032-01-01','2032-01-03',3,'ok')", [goodUser, lt])).error, 'a new valid leave request works');
