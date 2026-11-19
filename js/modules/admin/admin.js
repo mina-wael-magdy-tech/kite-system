@@ -17,6 +17,7 @@ export class AdminModule {
     this.auditLogs = [];
     this.tasks = [];
     this.employees = [];
+    this.toolGrants = new Set();
   }
 
   async render(container) {
@@ -110,6 +111,37 @@ export class AdminModule {
             <div id="adminTaskPager" style="padding: var(--space-3);"></div>
           </div>
         </div>
+
+        <!-- 4. Studio AI & External Tools Access Management -->
+        <div class="card" style="margin-top: var(--space-4);">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2);">
+            <div>
+              <div class="card-title">4. Studio AI & External Tools Access Control</div>
+              <div class="card-subtitle">Authorize specific specialists to access Google Flow (flow.google.com) and creative AI tools</div>
+            </div>
+            <a href="https://flow.google.com/" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-xs" style="gap: 4px; display: inline-flex; align-items: center;">
+              <i data-lucide="sparkles" style="width: 13px; height: 13px;"></i> Open Google Flow
+            </a>
+          </div>
+          <div class="card-body" style="padding: 0;">
+            <div class="table-responsive" style="border: none; border-radius: 0;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Specialist</th>
+                    <th>Department</th>
+                    <th>Tool</th>
+                    <th>Access Status</th>
+                    <th style="text-align: right;">Toggle Access</th>
+                  </tr>
+                </thead>
+                <tbody id="adminToolAccessTable">
+                  <tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">Loading tool access permissions...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
@@ -137,9 +169,15 @@ export class AdminModule {
 
       this.auditLogs = logs || [];
       this.renderAuditLogs();
+
+      // 4. Fetch Tool Access Grants
+      const { data: grants } = await supabase.from('user_tool_access').select('user_id, tool_key');
+      this.toolGrants = new Set((grants || []).map(g => `${g.user_id}:${g.tool_key}`));
+      this.renderToolAccessTable();
     } catch (err) {
       console.warn('Admin load error:', err);
       this.renderAuditLogs();
+      this.renderToolAccessTable();
     }
   }
 
@@ -224,5 +262,89 @@ export class AdminModule {
         <p class="text-muted">${escapeHTML(l.entity_type || 'System Event')}${l.new_data ? ' — ' + escapeHTML(JSON.stringify(l.new_data)) : ''}</p>
       </div>
     `).join('');
+  }
+
+  renderToolAccessTable() {
+    const tbody = document.getElementById('adminToolAccessTable');
+    if (!tbody) return;
+
+    if (!this.employees || this.employees.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: var(--space-6);">No studio specialists found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = this.employees.map(e => {
+      const isGranted = this.toolGrants.has(`${e.id}:google_flow`);
+      return `
+        <tr>
+          <td>
+            <div class="font-bold text-white">${escapeHTML(e.full_name || 'Specialist')}</div>
+          </td>
+          <td class="text-xs text-muted">${escapeHTML(e.departments?.name || 'Studio')}</td>
+          <td>
+            <span class="badge badge-indigo" style="font-size: 10px; display: inline-flex; align-items: center; gap: 4px;">
+              <i data-lucide="sparkles" style="width: 11px; height: 11px;"></i> Google Flow (AI Studio)
+            </span>
+          </td>
+          <td id="tool-status-${e.id}">
+            ${isGranted 
+              ? '<span class="badge badge-emerald" style="font-size: 10px;">Granted</span>' 
+              : '<span class="badge badge-slate" style="font-size: 10px;">Restricted</span>'}
+          </td>
+          <td style="text-align: right;">
+            <label style="cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
+              <input type="checkbox" class="tool-grant-checkbox" data-user-id="${e.id}" data-tool-key="google_flow" ${isGranted ? 'checked' : ''} style="accent-color: var(--color-indigo-light); width: 16px; height: 16px; cursor: pointer;" />
+              <span class="text-2xs text-muted" id="tool-label-${e.id}">${isGranted ? 'Enabled' : 'Disabled'}</span>
+            </label>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    if (window.lucide) window.lucide.createIcons();
+
+    tbody.querySelectorAll('.tool-grant-checkbox').forEach(cb => {
+      cb.addEventListener('change', async (ev) => {
+        const userId = cb.getAttribute('data-user-id');
+        const toolKey = cb.getAttribute('data-tool-key');
+        const checked = ev.target.checked;
+        const empName = cb.closest('tr')?.querySelector('.font-bold')?.textContent || 'Specialist';
+        const statusBadge = document.getElementById(`tool-status-${userId}`);
+        const labelText = document.getElementById(`tool-label-${userId}`);
+        const supabase = getSupabase();
+
+        cb.disabled = true;
+        try {
+          if (checked) {
+            const { error } = await supabase.from('user_tool_access').insert({
+              user_id: userId,
+              tool_key: toolKey,
+              granted_by: this.app.currentUser.id
+            });
+            if (error) throw error;
+            this.toolGrants.add(`${userId}:${toolKey}`);
+            if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-emerald" style="font-size: 10px;">Granted</span>';
+            if (labelText) labelText.textContent = 'Enabled';
+            Toast.success(`Google Flow access granted to ${empName}`, 'Access Updated');
+          } else {
+            const { error } = await supabase.from('user_tool_access')
+              .delete()
+              .eq('user_id', userId)
+              .eq('tool_key', toolKey);
+            if (error) throw error;
+            this.toolGrants.delete(`${userId}:${toolKey}`);
+            if (statusBadge) statusBadge.innerHTML = '<span class="badge badge-slate" style="font-size: 10px;">Restricted</span>';
+            if (labelText) labelText.textContent = 'Disabled';
+            Toast.info(`Google Flow access revoked from ${empName}`, 'Access Updated');
+          }
+        } catch (err) {
+          console.error('Tool grant error:', err);
+          cb.checked = !checked;
+          Toast.error(err.message || 'Failed to update tool access', 'Error');
+        } finally {
+          cb.disabled = false;
+        }
+      });
+    });
   }
 }

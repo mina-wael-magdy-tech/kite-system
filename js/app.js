@@ -130,6 +130,10 @@ class PulseStudioApp {
     const finNav = document.getElementById('financeNavItem');
     if (finNav) finNav.style.display = Money.canFinance() ? 'flex' : 'none';
     if (menuAdminLink) menuAdminLink.style.display = isAdmin ? 'flex' : 'none';
+
+    // Google Flow tool visibility (accessible only to admin or granted specialists)
+    const flowNav = document.getElementById('googleFlowNavItem');
+    if (flowNav) flowNav.style.display = Permissions.canAccessTool('google_flow') ? 'flex' : 'none';
   }
 
   registerModules() {

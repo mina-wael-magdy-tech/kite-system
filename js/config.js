@@ -50,6 +50,17 @@ export const CONFIG = {
     CHAT_MEDIA: 'chat-media'
   },
 
+  // External studio tools with granular admin access control
+  EXTERNAL_TOOLS: {
+    GOOGLE_FLOW: {
+      key: 'google_flow',
+      name: 'Google Flow',
+      url: 'https://flow.google.com/',
+      badge: 'AI Studio',
+      description: 'AI-powered filmmaking & creative studio by Google DeepMind (Veo & Gemini).'
+    }
+  },
+
   // profiles columns the browser may read. Must match the column-level GRANT in
   // 002_rls_policies.sql (selecting any other column, including "*", is rejected).
   PROFILE_COLUMNS:

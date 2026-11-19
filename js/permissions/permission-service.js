@@ -13,6 +13,7 @@ export class PermissionService {
     this.permissions = [];
     this.departments = [];
     this.userProfile = null;
+    this.tools = new Set();
   }
 
   async loadUserAccess(userId) {
@@ -58,6 +59,14 @@ export class PermissionService {
           .single();
         if (directDept) this.departments.push(directDept);
       }
+
+      // 4. Fetch granted tool access
+      const { data: userTools } = await supabase
+        .from('user_tool_access')
+        .select('tool_key')
+        .eq('user_id', userId);
+
+      this.tools = new Set((userTools || []).map(t => t.tool_key).filter(Boolean));
     } catch (err) {
       console.warn('Error loading user permissions:', err);
     }
@@ -103,6 +112,11 @@ export class PermissionService {
     if (this.roles.length === 0) return { name: 'employee', display_name: 'Employee' };
     // Sorted by priority (lower number = higher priority)
     return [...this.roles].sort((a, b) => (a.priority || 100) - (b.priority || 100))[0];
+  }
+
+  canAccessTool(toolKey) {
+    if (this.isAdmin()) return true;
+    return this.tools.has(toolKey);
   }
 
   canAccessModule(moduleRoute) {
