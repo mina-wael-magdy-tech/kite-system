@@ -16,6 +16,8 @@ Applied manually, one step at a time, staging first. Never `db push` on live. No
 
 ## Release order (one release train)
 
+> Phase 8 note: the order below is workable, but the release runbook (`docs/PHASE_8_DEPLOYMENT_RUNBOOK.md`) deploys the Kite Drive PHP **before** the `kite-drive` Edge Function (the new PHP is backward compatible; the new function against the old PHP works but without the new protections). The runbook order is the one to follow; `config.sample.php` is a template and is never uploaded as `config.php`.
+
 1. **Migration 034** on staging, then live (additive; old Edge Functions keep working because the old `accept-invitation` does its own updates; the unused `token` column is only hidden from the browser).
 2. **Edge Functions**: `kite-drive`, `accept-invitation`, `invite-employee`, `due-reminders` (the new `accept-invitation` needs 034 first; new tokens carry `jti`, which an old Drive ignores).
 3. **Kite Drive PHP** (`api/index.php`, `api/lib.php`, `api/send.php`, `api/config.sample.php` -> keep `url_tokens` at `legacy`). Upload the files together: `index.php` requires `lib.php`. The PHP side accepts both token transports, so it is safe before the web app.

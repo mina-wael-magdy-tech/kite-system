@@ -1,0 +1,12 @@
+%% Legend: write path vs read path. Verified for tasks/finance/drive; others by naming.
+flowchart LR
+  b[Browser JWT]
+  b -->|read, RLS| pgrest[PostgREST] --> pg[(Postgres)]
+  b -->|rule-bearing write| fn[Edge Function]
+  fn -->|1 getUser| auth[Supabase Auth]
+  fn -->|2 roles + status| pg
+  fn -->|3 visibility as caller| pgrest
+  fn -->|4 mutate, service role| pg
+  fn -->|5 audit + notify| pg
+  fn -->|push| ps[Push services]
+  pg --- trg[triggers: updated_at, content_posts_guard, blank_money, fin_*]

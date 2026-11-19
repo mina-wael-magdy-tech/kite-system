@@ -1,0 +1,15 @@
+%% Legend: verified from kite-drive/index.ts and api/index.php.
+sequenceDiagram
+  participant B as Browser (DrivePanel)
+  participant F as Edge: kite-drive
+  participant DB as Supabase DB
+  participant D as Drive PHP
+  B->>F: POST {action:token, scope:read, clientId} + JWT
+  F->>DB: getUser, profile, roles (service role)
+  F->>DB: select clients id (as caller, RLS)
+  DB-->>F: row or none (404)
+  F->>DB: client_drive_links (service role)
+  F-->>B: {apiUrl, token, expiresAt} HMAC claims aud/sub/scope/cid/exp
+  B->>D: GET ?action=list  X-Drive-Token
+  D->>D: verify HMAC, aud, exp<=3600, scope, cid, client exists
+  D-->>B: files scoped user_id = cid

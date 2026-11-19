@@ -1,0 +1,36 @@
+%% Legend: containers deployed separately. Dashed = configured outside repo (unverified live).
+flowchart TB
+  subgraph Browser
+    spa[SPA: js/app.js + modules]
+    sw[Service worker sw.js]
+    pv[preview.html public page]
+  end
+  subgraph Hosting[Vercel or Apache]
+    static[dist: html, js, css, vendor, env.js]
+  end
+  subgraph Supabase
+    auth[Auth]
+    rest[PostgREST + RLS]
+    rt[Realtime]
+    st[Storage: task-attachments, studio-assets, chat-media]
+    fn[Edge Functions x12]
+    pg[(Postgres: 68 tables, SQL fin_* functions, triggers)]
+  end
+  subgraph Hostinger
+    api[PHP api/index.php]
+    file[file.php]
+    mysql[(MySQL: users, folders, files)]
+    disk[(uploads/, _chunks, _thumbs, _log)]
+  end
+  static --> spa
+  spa --> auth & rest & rt & st & fn
+  pv --> fn
+  fn --> pg
+  rest --> pg
+  fn -. signed token .-> spa
+  spa -->|X-Drive-Token| api
+  fn -->|admin token| api
+  api --> mysql & disk
+  file --> mysql & disk
+  cron[dashboard cron]:::d -.-> fn
+  classDef d stroke-dasharray: 4 3;

@@ -1,0 +1,34 @@
+{
+ "stats": {
+  "total": 37,
+  "sev": {
+   "MEDIUM": 15,
+   "HIGH": 1,
+   "LOW": 20,
+   "INFORMATIONAL": 1
+  },
+  "conf": {
+   "Confirmed": 23,
+   "Strong Evidence": 4,
+   "Potential": 7,
+   "Unverified": 3
+  },
+  "pri": {
+   "P1": 5,
+   "P2": 13,
+   "P3": 19
+  },
+  "cat": {
+   "Security": 8,
+   "Architecture": 3,
+   "Data": 9,
+   "Operations": 4,
+   "Documentation": 3,
+   "Functional": 5,
+   "Performance": 4,
+   "Testing": 1
+  },
+  "new": 23,
+  "prev": 14
+ }
+}

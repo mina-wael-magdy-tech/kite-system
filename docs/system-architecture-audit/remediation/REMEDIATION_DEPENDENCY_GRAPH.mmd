@@ -1,0 +1,37 @@
+%% Remediation dependency graph. Arrow A --> B means: A must be done (and verified) before B.
+%% Colors: red = P1, orange = P2, grey = P3. Shapes: [ ] code-only, [[ ]] needs SQL migration, ([ ]) needs external configuration (dashboard/Hostinger/CI).
+%% Notes in the label: D = data cleanup needed, V = needs production verification. No fix requires downtime.
+flowchart TD
+  FX-01[["FX-01: Canonical role model and centralized authorization<br/>ARC-01, SEC-08<br/>D V"]]
+  FX-02(["FX-02: CI + complete RLS/role test matrix over all migrations<br/>OPS-02, TST-01"])
+  FX-03(["FX-03: Scheduler as code, run ledger, heartbeat alerts<br/>OPS-01, OPS-04 V"])
+  FX-04[["FX-04: Public share endpoint hardening and shared rate limiter<br/>SEC-01, SEC-07 V"]]
+  FX-05(["FX-05: Kite Drive token transport and link compensation (PHP + Edge together)<br/>SEC-02, DAT-01, PERF-04 V"])
+  FX-06[["FX-06: Atomic employee/role/department administration in SQL<br/>DAT-05, DAT-08 V"]]
+  FX-07[["FX-07: Browser-insert validation constraints and currency model<br/>DAT-04, DAT-06<br/>D V"]]
+  FX-08[["FX-08: Bind asset paths to uploader<br/>SEC-06<br/>D V"]]
+  FX-09["FX-09: Router render guard, module unmount contract, lint rules<br/>FUN-01, SEC-05, ARC-02"]
+  FX-10[["FX-10: Business time zone in finance SQL<br/>FUN-02 V"]]
+  FX-11[["FX-11: Notification outbox, batching and dedupe<br/>PERF-01, SEC-03 V"]]
+  FX-12[["FX-12: Data lifecycle: retention, storage cleanup, soft deletes<br/>OPS-03, DAT-03, DAT-07, DAT-09<br/>D V"]]
+  FX-13[["FX-13: Performance baselines, indexes, pagination audit<br/>PERF-02, PERF-03 V"]]
+  FX-14["FX-14: Documentation reconciliation (docs + Notion spec)<br/>DOC-01, DOC-02, DOC-03"]
+  FX-15[["FX-15: Small hardening and rule decisions<br/>SEC-04, DAT-02, FUN-03, FUN-04, FUN-05, ARC-03"]]
+  FX-02 --> FX-01
+  FX-01 --> FX-06
+  FX-02 --> FX-07
+  FX-02 --> FX-08
+  FX-02 --> FX-10
+  FX-04 --> FX-11
+  FX-03 --> FX-12
+  FX-11 --> FX-13
+  FX-01 --> FX-14
+  FX-07 --> FX-14
+  FX-02 --> FX-15
+  classDef p1 fill:#fdd,stroke:#c33;
+  classDef p2 fill:#ffe9c7,stroke:#c80;
+  classDef p3 fill:#eee,stroke:#888;
+  class FX-01,FX-02,FX-03,FX-04 p1;
+  class FX-05,FX-06,FX-07,FX-08,FX-09,FX-10,FX-11,FX-13 p2;
+  class FX-12,FX-14,FX-15 p3;
+  %% Final gate: every package ends with production verification (VERIFICATION_PLAN.md) before its issues move to Verified.

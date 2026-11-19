@@ -1,0 +1,12 @@
+%% Legend: solid = request; labels = auth mechanism.
+flowchart LR
+  B[Browser app]
+  P[preview.html]
+  C[Cron]
+  B -->|Bearer JWT| WF[workflow] & CH[chat] & FN[finance] & KD[kite-drive] & ACC[accept-invitation] & BC[broadcast] & CPL[content-plan] & INV[invite-employee]
+  P -->|share token, no JWT| CP[client-preview]
+  C -->|x-cron-secret| DR[due-reminders] & RB[retainer-billing]
+  KD -->|HMAC admin token| PHP[Drive api/index.php]
+  B -->|HMAC scoped token header or ?token=| PHP
+  B -->|REST + RLS| REST[PostgREST]
+  B -->|WebSocket| RT[Realtime]

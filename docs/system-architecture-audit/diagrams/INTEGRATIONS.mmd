@@ -1,0 +1,8 @@
+%% Legend: external systems and their secrets/config.
+flowchart LR
+  sb[Supabase Edge] -->|KITE_DRIVE_URL + KITE_DRIVE_API_SECRET| drive[Kite Drive]
+  drive -->|allowed_origins CORS| spa[SPA origin]
+  sb -->|VAPID keys| push[Push services]
+  spa -->|ICE_SERVERS STUN/TURN| rtc[WebRTC peers]
+  host[Vercel env] -->|SUPABASE_URL, ANON_KEY, VAPID_PUBLIC_KEY, ICE_SERVERS| spa
+  gs[Google Sites embed] -->|frame-ancestors| spa

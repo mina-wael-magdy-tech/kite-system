@@ -1,7 +1,7 @@
 # Chat v2: private conversations, voice notes, files, calls
 
 ## Deploy checklist (in this order)
-1. Run `supabase/migrations/016_chat_v2_private_and_media.sql` (SQL editor or `supabase db push`).
+1. Run `supabase/migrations/016_chat_v2_private_and_media.sql` (paste it into the SQL editor and run it as one script; do not use `supabase db push` on the live project, see `docs/deployment.md`).
 2. Redeploy the function: `npx supabase functions deploy chat --project-ref <ref> --use-api`
    and `workflow` / `broadcast` / `due-reminders` (they share `_shared/auth.ts` + `push.ts`, which changed).
 3. Redeploy the site (Vercel). Reopen the installed app once so the new service worker installs.

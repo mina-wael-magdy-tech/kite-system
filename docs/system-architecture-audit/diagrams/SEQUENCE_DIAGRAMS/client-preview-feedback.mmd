@@ -1,0 +1,15 @@
+%% Legend: verified from client-preview/index.ts. Note the non-atomic count then insert (SEC-01).
+sequenceDiagram
+  participant C as Client (preview.html#token)
+  participant F as Edge: client-preview (no JWT)
+  participant DB as Supabase DB
+  participant S as Staff
+  C->>F: POST {action:feedback, token, name, message}
+  F->>DB: share by token (enabled, not expired)
+  F->>DB: count feedback last hour (plan)
+  Note over F,DB: limit 60/h per plan; race between count and insert
+  F->>DB: insert content_feedback (+ plan status if change/approve_all)
+  F->>DB: notify admins + creator + publisher (+ push)
+  DB-->>S: notifications / push
+  F->>DB: audit (userId null)
+  F-->>C: {success:true}

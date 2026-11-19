@@ -35,7 +35,7 @@ openssl rand -hex 32
 
 ### 2. Hostinger
 1. From `integrations/kite-drive/`, upload `api/` (with its `.htaccess`) and `file.php` to the same folder as Drive's `index.php`.
-2. Copy `api/config.sample.php` to `api/config.php` on the server and fill in the secret and the Kite System's address.
+2. Copy `api/config.sample.php` to `api/config.php` on the server and fill in the secret and the Kite System's address. (First installation only. On an existing installation never overwrite `config.php` with the sample: it holds the live secret and database credentials. When a release adds an option to the sample, add that line to the live file by hand.)
 3. Open `https://our-kites.kiteagency-eg.com/api/config.php`. It must show a 403 error. If it doesn't, delete `api/config.php` and stop.
 
 Drive works exactly as before after this step.

@@ -1,0 +1,14 @@
+%% From Graphify + file layout; module internals not read. Legend: arrows = static imports (Graphify EXTRACTED).
+flowchart TB
+  html[index.html / login.html / preview.html] --> app[js/app.js PulseStudioApp]
+  app --> router[js/router.js]
+  app --> mods[js/modules/* — 25 feature files]
+  mods --> svc[js/services: api, realtime, push, notification, call, finance-pdf, toast, money]
+  mods --> ui[js/ui: dialogs formDialog/confirmDialog, pagination]
+  mods --> util[js/utils: helpers escapeHTML, formatters, bidi-text, plan-slide]
+  mods --> perm[js/permissions: permission-service UX gating only]
+  svc --> sbc[js/supabase-client.js getSupabase]
+  mods --> sbc
+  auth[js/auth/*] --> sbc
+  sbc --> cfg[js/config.js ← env.js]
+  sw[sw.js] -.-> html

@@ -108,7 +108,7 @@ psql -f supabase/maintenance/rollback-036.sql
 
 Restores the exact original text of all rewritten policies, drops the helpers, aggregates and indexes. No data is touched.
 `npm run test:perf` (section 8) runs the rollback, checks that every policy is back to its exact original text, then applies 036 again.
-If 017 is ever re-run it re-creates the finance policies in their slower per-row form (still correct): re-apply 036 afterwards.
+If 017 is ever re-run it re-creates the finance policies in their slower per-row form and with the pre-022 finance access: re-apply 022 -> 028 -> 033 -> 035 -> 036 -> 037 (in that order; re-applying 036 alone is not enough).
 The frontend can be rolled back on its own: the old browser code still works against the new database (the old queries are still valid).
 
 ## Not done / deferred

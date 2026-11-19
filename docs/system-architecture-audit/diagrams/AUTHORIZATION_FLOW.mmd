@@ -1,0 +1,15 @@
+%% Legend: diamonds = checks that exist in code read.
+flowchart TD
+  r[Request + JWT] --> a{Auth.getUser ok?}
+  a -- no --> e401[401]
+  a -- yes --> p{profile.employment_status = active?}
+  p -- no --> e403[403 / no privileges]
+  p -- yes --> roles[load active roles from user_roles+roles]
+  roles --> s{requireStaff: any non-client role?}
+  s -- no --> e403b[403]
+  s -- yes --> act{action-specific rule}
+  act -->|visibility| rls[userClient query under RLS auth_can_see_*]
+  act -->|admin / finance / owner| rl[role list check in code]
+  rls --> go[mutate with service role]
+  rl --> go
+  go --> log[audit + notify]

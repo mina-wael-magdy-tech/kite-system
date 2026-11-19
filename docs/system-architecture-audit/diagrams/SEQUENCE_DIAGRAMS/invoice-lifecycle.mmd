@@ -1,0 +1,15 @@
+%% Legend: from finance/index.ts header and 017 function names. Each fin_* call is one SQL transaction.
+sequenceDiagram
+  participant B as Browser
+  participant F as Edge: finance
+  participant S as SQL fin_* (service_role only)
+  B->>F: invoice.save {items} (no totals)
+  F->>S: fin_invoice_save (recompute NUMERIC)
+  B->>F: invoice.issue
+  F->>S: fin_invoice_issue (FOR UPDATE, gapless number, freeze)
+  B->>F: payment.add
+  F->>S: fin_payment_add (FOR UPDATE, refresh status)
+  Note over S: cron fin_mark_overdue daily
+  B->>F: payment.reverse / invoice.void (senior roles + reason)
+  F->>S: fin_payment_reverse / fin_invoice_void
+  S->>S: fin_audit triggers -> finance_audit_log (append-only)

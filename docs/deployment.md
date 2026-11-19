@@ -1,7 +1,7 @@
 # PULSE STUDIO OS — Production Deployment Guide
 
 ## 1. Architecture
-- **Static site** (this folder) on any HTTPS host. No build step.
+- **Static site**, produced by the production build `npm run build` (`scripts/build.mjs`, output folder `dist/`; on Vercel this is the configured build command in `vercel.json`) and served from any HTTPS host.
 - **Supabase** for database, auth, storage, realtime and Edge Functions.
 
 ## 2. Deploying on Vercel (recommended path)
@@ -55,12 +55,19 @@ Create a `_headers` file with the same header values under `/*`.
 3. Auth: signups **off**, 12-char passwords, real SMTP, redirect URLs set (`supabase config push`).
 4. Edge Function secrets set (`ALLOWED_ORIGINS`, `APP_URL`); `setup-admin` deleted and `SETUP_TOKEN` unset after bootstrap.
 5. Backups: enable daily backups (Supabase Pro) or schedule `pg_dump`; **test a restore**.
-6. Walk through `production-checklist.md`.
+6. Walk through `production-checklist.md` and the runbook's pre-deployment checklist.
 
 ## 5. Releasing changes
-- **Front end:** upload changed files. Bump query strings or rely on `Cache-Control: no-cache` on HTML/JS (already set).
-- **Database:** add a new numbered file in `supabase/migrations/`, test on a staging project, then `supabase db push`. Never edit applied migrations.
-- **Functions:** `supabase functions deploy <name>`. Roll back by redeploying the previous commit.
+The full, ordered procedure for a release is `docs/PHASE_8_DEPLOYMENT_RUNBOOK.md`; the audit behind it is `docs/PHASE_8_RELEASE_READINESS_AUDIT.md`.
+Order of layers: **database -> Edge Functions (`kite-drive` after the Hostinger PHP) -> Hostinger PHP -> cron -> web app last.**
+
+- **Front end:** deploy through the production build (on Vercel: push to the production branch, `npm run build` runs and publishes `dist/`; elsewhere run `npm run build` with `SUPABASE_URL` and `SUPABASE_ANON_KEY` set and upload `dist/`). Do not upload the source folders. The service worker cache id changes with every build, and HTML/JS are served with `Cache-Control: no-cache`.
+  Deploy the web app **last**: it calls database functions and Edge Functions that must already exist.
+- **Database:** add a new numbered file in `supabase/migrations/`, test it on a staging project, then apply it **manually, one file at a time, each file as a single script, in numeric order** (Dashboard SQL editor, or `psql -v ON_ERROR_STOP=1 -f supabase/migrations/NNN_name.sql`).
+  **Never run `supabase db push` on the live project:** its migration history table is empty, so `db push` would try to apply every migration from the first one. Check what is already applied with the read-only probes in the runbook (R0) before choosing the first file. Never edit an applied migration. Roll back with the scripts in `supabase/maintenance/` (`rollback-036/037/038.sql`) or the ROLLBACK text in each migration header.
+  - **If migration 017 is ever re-run** (it re-creates the original finance functions and policies), re-apply in exactly this order: **022 -> 028 -> 033 -> 035 -> 036 -> 037**. Skipping 022 re-opens Finance to the finance-manager and accountant roles. Do not re-run 024 afterwards without re-applying 036. Migration 038 is unaffected.
+- **Functions:** `supabase functions deploy <name>`. Deploy `kite-drive` only after the Kite Drive PHP is on Hostinger. Roll back by redeploying the previous commit's version.
+- **Scheduled jobs:** `due-reminders` and `retainer-billing` are created by hand in the Dashboard and need the owner's approval (see `docs/background-jobs.md`).
 
 ## 6. Monitoring
 - Supabase Dashboard → Logs: Edge Function errors, Auth failures, Postgres errors.

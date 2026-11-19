@@ -1,0 +1,23 @@
+%% Hub dependencies from graphify/graph.json. Arrow label = number of graph edges between that FILE's nodes and the hub node
+%% (edges are recorded at function/method level, then aggregated per file here). Top contributors only. Static (EXTRACTED) edges.
+%% Full interactive graph: ../graphify/graph.html
+flowchart LR
+  gs(("getSupabase()<br/>118 edges")):::hub
+  eh(("escapeHTML()<br/>94 edges")):::hub
+  fd(("formDialog()<br/>45 edges")):::hub
+  tasks[tasks.js] -->|13| gs
+  chat[chat.js] -->|10| gs
+  docs[documents.js] -->|7| gs
+  hr[hr.js] -->|7| gs
+  notif[notification-service.js] -->|7| gs
+  authsvc[auth-service.js] -->|6| gs
+  crm[crm.js] -->|6| gs
+  drive[drive-panel.js] -->|7| eh
+  prev[preview.js] -->|7| eh
+  hub[client-hub.js] -->|6| eh
+  fmt[formatters.js] -->|6| eh
+  plan[content-plan.js] -->|5| eh
+  drive -->|7| fd
+  chat -->|5| fd
+  inv[finance/tabs/invoices.js] -->|4| fd
+  classDef hub fill:#fdd,stroke:#a33;

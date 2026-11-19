@@ -1,0 +1,13 @@
+%% Edge Function component view. Legend: arrows = import/use (verified in code read). Functions not read are marked (?).
+flowchart LR
+  http[_shared/http.ts<br/>serveJson, CORS, readJson]
+  auth[_shared/auth.ts<br/>getCaller, adminClient, userClient, notify, audit]
+  val[_shared/validate.ts]
+  push[_shared/push.ts]
+  wf[workflow] & chat[chat] & fin[finance] & kd[kite-drive] & cp[client-preview] & acc[accept-invitation] & sa[setup-admin] & dr[due-reminders] & rb[retainer-billing] & bc[broadcast ?] & cpl[content-plan ?] & inv[invite-employee ?]
+  wf & chat & fin & kd & cp & acc & sa & dr & rb --> http
+  wf & chat & fin & kd & cp & acc & sa & dr & rb --> auth
+  wf & chat & fin & kd & cp & sa --> val
+  auth --> push
+  fin -->|RPC fin_*| sql[(SQL functions)]
+  rb -->|RPC| sql

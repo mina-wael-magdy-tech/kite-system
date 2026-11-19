@@ -9,7 +9,7 @@ Static front end (HTML/CSS/ES modules, **no build step**, third-party libraries 
 - Any static web host (Apache/Hostinger, Nginx, Netlify, Cloudflare Pages…) over **HTTPS**.
 
 ## 3. Database
-Apply the migrations **in order** (CLI: `supabase db push`, or paste each into the SQL editor):
+Apply the migrations **in order** (on a NEW, empty project the CLI `supabase db push` works; on the live project never use it: paste each file into the SQL editor, one at a time, see `docs/deployment.md`):
 
 | File | Contents |
 |---|---|

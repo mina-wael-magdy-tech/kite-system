@@ -11,10 +11,11 @@ never `db push` on live (the live migration history is empty).
                                                          ->  032 atomic operations   ->  033 hygiene  ->  034 invitation activation (Phase 4)
 ```
 
-Every file is idempotent. **If 017 is ever re-run, re-apply 028 and then 033** (017 re-creates the original bodies of the finance
-functions and the 7-argument `fin_payment_add`; 028 restores the Phase 3.A versions, 033 restores the studio-date and
-operator-only-switch versions). The sequence 017 -> 028 -> 033 is tested (`verify-integrity.mjs`, section 14) and must end with
-exactly one `fin_payment_add`.
+Every file is idempotent. **If 017 is ever re-run, re-apply, in this order: 022, 028, 033, 035, 036, 037.** 017 re-creates the original bodies of the finance
+functions and the 7-argument `fin_payment_add` (028 restores the Phase 3.A versions, 033 the studio-date and operator-only-switch versions)
+**and** the original finance policies and `auth_is_finance()` (022 restores the executive-only versions: without 022 the finance-manager and accountant roles regain Finance access).
+The part 017 -> 028 -> 033 is tested (`verify-integrity.mjs`, section 14) and must end with exactly one `fin_payment_add`; the full sequence was checked
+on a scratch database by comparing every public function, policy and trigger with the intended state (zero differences; 022 last, or omitted, leaves differences). 038 is unaffected.
 
 A constraint or unique index that existing data cannot satisfy is **not forced**: the migration prints a NOTICE with the count and leaves
 the constraint `NOT VALID` (still enforced for every new write) or skips the index. Clean the data, then re-run the migration.
@@ -56,7 +57,7 @@ the constraint `NOT VALID` (still enforced for every new write) or skips the ind
 ## Rollback
 
 Each migration's header has its exact rollback statements; none deletes business data. Rollback order is the reverse of the apply order
-(033 first). Rolling back 033 leaves the 017 / 028 function bodies in place: restore them by re-running 017 and then 028, and **do not**
+(033 first). Rolling back 033 leaves the 017 / 028 function bodies in place: restore them by re-running 017 and then 022 and 028 (022 first: 017 also re-creates the wider finance policies), and **do not**
 re-run 033. `maintenance/remove-test-data.sql` switches the audit trigger off for its one audit delete and back on.
 
 ## Tests
@@ -65,7 +66,7 @@ re-run 033. `maintenance/remove-test-data.sql` switches the audit trigger off fo
 `npm run test:concurrency` (Phase 1), `npm test` (RLS + roles, including the Edge Function behaviour).
 
 ## Phase 5 (migration 035): business correctness
-Apply 035 after 034. **If 017 is ever re-run: re-apply 028, then 033, then 035** (035 re-creates `integrity_report()` with the 13 rows of 033 plus 4 new ones).
+Apply 035 after 034. **If 017 is ever re-run: re-apply 022, 028, 033, then 035** (035 re-creates `integrity_report()` with the 13 rows of 033 plus 4 new ones; the complete sequence is 022 -> 028 -> 033 -> 035 -> 036 -> 037).
 | Change | Behaviour |
 |---|---|
 | `fin_kpis()`, `fin_client_balances()` | Outstanding, overdue, collected (studio month) and open balance per client, **per currency**, summed in the database (no 1000-row limit). SECURITY INVOKER: RLS applies, and the function refuses anyone who is not an executive (`auth_is_finance()`). No EXECUTE for PUBLIC / anon. |
@@ -79,7 +80,7 @@ Tests: `npm run test:integrity` section 17 (real PostgreSQL).
 ## Phase 6 (migration 036): performance
 Apply 036 after 035. Details, measurements and the rollback are in `docs/performance-phase6.md`.
 * 143 policies were rewritten mechanically (`auth_is_*()` and `auth.uid()` evaluated once per statement instead of once per row; the tasks policy and the task-children policies no longer call `auth_can_view_task()` per row). No rule changed: `npm run test:perf` proves, for 17 users and anon, that every user sees byte-identical rows and every INSERT / UPDATE / DELETE has the same outcome.
-* The old helper functions are still there. **If 017 is ever re-run**, it re-creates the finance policies in their slower per-row form (correct, just slow): re-apply 036 afterwards (order 017 -> 028 -> 033 -> 035 -> 036).
+* The old helper functions are still there. **If 017 is ever re-run**, it re-creates the finance policies in their slower per-row form (correct, just slow): re-apply 036 afterwards (complete order after a 017 re-run: 022 -> 028 -> 033 -> 035 -> 036 -> 037).
 * New: `task_stats()`, `client_task_stats(date)` (SECURITY INVOKER, RLS decides what is counted), id-set helpers `auth_managed_department_ids()`, `auth_assigned_task_ids()`, `auth_managed_project_ids()`, and six `created_at DESC` indexes. No index was dropped (8 redundant ones are listed in the performance document for a separate clean-up).
 * Rollback: `supabase/maintenance/rollback-036.sql` (restores every original policy, drops the helpers, aggregates and indexes; no data is touched).
 
@@ -92,7 +93,7 @@ the rollback are in `docs/background-jobs.md`.
 * `storage_cleanup_requeue()` (+ history table `storage_cleanup_requeues`), `storage_cleanup_prune_candidates(age)`, `storage_orphans(age)`: the 029 queue functions are untouched; nothing is deleted.
 * `fin_retainer_drafts_unreviewed()`; the "drafts ready" alert has a per-month dedupe key.
 * Rollback: `supabase/maintenance/rollback-037.sql`. Tests: `npm run test:background`.
-* Re-run rule: after 017 the order is 028 -> 033 -> 035 -> 036 -> 037.
+* Re-run rule: after a 017 re-run the order is 022 -> 028 -> 033 -> 035 -> 036 -> 037 (038 is unaffected).
 
 ## Hotfix (migration 038): employee IDs beyond 999
 `profiles.employee_id` is generated by `format_employee_id(nextval('employee_id_seq'))`: three digits up to 999, then `EMP-1000`, `EMP-1001`... Before, `LPAD(n, 3)` truncated 1000 to `EMP-100`, so the 1,000th employee could not be created. No existing ID is changed; the sequence is only ever moved forward (past the highest `EMP-<n>` present). Rollback: `supabase/maintenance/rollback-038.sql` (run with `psql -v ON_ERROR_STOP=1`). It REFUSES, changing nothing, when an `EMP-<n>` above 999 exists or when the next sequence number would be above 999, because the old truncating default would then collide; otherwise it restores the old default and drops the formatter. It never edits an ID or rewinds the sequence. Tests: `npm run test:employee-id`.

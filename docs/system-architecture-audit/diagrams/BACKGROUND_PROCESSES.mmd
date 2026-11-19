@@ -1,0 +1,9 @@
+%% Legend: dashed = scheduler exists only in Supabase dashboard (not in repo).
+flowchart LR
+  cron[Dashboard cron daily]:::d -. x-cron-secret .-> dr[due-reminders] --> n[notify: notifications + push]
+  cron -. x-cron-secret .-> rb[retainer-billing]
+  rb --> g[fin_retainer_generate] --> inv[(draft invoices)]
+  rb --> mo[fin_mark_overdue]
+  rb --> n
+  api[Drive API request] --> clean[remove_stale_uploads _chunks >2d]
+  classDef d stroke-dasharray: 4 3;

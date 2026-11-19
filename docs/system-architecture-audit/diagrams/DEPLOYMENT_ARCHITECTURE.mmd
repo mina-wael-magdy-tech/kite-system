@@ -1,0 +1,8 @@
+%% Legend: deployment targets named in repo docs/config; live state unverified.
+flowchart TB
+  git[GitHub main] -->|Vercel build: npm run build| vercel[Vercel static + headers]
+  git -->|manual upload alt| apache[Apache/Hostinger .htaccess]
+  git -->|supabase functions deploy| fns[Supabase Edge Functions]
+  sql[migrations/*.sql] -->|run one at a time manually| db[(Supabase Postgres)]
+  git -->|upload integrations/kite-drive| host[Hostinger: Drive PHP]
+  host --> cfg[api/config.php local secret, gitignored]

@@ -124,7 +124,7 @@ psql -f supabase/maintenance/rollback-037.sql
 Restores the 17-row `integrity_report()` of 035 and drops everything 037 added (the ledger and the requeue history tables are dropped
 with their rows). No other data is touched. Roll the Edge Functions back to the previous version at the same time: the old
 `due-reminders` and `broadcast` do not call the new functions, so they work against the old database too. After a re-run of 017 the order
-is 028 -> 033 -> 035 -> 036 -> 037.
+is 022 -> 028 -> 033 -> 035 -> 036 -> 037 (022 restores executive-only Finance).
 
 ## 7. Not done (needs a decision)
 

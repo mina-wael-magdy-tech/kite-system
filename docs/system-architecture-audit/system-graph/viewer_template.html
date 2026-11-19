@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kite System — Interactive System Architecture</title>
+<style>
+  :root { --bg:#0f1220; --panel:#171b2e; --line:#2a3050; --txt:#e6e9f5; --mut:#97a0c4; --acc:#7c9cff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--txt); font:13px/1.45 system-ui, "Segoe UI", sans-serif; }
+  #app { display:grid; grid-template-columns: 270px 1fr 360px; height:100vh; }
+  aside { background:var(--panel); border-right:1px solid var(--line); overflow:auto; padding:12px; }
+  #detail { border-right:0; border-left:1px solid var(--line); }
+  h1 { font-size:15px; margin:0 0 4px; } h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--mut); margin:14px 0 6px; }
+  .sub { color:var(--mut); font-size:11.5px; }
+  input[type=search], select { width:100%; padding:7px 8px; border-radius:6px; border:1px solid var(--line); background:#0f1325; color:var(--txt); }
+  label.chk { display:flex; align-items:center; gap:6px; padding:2px 0; cursor:pointer; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .cnt { margin-left:auto; color:var(--mut); font-size:11px; }
+  button { background:#232a4a; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:5px 8px; cursor:pointer; margin:2px 2px 2px 0; }
+  button:hover { border-color:var(--acc); }
+  #stage { position:relative; overflow:hidden; }
+  canvas { width:100%; height:100%; display:block; cursor:grab; }
+  #hint { position:absolute; left:10px; bottom:8px; color:var(--mut); font-size:11px; background:rgba(15,18,32,.8); padding:3px 6px; border-radius:4px; }
+  #tip { position:absolute; pointer-events:none; background:#000c; border:1px solid var(--line); padding:3px 6px; border-radius:4px; font-size:11.5px; display:none; max-width:320px; }
+  .kv { margin:6px 0; } .k { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .badge { display:inline-block; padding:1px 6px; border-radius:10px; font-size:11px; border:1px solid var(--line); margin:1px 2px 1px 0; }
+  .b-extracted { color:#9aa7d9; } .b-curated { color:#6cb2ff; border-color:#35609a; } .b-inferred { color:#ffb454; border-color:#8a5a1a; }
+  .b-issue { color:#ff8b8b; border-color:#8a2a2a; }
+  ul.conn { list-style:none; margin:0; padding:0; max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:6px; }
+  ul.conn li { padding:3px 7px; border-bottom:1px solid var(--line); cursor:pointer; display:flex; gap:6px; }
+  ul.conn li:hover { background:#232a4a; } ul.conn li:last-child { border-bottom:0; }
+  .rel { color:var(--acc); font-size:11px; min-width:96px; } .mono { font-family:ui-monospace, Consolas, monospace; font-size:11.5px; word-break:break-all; }
+  .step { padding:4px 6px; border-left:3px solid var(--line); margin:3px 0; cursor:pointer; } .step:hover { background:#232a4a; }
+  .legend span { margin-right:10px; font-size:11px; color:var(--mut); }
+  .lim { font-size:11px; color:var(--mut); border-top:1px solid var(--line); margin-top:12px; padding-top:8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h1>Kite System — architecture graph</h1>
+    <div class="sub" id="meta"></div>
+    <h2>Search</h2>
+    <input id="q" type="search" placeholder="node name, file, table, function…">
+    <h2>Presets</h2>
+    <div>
+      <button data-p="all">All (no policies)</button><button data-p="req">Request path</button>
+      <button data-p="er">ER (tables)</button><button data-p="sec">Security / RLS</button>
+      <button data-p="crit">Critical nodes</button>
+    </div>
+    <h2>Architecture layer</h2><div id="layers"></div>
+    <h2>Module</h2><select id="module"></select>
+    <h2>Relation</h2><div id="rels"></div>
+    <h2>Options</h2>
+    <label class="chk"><input type="checkbox" id="optPol"> show RLS policy nodes</label>
+    <label class="chk"><input type="checkbox" id="optCrit"> critical nodes only</label>
+    <label class="chk"><input type="checkbox" id="optLabels"> always show edge labels</label>
+    <h2>Trace a business workflow</h2><select id="wf"><option value="">— none —</option></select>
+    <h2>Legend</h2>
+    <div class="legend"><span>— extracted (code, file:line)</span><span style="color:#6cb2ff">— curated (read + asserted)</span><span style="color:#ffb454">- - inferred (unverified)</span></div>
+    <div class="legend" style="margin-top:4px">node ring = critical · size = connections</div>
+    <div class="lim" id="lim"></div>
+  </aside>
+  <div id="stage"><canvas id="cv"></canvas><div id="tip"></div><div id="hint">wheel = zoom · drag = pan · drag node = move · click = details · double-click background = reset view</div></div>
+  <aside id="detail"><div class="sub">Click a node to see its purpose, source, connections, security boundary, known issues and evidence.</div></aside>
+</div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(function(){
+const D = JSON.parse(document.getElementById('data').textContent);
+const LAYERS = {actor:'#a78bfa', frontend:'#60a5fa', backend:'#34d399', authn:'#fbbf24', authz:'#f87171', database:'#818cf8', storage:'#2dd4bf', external:'#a8a29e', scheduled:'#f472b6'};
+const LAYER_X = {actor:0, frontend:1, scheduled:2, backend:2.6, authn:2.6, authz:3.9, database:5.0, storage:6.0, external:6.0};
+const GROUPS = ['platform','identity','tasks','projects','content','clients','hr','finance','comms','system'];
+const GY = g => (GROUPS.indexOf(g) < 0 ? 0 : GROUPS.indexOf(g)) * 300 - 600;
+const ISSUE_TITLE = {'SEC-01':'Public client-preview endpoint: weak throttle, link holder can change plan state','SEC-02':'Drive tokens accepted in query string','SEC-03':'Notification triggers replayable 10 min','SEC-04':'readJson size guard after full read','SEC-05':'innerHTML surface relies on manual escaping','ARC-01':'Role lists duplicated/inconsistent across SQL, Edge, JS','DAT-01':'Drive link creation is a non-transactional two-system write','DAT-02':'blank_money trigger silently zeroes legacy money columns','DAT-03':'Client delete vs invoice FK/guard interplay (unverified)','OPS-01':'Crons only in Supabase dashboard; no heartbeat','OPS-02':'No CI; partial RLS test coverage','OPS-03':'Drive log/thumb cache unbounded','DOC-01':'Table not mentioned in docs/database.md (doc says 48 tables; migrations create 68)','DOC-02':'docs say "only trigger"/"no business logic in SQL"; ~48 trigger instances and SQL finance logic exist'};
+const N = new Map(D.nodes.map(n=>[n.id,n]));
+const out = new Map(), inn = new Map();
+D.edges.forEach(e=>{ (out.get(e.source)||out.set(e.source,[]).get(e.source)).push(e); (inn.get(e.target)||inn.set(e.target,[]).get(e.target)).push(e); });
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+document.getElementById('meta').textContent = `${D.meta.counts.nodes} nodes · ${D.meta.counts.edges} edges · generated ${D.meta.date}`;
+document.getElementById('lim').innerHTML = '<b>Limitations</b><ul style="padding-left:16px;margin:4px 0">'+D.meta.limitations.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>';
+
+// ---------- state
+const st = {layers:new Set(Object.keys(LAYERS)), module:'', rels:new Set(), pol:false, crit:false, labels:false, q:'', sel:null, wf:null, tx:0, ty:0, k:0.6};
+const layerCount = {}; D.nodes.forEach(n=>layerCount[n.layer]=(layerCount[n.layer]||0)+1);
+const relCount = {}; D.edges.forEach(e=>relCount[e.relation]=(relCount[e.relation]||0)+1);
+Object.keys(relCount).forEach(r=>st.rels.add(r));
+const lw = document.getElementById('layers');
+Object.keys(LAYERS).forEach(l=>{ if(!layerCount[l])return; const d=document.createElement('label'); d.className='chk';
+  d.innerHTML=`<input type="checkbox" checked data-l="${l}"><span class="dot" style="background:${LAYERS[l]}"></span>${l}<span class="cnt">${layerCount[l]}</span>`; lw.appendChild(d);});
+const rw = document.getElementById('rels');
+Object.keys(relCount).sort().forEach(r=>{ const d=document.createElement('label'); d.className='chk'; d.innerHTML=`<input type="checkbox" checked data-r="${r}">${r}<span class="cnt">${relCount[r]}</span>`; rw.appendChild(d);});
+const ms = document.getElementById('module'); ms.innerHTML='<option value="">all modules</option>'+[...new Set(D.nodes.map(n=>n.module).filter(Boolean))].sort().map(m=>`<option>${esc(m)}</option>`).join('');
+const ws = document.getElementById('wf'); D.workflows.forEach((w,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=w.name; ws.appendChild(o); });
+
+// ---------- layout (simple force simulation, layered columns)
+D.nodes.forEach((n,i)=>{ n.x=(LAYER_X[n.layer]??3)*520 + (Math.random()-.5)*160; n.y=GY(n.group) + (Math.random()-.5)*190; n.vx=0; n.vy=0; n.r=Math.max(4,Math.min(16,3+Math.sqrt(n.degree||0)*1.3)); });
+let visible = [], vEdges = [], alpha = 1;
+function isVisible(n){
+  if(!st.layers.has(n.layer)) return false;
+  if(n.ntype==='policy' && !st.pol) return false;
+  if(st.module && n.module!==st.module) return false;
+  if(st.crit && !n.critical) return false;
+  return true;
+}
+function refresh(){
+  visible = D.nodes.filter(isVisible); const vs = new Set(visible.map(n=>n.id));
+  vEdges = D.edges.filter(e=>vs.has(e.source)&&vs.has(e.target)&&st.rels.has(e.relation));
+  alpha = Math.max(alpha, .6); loop();
+}
+function step(){
+  const n=visible.length; if(!n) return;
+  for(let i=0;i<n;i++){ const a=visible[i];
+    for(let j=i+1;j<n;j++){ const b=visible[j]; let dx=a.x-b.x, dy=a.y-b.y, d2=dx*dx+dy*dy+.01; if(d2>90000) continue; const f=(a.r+b.r+10)*16/d2; dx*=f; dy*=f; a.vx+=dx; a.vy+=dy; b.vx-=dx; b.vy-=dy; } }
+  vEdges.forEach(e=>{ const a=N.get(e.source), b=N.get(e.target); let dx=b.x-a.x, dy=b.y-a.y; const d=Math.sqrt(dx*dx+dy*dy)+.01; const f=(d-140)*.0012; dx=dx/d*f; dy=dy/d*f; a.vx+=dx; a.vy+=dy; b.vx-=dx; b.vy-=dy; });
+  visible.forEach(a=>{ const tx=(LAYER_X[a.layer]??3)*520; a.vx+=(tx-a.x)*.09; a.vy+=(GY(a.group)-a.y)*.07; a.vx*=.82; a.vy*=.82; if(!a.fixed){ a.x+=a.vx*alpha; a.y+=a.vy*alpha; } });
+  alpha*=.985;
+}
+let raf=0; function loop(){ if(raf) return; raf=requestAnimationFrame(tick); }
+function tick(){ raf=0; for(let i=0;i<3&&alpha>.02;i++) step(); draw(); if(alpha>.02) loop(); }
+
+// ---------- drawing
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d'), tip=document.getElementById('tip');
+function resize(){ const r=cv.parentElement.getBoundingClientRect(); cv.width=r.width*devicePixelRatio; cv.height=r.height*devicePixelRatio; draw(); }
+addEventListener('resize', resize);
+const sx = x=>x*st.k+st.tx, sy = y=>y*st.k+st.ty;
+function nbrs(id){ const s=new Set([id]); (out.get(id)||[]).forEach(e=>s.add(e.target)); (inn.get(id)||[]).forEach(e=>s.add(e.source)); return s; }
+function matches(n){ if(!st.q) return true; const q=st.q.toLowerCase(); return (n.label+' '+n.id+' '+(n.file||'')+' '+(n.purpose||'')).toLowerCase().includes(q); }
+function draw(){
+  const W=cv.width/devicePixelRatio, H=cv.height/devicePixelRatio; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); ctx.clearRect(0,0,W,H);
+  const focus = st.sel ? nbrs(st.sel) : null; const wfEdges = st.wf ? st.wf.steps : null; const wfNodes = wfEdges ? new Set(wfEdges.flatMap(s=>[s.from,s.to])) : null;
+  ctx.globalAlpha=.5; ctx.fillStyle='#4a5280'; ctx.font='bold 12px system-ui'; GROUPS.forEach(g=>{ if(visible.some(n=>n.group===g)) ctx.fillText(g.toUpperCase(), 8, sy(GY(g))); }); ctx.globalAlpha=1;
+  // edges
+  vEdges.forEach(e=>{ const a=N.get(e.source), b=N.get(e.target); const hot = focus && (e.source===st.sel||e.target===st.sel);
+    const dim = (focus && !hot) || (wfNodes && !(wfNodes.has(e.source)&&wfNodes.has(e.target)));
+    ctx.beginPath(); ctx.moveTo(sx(a.x),sy(a.y)); ctx.lineTo(sx(b.x),sy(b.y));
+    ctx.strokeStyle = e.kind==='curated'?'#6cb2ff': e.kind==='inferred'?'#ffb454': '#7a85b5'; ctx.globalAlpha = dim?.04 : hot?.95 : .22; ctx.lineWidth = hot?1.6:.8;
+    ctx.setLineDash(e.kind==='inferred'?[5,4]:[]); ctx.stroke(); ctx.setLineDash([]);
+    if(hot || st.labels && !dim && st.k>.9){ ctx.globalAlpha=.95; ctx.fillStyle='#cfd6ff'; ctx.font='10px system-ui'; ctx.fillText(e.relation+(e.labels?' · '+e.labels.slice(0,2).join(', '):''), (sx(a.x)+sx(b.x))/2, (sy(a.y)+sy(b.y))/2); }
+  });
+  // workflow overlay
+  if(wfEdges){ wfEdges.forEach(s=>{ const a=N.get(s.from), b=N.get(s.to); if(!a||!b) return; const x1=sx(a.x),y1=sy(a.y),x2=sx(b.x),y2=sy(b.y);
+    ctx.globalAlpha=1; ctx.strokeStyle = s.kind==='inferred'?'#ffb454': s.kind==='curated'?'#6cb2ff':'#ffffff'; ctx.lineWidth=2.2; ctx.setLineDash(s.kind==='inferred'?[6,4]:[]);
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.setLineDash([]);
+    const ang=Math.atan2(y2-y1,x2-x1), mx=(x1+x2)/2, my=(y1+y2)/2; ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(mx-9*Math.cos(ang-.4),my-9*Math.sin(ang-.4)); ctx.lineTo(mx-9*Math.cos(ang+.4),my-9*Math.sin(ang+.4)); ctx.closePath(); ctx.fillStyle=ctx.strokeStyle; ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 11px system-ui'; ctx.fillText(String(s.n), mx+6, my-6); }); }
+  // nodes
+  visible.forEach(n=>{ const m = matches(n); const dim=(focus && !focus.has(n.id)) || (wfNodes && !wfNodes.has(n.id)) || !m;
+    ctx.globalAlpha = dim?.12:1; ctx.beginPath(); ctx.arc(sx(n.x),sy(n.y),n.r*Math.max(.6,st.k),0,7); ctx.fillStyle=LAYERS[n.layer]||'#888'; ctx.fill();
+    if(n.critical){ ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke(); }
+    if(n.id===st.sel){ ctx.lineWidth=3; ctx.strokeStyle='#ffe066'; ctx.stroke(); }
+    if(!dim && (st.k>1.1 || n.critical || n.degree>14 || n.id===st.sel || (st.q&&m) || (wfNodes&&wfNodes.has(n.id)) || (focus&&focus.has(n.id)))){ ctx.globalAlpha=1; ctx.fillStyle='#e6e9f5'; ctx.font=(n.critical?'bold ':'')+'11px system-ui'; ctx.fillText(n.label.length>34?n.label.slice(0,33)+'…':n.label, sx(n.x)+n.r*Math.max(.6,st.k)+3, sy(n.y)+3); }
+  }); ctx.globalAlpha=1;
+}
+function nodeAt(px,py){ let best=null,bd=1e9; visible.forEach(n=>{ const dx=sx(n.x)-px, dy=sy(n.y)-py, d=dx*dx+dy*dy, r=Math.max(8,n.r*st.k+3); if(d<r*r&&d<bd){best=n;bd=d;} }); return best; }
+
+// ---------- interaction
+let drag=null, pan=null, moved=false;
+cv.addEventListener('mousedown',e=>{ const r=cv.getBoundingClientRect(), px=e.clientX-r.left, py=e.clientY-r.top; const n=nodeAt(px,py); moved=false; if(n){ drag=n; n.fixed=true; } else pan={x:px,y:py,tx:st.tx,ty:st.ty}; cv.style.cursor='grabbing'; });
+addEventListener('mouseup',()=>{ if(drag){ drag.fixed=false; } drag=null; pan=null; cv.style.cursor='grab'; });
+cv.addEventListener('mousemove',e=>{ const r=cv.getBoundingClientRect(), px=e.clientX-r.left, py=e.clientY-r.top;
+  if(drag){ moved=true; drag.x=(px-st.tx)/st.k; drag.y=(py-st.ty)/st.k; alpha=Math.max(alpha,.15); loop(); return; }
+  if(pan){ moved=true; st.tx=pan.tx+(px-pan.x); st.ty=pan.ty+(py-pan.y); draw(); return; }
+  const n=nodeAt(px,py); if(n){ tip.style.display='block'; tip.style.left=(px+14)+'px'; tip.style.top=(py+14)+'px'; tip.textContent=n.label+'  ['+n.layer+(n.module?' / '+n.module:'')+']'; } else tip.style.display='none'; });
+cv.addEventListener('click',e=>{ if(moved) return; const r=cv.getBoundingClientRect(); const n=nodeAt(e.clientX-r.left,e.clientY-r.top); select(n?n.id:null); });
+cv.addEventListener('dblclick',e=>{ const r=cv.getBoundingClientRect(); if(!nodeAt(e.clientX-r.left,e.clientY-r.top)) fit(); });
+cv.addEventListener('wheel',e=>{ e.preventDefault(); const r=cv.getBoundingClientRect(), px=e.clientX-r.left, py=e.clientY-r.top; const f=e.deltaY<0?1.12:1/1.12; const nk=Math.max(.08,Math.min(4,st.k*f)); st.tx=px-(px-st.tx)*(nk/st.k); st.ty=py-(py-st.ty)*(nk/st.k); st.k=nk; draw(); },{passive:false});
+function fit(){ if(!visible.length) return; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; visible.forEach(n=>{x0=Math.min(x0,n.x);x1=Math.max(x1,n.x);y0=Math.min(y0,n.y);y1=Math.max(y1,n.y);}); const r=cv.getBoundingClientRect(); st.k=Math.min(r.width/(x1-x0+160), r.height/(y1-y0+160), 2); st.tx=r.width/2-(x0+x1)/2*st.k; st.ty=r.height/2-(y0+y1)/2*st.k; draw(); }
+function fitNodes(ns){ if(!ns.length) return; let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; ns.forEach(n=>{x0=Math.min(x0,n.x);x1=Math.max(x1,n.x);y0=Math.min(y0,n.y);y1=Math.max(y1,n.y);}); const r=cv.getBoundingClientRect(); st.k=Math.min(r.width/(x1-x0+260), r.height/(y1-y0+260), 2.2); st.tx=r.width/2-(x0+x1)/2*st.k; st.ty=r.height/2-(y0+y1)/2*st.k; }
+function center(n){ const r=cv.getBoundingClientRect(); st.k=Math.max(st.k,1.1); st.tx=r.width/2-n.x*st.k; st.ty=r.height/2-n.y*st.k; }
+
+// ---------- detail panel
+function conn(list, dir){ if(!list||!list.length) return '<div class="sub">none</div>'; return '<ul class="conn">'+list.slice().sort((a,b)=>a.relation.localeCompare(b.relation)).slice(0,300).map(e=>{ const o=N.get(dir==='out'?e.target:e.source); return `<li data-id="${esc(o.id)}"><span class="rel">${dir==='out'?'→':'←'} ${esc(e.relation)}</span><span>${esc(o.label)}${e.labels?` <span class="sub">(${esc(e.labels.slice(0,3).join(', '))})</span>`:''} <span class="badge b-${e.kind}">${e.kind}</span></span></li>`; }).join('')+'</ul>'; }
+function select(id){ st.sel=id; const el=document.getElementById('detail'); if(!id){ el.innerHTML='<div class="sub">Click a node to see its purpose, source, connections, security boundary, known issues and evidence.</div>'; draw(); return; }
+  const n=N.get(id), o=out.get(id)||[], i=inn.get(id)||[], all=o.concat(i);
+  const tabs = o.filter(e=>e.target.startsWith('tbl:')); const reads=[...new Set(tabs.filter(e=>e.relation==='READS').map(e=>N.get(e.target).label))], writes=[...new Set(tabs.filter(e=>e.relation==='WRITES').map(e=>N.get(e.target).label))];
+  const api = o.filter(e=>e.target.startsWith('fn:')||e.target.startsWith('php:')); const kinds={}; all.forEach(e=>kinds[e.kind]=(kinds[e.kind]||0)+1);
+  const g = n.graphify; const wfs = D.workflows.filter(w=>w.steps.some(s=>s.from===id||s.to===id)).map(w=>w.name);
+  const kv=(k,v)=> v?`<div class="kv"><div class="k">${k}</div><div>${v}</div></div>`:'';
+  el.innerHTML = `<h1>${esc(n.label)}</h1><div><span class="badge" style="border-color:${LAYERS[n.layer]};color:${LAYERS[n.layer]}">${esc(n.layer)}</span><span class="badge">${esc(n.ntype||'')}</span>${n.module?`<span class="badge">module: ${esc(n.module)}</span>`:''}${n.critical?'<span class="badge b-issue">critical node</span>':''}</div>`
+   + kv('Business purpose', esc(n.purpose||'—')+(n.purpose_conf?` <span class="badge b-${n.purpose_conf==='curated'?'curated':n.purpose_conf==='inferred'?'inferred':'extracted'}">${esc(n.purpose_conf)}</span>`:''))
+   + kv('Technical responsibility', esc(n.responsibility||'—'))
+   + kv('Source', n.files? n.files.map(f=>`<div class="mono">${esc(f)}</div>`).join('') : (n.file?`<div class="mono">${esc(n.file)}</div>`:'') ) + (n.loc?kv('Size',n.loc+' lines'+(n.innerHTML?` · innerHTML uses: ${n.innerHTML}`:'')):'')
+   + kv('Important functions', (n.functions&&n.functions.length)?n.functions.slice(0,14).map(f=>`<span class="badge mono">${esc(f)}</span>`).join(''):'')
+   + kv('Database interactions', (reads.length||writes.length)?`<div>reads: ${reads.map(esc).join(', ')||'—'}</div><div>writes: ${writes.map(esc).join(', ')||'—'}</div>`:'')
+   + kv('API / service interactions', api.length?[...new Set(api.map(e=>e.relation+' '+N.get(e.target).label+(e.labels?' ['+e.labels.slice(0,6).join(', ')+']':'')))].map(esc).join('<br>'):'')
+   + kv('Security boundary', esc(n.security_boundary||''))
+   + kv('Known issues', (n.issues&&n.issues.length)?n.issues.map(x=>`<div><span class="badge b-issue">${x}</span> ${esc(ISSUE_TITLE[x]||'')}</div>`).join(''):'<span class="sub">none recorded</span>')
+   + kv('Graphify code graph', g?`${g.symbols} symbols in ${esc(g.files.join(', '))}; communities ${g.community.join(', ')||'—'}<div class="mono sub">${g.example_ids.map(esc).join(', ')}</div>`:'<span class="sub">no code nodes (SQL is not parsed by Graphify)</span>')
+   + kv('Evidence & confidence', `edges: ${Object.entries(kinds).map(([k,v])=>`<span class="badge b-${k}">${k} ${v}</span>`).join('')}`+(all.slice(0,5).map(e=>`<div class="mono sub">${esc(e.evidence[0])}</div>`).join('')))
+   + kv('Used in workflows', wfs.length?wfs.map(esc).join('<br>'):'')
+   + `<div class="kv"><div class="k">Outgoing (${o.length})</div>${conn(o,'out')}</div><div class="kv"><div class="k">Incoming (${i.length})</div>${conn(i,'in')}</div>`;
+  el.querySelectorAll('li[data-id]').forEach(li=>li.addEventListener('click',()=>{ const t=N.get(li.dataset.id); ensureVisible(t); select(t.id); center(t); draw(); }));
+  draw(); }
+function ensureVisible(n){ let ch=false; if(!st.layers.has(n.layer)){ st.layers.add(n.layer); ch=true; document.querySelector(`[data-l="${n.layer}"]`).checked=true; } if(n.ntype==='policy'&&!st.pol){ st.pol=true; document.getElementById('optPol').checked=true; ch=true; } if(st.module&&n.module!==st.module){ st.module=''; ms.value=''; ch=true; } if(st.crit&&!n.critical){ st.crit=false; document.getElementById('optCrit').checked=false; ch=true; } if(ch) refresh(); }
+
+// ---------- controls
+document.getElementById('q').addEventListener('input',e=>{ st.q=e.target.value.trim(); draw(); });
+document.getElementById('q').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const m=D.nodes.find(n=>matches(n)&&st.q); if(m){ ensureVisible(m); select(m.id); center(m); draw(); } } });
+lw.addEventListener('change',e=>{ const l=e.target.dataset.l; if(!l) return; e.target.checked?st.layers.add(l):st.layers.delete(l); refresh(); });
+rw.addEventListener('change',e=>{ const r=e.target.dataset.r; if(!r) return; e.target.checked?st.rels.add(r):st.rels.delete(r); refresh(); });
+ms.addEventListener('change',()=>{ st.module=ms.value; refresh(); });
+document.getElementById('optPol').addEventListener('change',e=>{ st.pol=e.target.checked; refresh(); });
+document.getElementById('optCrit').addEventListener('change',e=>{ st.crit=e.target.checked; refresh(); });
+document.getElementById('optLabels').addEventListener('change',e=>{ st.labels=e.target.checked; draw(); });
+ws.addEventListener('change',()=>{ const w=D.workflows[+ws.value]; st.wf=ws.value===''?null:w; const el=document.getElementById('detail');
+  if(st.wf){ st.sel=null; st.wf.steps.forEach(s=>{ const n=N.get(s.from), m=N.get(s.to); ensureVisible(n); ensureVisible(m); });
+    el.innerHTML=`<h1>${esc(st.wf.name)}</h1><div class="sub">Numbered arrows are drawn on the graph. Solid white = extracted from code, blue = curated, dashed orange = inferred.</div>`+st.wf.steps.map(s=>`<div class="step" data-id="${esc(s.from)}" style="border-color:${s.kind==='inferred'?'#ffb454':s.kind==='curated'?'#6cb2ff':'#fff'}"><b>${s.n}.</b> ${esc(N.get(s.from).label)} → ${esc(N.get(s.to).label)}<div class="sub">${esc(s.label)} <span class="badge b-${s.kind}">${s.kind}</span></div></div>`).join('');
+    setTimeout(()=>{ fitNodes([...new Set(st.wf.steps.flatMap(s=>[s.from,s.to]))].map(i=>N.get(i))); draw(); },900);
+    el.querySelectorAll('.step').forEach(x=>x.addEventListener('click',()=>{ const t=N.get(x.dataset.id); select(t.id); center(t); draw(); })); }
+  draw(); });
+function preset(p){ const set=(ls,pol,crit,rels)=>{ st.layers=new Set(ls); st.pol=pol; st.crit=crit; st.module=''; ms.value=''; st.rels=new Set(rels||Object.keys(relCount)); st.sel=null; st.wf=null; ws.value='';
+  lw.querySelectorAll('input').forEach(c=>c.checked=st.layers.has(c.dataset.l)); rw.querySelectorAll('input').forEach(c=>c.checked=st.rels.has(c.dataset.r)); document.getElementById('optPol').checked=pol; document.getElementById('optCrit').checked=crit; refresh(); setTimeout(fit,700); };
+  const all=Object.keys(LAYERS);
+  if(p==='all') set(all,false,false); if(p==='req') set(['actor','frontend','backend','authn','external','scheduled','storage'],false,false,['CALLS','AUTHENTICATES','SYNCHRONIZES_WITH','TRIGGERS','USES','PUBLISHES','AUTHORIZES','SUBSCRIBES_TO','STORES_IN','IMPORTS']);
+  if(p==='er'){ set(['database'],false,false,['REFERENCES']); st.module=''; }
+  if(p==='sec') set(['authz','database','backend','authn'],true,false,['PROTECTS','USES','AUTHENTICATES','AUTHORIZES','CALLS','IMPORTS']); if(p==='crit') set(all,false,true); }
+document.querySelectorAll('[data-p]').forEach(b=>b.addEventListener('click',()=>preset(b.dataset.p)));
+resize();
+const H = Object.fromEntries((location.hash||'').replace(/^#/,'').split('&').filter(Boolean).map(x=>{const i=x.indexOf('=');return [x.slice(0,i),decodeURIComponent(x.slice(i+1))];}));
+preset(H.preset||'req'); for(let i=0;i<300;i++){ if(alpha<.03)break; step(); } fit();
+if(H.wf!==undefined && D.workflows[+H.wf]){ ws.value=H.wf; ws.dispatchEvent(new Event('change')); }
+if(H.sel && N.get(H.sel)){ ensureVisible(N.get(H.sel)); for(let i=0;i<200;i++){ if(alpha<.03)break; step(); } select(H.sel); center(N.get(H.sel)); draw(); }
+if(H.q){ document.getElementById('q').value=H.q; st.q=H.q; draw(); }
+addEventListener('keydown',e=>{ if(e.key==='Escape'){ select(null); st.wf=null; ws.value=''; draw(); } });
+window.__kite = {N, D, select, preset, st};
+})();
+</script>
+</body>
+</html>

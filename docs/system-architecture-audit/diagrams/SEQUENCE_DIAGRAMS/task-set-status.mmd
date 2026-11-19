@@ -1,0 +1,12 @@
+%% Legend: from workflow/index.ts header and helpers.
+sequenceDiagram
+  participant B as Browser
+  participant F as Edge: workflow
+  participant DB as Postgres
+  B->>F: task.set_status {taskId, status}
+  F->>DB: getCaller (JWT, profile, roles)
+  F->>DB: load task as caller (RLS) -> 404 if invisible
+  F->>F: check TRANSITIONS, review gate for approved/completed
+  F->>DB: conditional update (race-safe)
+  F->>DB: task_activity_logs, notifications, audit
+  F-->>B: {success:true}

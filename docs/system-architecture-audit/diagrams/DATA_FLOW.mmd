@@ -1,0 +1,15 @@
+%% Legend: store = cylinder. Data classes: identity, business records, money, files, notifications.
+flowchart LR
+  U[User input] --> SPA
+  SPA -->|records, RLS| PG[(Postgres)]
+  SPA -->|task/leave/expense/chat/finance actions| FN[Edge Functions]
+  FN -->|service role| PG
+  PG -->|NUMERIC money via fin_* only| PG
+  SPA -->|attachments| ST[(Supabase Storage)]
+  SPA -->|client deliverables, token| DR[(Drive disk + MySQL)]
+  FN -->|signed token| SPA
+  FN -->|notifications rows| PG
+  PG -->|Realtime| SPA
+  FN -->|push payloads| PS[Push services]
+  CL[Client reviewer] -->|feedback| FN
+  FN -->|signed image URLs 1h| CL

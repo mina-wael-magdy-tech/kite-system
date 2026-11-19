@@ -1,0 +1,19 @@
+%% Legend: rounded = people; boxes = systems; solid = verified in code; labels = protocol.
+flowchart LR
+  staff([Staff: owner, managers, designers, HR, finance]):::p
+  client([External client: content-plan reviewer]):::p
+  app[Kite System web app<br/>static SPA]:::s
+  sb[(Supabase<br/>Auth, Postgres+RLS, Realtime, Storage, Edge Functions)]:::s
+  drive[Kite Drive<br/>PHP + MySQL on Hostinger]:::s
+  push[Web Push services]:::x
+  cron[Supabase Dashboard cron]:::x
+  staff -->|HTTPS| app
+  app -->|supabase-js + Functions| sb
+  app -->|HMAC-token API calls| drive
+  client -->|HTTPS preview.html#token| app
+  sb -->|signs tokens + admin API calls| drive
+  sb -->|VAPID push| push
+  cron -->|x-cron-secret| sb
+  classDef p fill:#eef,stroke:#446;
+  classDef s fill:#efe,stroke:#464;
+  classDef x fill:#ffe,stroke:#664;
