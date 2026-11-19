@@ -133,7 +133,21 @@ class PulseStudioApp {
 
     // Google Flow tool visibility (accessible only to admin or granted specialists)
     const flowNav = document.getElementById('googleFlowNavItem');
-    if (flowNav) flowNav.style.display = Permissions.canAccessTool('google_flow') ? 'flex' : 'none';
+    if (flowNav) {
+      flowNav.style.display = Permissions.canAccessTool('google_flow') ? 'flex' : 'none';
+      // Google forbids embedding Flow in a frame (X-Frame-Options), so open it as a window beside the app.
+      // One named window: clicking again focuses it instead of opening another. Falls back to the normal link if blocked.
+      if (!flowNav.dataset.popupBound) {
+        flowNav.dataset.popupBound = '1';
+        flowNav.addEventListener('click', (ev) => {
+          const w = Math.min(1100, Math.round(window.screen.availWidth * 0.6));
+          const h = window.screen.availHeight;
+          const left = window.screen.availLeft + window.screen.availWidth - w;
+          const win = window.open(flowNav.href, 'kiteGoogleFlow', `popup=yes,width=${w},height=${h},left=${left},top=${window.screen.availTop || 0}`);
+          if (win) { try { win.opener = null; } catch { /* cross-origin */ } ev.preventDefault(); win.focus(); }
+        });
+      }
+    }
   }
 
   registerModules() {
